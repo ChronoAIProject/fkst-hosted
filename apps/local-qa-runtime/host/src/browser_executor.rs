@@ -15,8 +15,8 @@ use fkst_local_qa_evidence_stager::{
 use fkst_qa_contracts::{
     canonical_bytes, encode_local_worker_frame, validate_local_worker_capability_request,
     validate_local_worker_capability_result, validate_local_worker_invocation,
-    validate_local_worker_terminal_result, AttemptBindingV2, LocalWorkerFrameDecoder,
-    LocalWorkerInputSequence, ValidatedValue,
+    validate_local_worker_terminal_result, AttemptBindingV2, LocalWorkerInputSequence,
+    ValidatedValue,
 };
 use serde_json::{json, Value};
 
@@ -27,7 +27,7 @@ use crate::executor::{
     CleanupReceipt, ExecutorControlReport, ExecutorControlRequest, ExecutorDescriptor,
     ExecutorRequest, ExecutorResult, ExecutorSelection, SanitizedResidual, VersionedExecutor,
 };
-use crate::worker_process::{WorkerControlHandle, WorkerProcess};
+use crate::worker_process::{WorkerControlHandle, WorkerControlResult, WorkerProcess};
 use crate::RunError;
 
 const PROTOCOL: &str = "qa.local-worker-protocol/v1";
@@ -85,7 +85,10 @@ struct ActiveBrowserRun {
 
 enum BrowserControlOutcome {
     TooLate(CleanupReceipt),
-    Stopped(CleanupReceipt),
+    Stopped {
+        cleanup_receipt: CleanupReceipt,
+        control_result: Option<WorkerControlResult>,
+    },
     StopUnconfirmed(SanitizedResidual),
 }
 
@@ -221,6 +224,19 @@ impl BrowserWorkerExecutor {
                 return Err(error);
             }
         };
+        let mut input_sequence = LocalWorkerInputSequence::default();
+        let invocation = validate_frame(
+            json!({
+                "protocol": PROTOCOL,
+                "kind": "invocation",
+                "invocation_id": INVOCATION_ID,
+                "operation": "browser-smoke",
+                "input": fixed_request(&fixture_url),
+            }),
+            validate_local_worker_invocation,
+            "invalid Browser Worker invocation",
+        )?;
+        write_host_frame(&mut process, &mut input_sequence, &invocation)?;
         {
             let mut active = self
                 .active_worker
@@ -234,7 +250,8 @@ impl BrowserWorkerExecutor {
                 close_browser(&mut browser, &self.counters)?;
                 return Err(RunError::Contract("Browser Worker control relation failed"));
             }
-            active.worker = Some(process.control_handle());
+            active.worker = Some(process.control_handle()?);
+            self.active_worker_changed.notify_all();
         }
         let deadline = Instant::now() + EXECUTION_TIMEOUT;
         let protocol = self.walk_protocol(
@@ -243,6 +260,7 @@ impl BrowserWorkerExecutor {
             &stager,
             &mut browser,
             &mut process,
+            &mut input_sequence,
             deadline,
         );
         match protocol {
@@ -277,30 +295,14 @@ impl BrowserWorkerExecutor {
         stager: &EvidenceStager,
         browser: &mut Option<PreparedFixedBrowserSession>,
         process: &mut WorkerProcess,
+        input_sequence: &mut LocalWorkerInputSequence,
         deadline: Instant,
     ) -> Result<(), RunError> {
-        let mut input_sequence = LocalWorkerInputSequence::default();
-        let invocation = validate_frame(
-            json!({
-                "protocol": PROTOCOL,
-                "kind": "invocation",
-                "invocation_id": INVOCATION_ID,
-                "operation": "browser-smoke",
-                "input": fixed_request(fixture_url),
-            }),
-            validate_local_worker_invocation,
-            "invalid Browser Worker invocation",
-        )?;
-        self.ensure_not_cancelled()?;
-        write_host_frame(process, &mut input_sequence, &invocation)?;
-
-        let mut decoder = LocalWorkerFrameDecoder::default();
         let mut observation: Option<HostObservation> = None;
         let mut screenshot: Option<StagedEvidence> = None;
         let mut runner_log: Option<StagedEvidence> = None;
         for index in 0..7 {
-            self.ensure_not_cancelled()?;
-            let frame = process.read_frame(&mut decoder, deadline)?;
+            let frame = process.read_frame(deadline)?;
             let expected_input = expected_capability_input(index, fixture_url);
             let capability = capability_name(index);
             let expected = json!({
@@ -316,7 +318,6 @@ impl BrowserWorkerExecutor {
                 .capability_exchanges
                 .fetch_add(1, Ordering::SeqCst);
 
-            self.ensure_not_cancelled()?;
             let output = match index {
                 0 => json!({ "value": self.started_at }),
                 1 => json!({ "value": self.started_monotonic_ms }),
@@ -420,14 +421,14 @@ impl BrowserWorkerExecutor {
                 validate_local_worker_capability_result,
                 "invalid Browser capability result",
             )?;
-            write_host_frame(process, &mut input_sequence, &result)?;
+            write_host_frame(process, input_sequence, &result)?;
         }
         input_sequence
             .finish()
             .map_err(|_| RunError::Contract("incomplete Browser capability sequence"))?;
         process.close_stdin()?;
 
-        let terminal = process.read_frame(&mut decoder, deadline)?;
+        let terminal = process.read_frame(deadline)?;
         let terminal_bytes = canonical_bytes(&terminal)
             .map_err(|_| RunError::Contract("invalid Browser terminal serialization"))?;
         let terminal = validate_local_worker_terminal_result(&terminal_bytes)
@@ -473,7 +474,7 @@ impl BrowserWorkerExecutor {
                 "Browser terminal result relation failed",
             ));
         }
-        process.require_clean_eof(&mut decoder, deadline)?;
+        process.require_clean_eof(deadline)?;
         process.wait_success(deadline)
     }
 }
@@ -515,28 +516,97 @@ impl VersionedExecutor for BrowserWorkerExecutor {
             return Err(RunError::Contract("Browser control Run relation failed"));
         }
         self.cancel_requested.store(true, Ordering::SeqCst);
-        if let Some(handle) = active_run.worker {
-            handle.request_stop()?;
-        }
         let remaining = remaining_until_deadline(&request.deadline_utc)?;
-        let (guard, wait) = self
+        let deadline = Instant::now() + remaining;
+        let handle = loop {
+            match active.as_ref() {
+                Some(active_run) => {
+                    if let Some(handle) = active_run.worker.as_ref() {
+                        break handle.clone();
+                    }
+                }
+                None => {
+                    return Ok(browser_control_report(
+                        request,
+                        &self.descriptor,
+                        BrowserControlOutcome::Stopped {
+                            cleanup_receipt: CleanupReceipt {
+                                receipt_id: request.control_id.clone(),
+                                no_resources_remain: true,
+                                resource_handles: Vec::new(),
+                            },
+                            control_result: None,
+                        },
+                    ));
+                }
+            }
+            let remaining = deadline.saturating_duration_since(Instant::now());
+            if remaining.is_zero() {
+                return Ok(browser_control_report(
+                    request,
+                    &self.descriptor,
+                    BrowserControlOutcome::StopUnconfirmed(SanitizedResidual {
+                        code: "worker.stop_unconfirmed".to_owned(),
+                        summary: concat!(
+                            "Exact Browser Worker attachment or cleanup was not observed before ",
+                            "the cancellation deadline"
+                        )
+                        .to_owned(),
+                    }),
+                ));
+            }
+            let (guard, wait) = self
+                .active_worker_changed
+                .wait_timeout_while(active, remaining, |active| {
+                    active
+                        .as_ref()
+                        .is_some_and(|active_run| active_run.worker.is_none())
+                })
+                .map_err(|_| RunError::Contract("Browser Worker control wait poisoned"))?;
+            active = guard;
+            if wait.timed_out() {
+                return Ok(browser_control_report(
+                    request,
+                    &self.descriptor,
+                    BrowserControlOutcome::StopUnconfirmed(SanitizedResidual {
+                        code: "worker.stop_unconfirmed".to_owned(),
+                        summary: concat!(
+                            "Exact Browser Worker attachment or cleanup was not observed before ",
+                            "the cancellation deadline"
+                        )
+                        .to_owned(),
+                    }),
+                ));
+            }
+        };
+        drop(active);
+        let control_result = handle.request_abort(
+            &request.control_id,
+            INVOCATION_ID,
+            &request.deadline_utc,
+            deadline,
+        )?;
+        let active = self
+            .active_worker
+            .lock()
+            .map_err(|_| RunError::Contract("Browser Worker control lock poisoned"))?;
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        let (active, wait) = self
             .active_worker_changed
             .wait_timeout_while(active, remaining, |active| active.is_some())
             .map_err(|_| RunError::Contract("Browser Worker control wait poisoned"))?;
-        active = guard;
         if active.is_none() {
             Ok(browser_control_report(
                 request,
                 &self.descriptor,
-                BrowserControlOutcome::Stopped(CleanupReceipt {
-                    receipt_id: request.control_id.clone(),
-                    no_resources_remain: true,
-                    resource_handles: active_run
-                        .worker
-                        .map(WorkerControlHandle::identity)
-                        .into_iter()
-                        .collect(),
-                }),
+                BrowserControlOutcome::Stopped {
+                    cleanup_receipt: CleanupReceipt {
+                        receipt_id: request.control_id.clone(),
+                        no_resources_remain: true,
+                        resource_handles: vec![handle.identity()],
+                    },
+                    control_result: Some(control_result),
+                },
             ))
         } else if wait.timed_out() {
             Ok(browser_control_report(
@@ -671,10 +741,20 @@ fn browser_control_report(
             Some(cleanup_receipt),
             None,
         ),
-        BrowserControlOutcome::Stopped(cleanup_receipt) => (
-            "accepted",
+        BrowserControlOutcome::Stopped {
+            cleanup_receipt,
+            control_result,
+        } => (
+            if control_result == Some(WorkerControlResult::TooLate) {
+                "too_late"
+            } else {
+                "accepted"
+            },
             "uncertain",
-            false,
+            matches!(
+                control_result,
+                Some(WorkerControlResult::Accepted | WorkerControlResult::TooLate)
+            ),
             true,
             Some(cleanup_receipt),
             None,
@@ -896,6 +976,44 @@ mod tests {
     use crate::executor::ExecutorRegistry;
     #[cfg(target_os = "linux")]
     use crate::journal::Journal;
+
+    #[test]
+    fn worker_acknowledgement_and_observed_stop_remain_separate_truths() {
+        let request = ExecutorControlRequest {
+            schema_version: "qa.local-executor-control/v1".to_owned(),
+            control_id: "00000000-0000-0000-0000-000000000001".to_owned(),
+            run_id: "run/control".to_owned(),
+            executor_run_id: "run/control".to_owned(),
+            selection: browser_executor_selection(),
+            deadline_utc: "2099-09-02T12:00:00Z".to_owned(),
+        };
+        let receipt = CleanupReceipt {
+            receipt_id: request.control_id.clone(),
+            no_resources_remain: true,
+            resource_handles: vec!["worker-pgid:1".to_owned()],
+        };
+        let acknowledged = browser_control_report(
+            &request,
+            &browser_executor_descriptor(),
+            BrowserControlOutcome::Stopped {
+                cleanup_receipt: receipt.clone(),
+                control_result: Some(WorkerControlResult::Accepted),
+            },
+        );
+        assert!(acknowledged.control_acknowledged);
+        assert!(acknowledged.worker_stop_observed);
+
+        let contained = browser_control_report(
+            &request,
+            &browser_executor_descriptor(),
+            BrowserControlOutcome::Stopped {
+                cleanup_receipt: receipt,
+                control_result: Some(WorkerControlResult::Failed),
+            },
+        );
+        assert!(!contained.control_acknowledged);
+        assert!(contained.worker_stop_observed);
+    }
 
     #[cfg(target_os = "linux")]
     #[test]

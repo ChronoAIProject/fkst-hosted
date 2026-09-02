@@ -1,8 +1,10 @@
 import {
   ContractError,
-  LocalWorkerFrameDecoder,
+  LOCAL_WORKER_MAX_FRAME_BYTES,
   encodeLocalWorkerFrame,
   validateLocalWorkerCapabilityRequest,
+  validateLocalWorkerControlFailure,
+  validateLocalWorkerFrame,
   validateLocalWorkerAbort,
   validateLocalWorkerCancelAck,
   validateLocalWorkerProtocolFailure,
@@ -34,6 +36,44 @@ export type ProtocolFailureCode =
 type FrameRecord = Readonly<Record<string, unknown>>;
 type FrameValidator = (raw: Uint8Array) => ValidatedValue;
 
+class WorkerCancelled extends Error {}
+
+class WireFrameDecoder {
+  #buffer = new Uint8Array(0);
+
+  bufferedBytes(): number {
+    return this.#buffer.length;
+  }
+
+  push(chunk: Uint8Array): readonly Uint8Array[] {
+    const combined = new Uint8Array(this.#buffer.length + chunk.length);
+    combined.set(this.#buffer);
+    combined.set(chunk, this.#buffer.length);
+    this.#buffer = combined;
+    const frames: Uint8Array[] = [];
+    let offset = 0;
+    while (this.#buffer.length - offset >= 4) {
+      const length = new DataView(
+        this.#buffer.buffer,
+        this.#buffer.byteOffset + offset,
+        4,
+      ).getUint32(0, false);
+      if (length < 1 || length > LOCAL_WORKER_MAX_FRAME_BYTES) {
+        throw new Error("invalid frame length");
+      }
+      if (this.#buffer.length - offset - 4 < length) break;
+      frames.push(this.#buffer.slice(offset + 4, offset + 4 + length));
+      offset += 4 + length;
+    }
+    if (offset > 0) this.#buffer = this.#buffer.slice(offset);
+    return frames;
+  }
+
+  finish(): void {
+    if (this.#buffer.length !== 0) throw new Error("truncated frame");
+  }
+}
+
 class ProtocolFailure extends Error {
   readonly code: ProtocolFailureCode;
 
@@ -45,42 +85,105 @@ class ProtocolFailure extends Error {
 }
 
 class ProtocolPeer {
-  readonly #decoder = new LocalWorkerFrameDecoder();
+  readonly #decoder = new WireFrameDecoder();
   readonly #iterator = process.stdin[Symbol.asyncIterator]();
-  readonly #pending: ValidatedValue[] = [];
+  readonly #pending: Uint8Array[] = [];
+  #controlState: WorkerControlState | undefined;
+  #cancelled = false;
   #writeChain = Promise.resolve();
   #terminal = false;
   #recordedFailure: ProtocolFailureCode | undefined;
 
+  attachControl(state: WorkerControlState): void {
+    if (this.#controlState !== undefined) throw new ProtocolFailure("protocol.invalid_sequence");
+    this.#controlState = state;
+  }
+
   async read(finalInboundFrame = false): Promise<FrameRecord> {
     if (this.#terminal) throw new ProtocolFailure("protocol.trailing_input");
-    while (this.#pending.length === 0) {
-      const next = await this.#iterator.next();
-      if (next.done === true) {
+    for (;;) {
+      while (this.#pending.length === 0) {
+        const next = await this.#iterator.next();
+        if (next.done === true) {
+          try {
+            this.#decoder.finish();
+          } catch {
+            throw new ProtocolFailure("protocol.invalid_frame");
+          }
+          throw new ProtocolFailure("protocol.unexpected_eof");
+        }
+        let frames: readonly Uint8Array[];
         try {
-          this.#decoder.finish();
+          frames = this.#decoder.push(next.value);
         } catch {
           throw new ProtocolFailure("protocol.invalid_frame");
         }
-        throw new ProtocolFailure("protocol.unexpected_eof");
+        const executionFrames = frames.filter((frame) => frameProtocol(frame) !== "qa.local-worker-control/v1");
+        if (
+          (this.#controlState === undefined && frames.length + this.#pending.length > MAX_PENDING_FRAMES) ||
+          executionFrames.length > MAX_PENDING_FRAMES ||
+          (frames.length > 0 && this.#decoder.bufferedBytes() > 0)
+        ) {
+          throw new ProtocolFailure(finalInboundFrame ? "protocol.trailing_input" : "protocol.invalid_sequence");
+        }
+        this.#pending.push(...frames);
       }
-      let frames: readonly ValidatedValue[];
+      const raw = this.#pending.shift();
+      if (raw === undefined) throw new ProtocolFailure("protocol.invalid_frame");
+      if (frameProtocol(raw) === "qa.local-worker-control/v1") {
+        await this.#handleControl(raw);
+        if (this.#cancelled && this.#pending.length === 0) throw new WorkerCancelled();
+        continue;
+      }
+      if (this.#cancelled) throw new WorkerCancelled();
+      let value: unknown;
       try {
-        frames = this.#decoder.push(next.value);
+        value = validateLocalWorkerFrame(raw).value();
       } catch {
         throw new ProtocolFailure("protocol.invalid_frame");
       }
-      if (
-        frames.length + this.#pending.length > MAX_PENDING_FRAMES ||
-        (frames.length > 0 && this.#decoder.bufferedBytes() > 0)
-      ) {
-        throw new ProtocolFailure(finalInboundFrame ? "protocol.trailing_input" : "protocol.invalid_sequence");
-      }
-      this.#pending.push(...frames);
+      if (!isRecord(value)) throw new ProtocolFailure("protocol.invalid_frame");
+      return value;
     }
-    const value = this.#pending.shift()?.value();
-    if (!isRecord(value)) throw new ProtocolFailure("protocol.invalid_frame");
-    return value;
+  }
+
+  async #handleControl(raw: Uint8Array): Promise<void> {
+    let abort: AbortFrame;
+    try {
+      abort = validateLocalWorkerAbort(raw).value() as AbortFrame;
+    } catch {
+      const controlId = frameString(raw, "control_id");
+      if (controlId === undefined) throw new ProtocolFailure("protocol.invalid_frame");
+      await this.#enqueueWrite(
+        {
+          protocol: "qa.local-worker-control/v1",
+          kind: "control_failure",
+          control_id: controlId,
+          code: "control.invalid_frame",
+        },
+        validateLocalWorkerControlFailure,
+      );
+      throw new WorkerCancelled();
+    }
+    try {
+      if (this.#controlState === undefined) throw new Error("control.invalid_invocation");
+      const acknowledgement = this.#controlState.acceptAbort(raw);
+      await this.#enqueueWrite(acknowledgement, validateLocalWorkerCancelAck);
+      if (acknowledgement.status === "accepted") this.#cancelled = true;
+    } catch (error) {
+      if (error instanceof WorkerCancelled) throw error;
+      const code = controlFailureCode(error);
+      await this.#enqueueWrite(
+        {
+          protocol: "qa.local-worker-control/v1",
+          kind: "control_failure",
+          control_id: abort.control_id,
+          code,
+        },
+        validateLocalWorkerControlFailure,
+      );
+      this.#cancelled = true;
+    }
   }
 
   async write(value: unknown, validate: FrameValidator): Promise<void> {
@@ -112,13 +215,34 @@ class ProtocolPeer {
 
   async expectCleanEof(): Promise<void> {
     if (this.#terminal) throw new ProtocolFailure("protocol.invalid_sequence");
-    if (this.#pending.length !== 0) throw new ProtocolFailure("protocol.trailing_input");
-    const next = await this.#iterator.next();
-    if (next.done !== true) throw new ProtocolFailure("protocol.trailing_input");
-    try {
-      this.#decoder.finish();
-    } catch {
-      throw new ProtocolFailure("protocol.trailing_input");
+    for (;;) {
+      while (this.#pending.length > 0) {
+        const raw = this.#pending.shift();
+        if (raw === undefined || frameProtocol(raw) !== "qa.local-worker-control/v1") {
+          throw new ProtocolFailure("protocol.trailing_input");
+        }
+        await this.#handleControl(raw);
+      }
+      if (this.#cancelled) throw new WorkerCancelled();
+      const next = await this.#iterator.next();
+      if (next.done === true) {
+        try {
+          this.#decoder.finish();
+        } catch {
+          throw new ProtocolFailure("protocol.trailing_input");
+        }
+        return;
+      }
+      let frames: readonly Uint8Array[];
+      try {
+        frames = this.#decoder.push(next.value);
+      } catch {
+        throw new ProtocolFailure("protocol.trailing_input");
+      }
+      if (frames.length > 0 && this.#decoder.bufferedBytes() > 0) {
+        throw new ProtocolFailure("protocol.trailing_input");
+      }
+      this.#pending.push(...frames);
     }
   }
 
@@ -140,18 +264,21 @@ class ProtocolPeer {
 class CapabilityClient {
   readonly #peer: ProtocolPeer;
   readonly #invocationId: string;
+  readonly #control: WorkerControlState;
   #nextRequest = 0;
   #outstanding = false;
 
-  constructor(peer: ProtocolPeer, invocationId: string) {
+  constructor(peer: ProtocolPeer, invocationId: string, control: WorkerControlState) {
     this.#peer = peer;
     this.#invocationId = invocationId;
+    this.#control = control;
   }
 
   async request(capability: string, input: unknown): Promise<FrameRecord> {
     if (this.#outstanding || this.#nextRequest >= 7) {
       throw new ProtocolFailure("protocol.invalid_sequence");
     }
+    this.#control.assertCapabilityAllowed();
     this.#outstanding = true;
     const requestId = `capability/${this.#nextRequest}`;
     this.#nextRequest += 1;
@@ -168,6 +295,7 @@ class CapabilityClient {
         validateLocalWorkerCapabilityRequest,
       );
       const result = await this.#peer.read(this.#nextRequest === 7);
+      this.#control.assertCapabilityAllowed();
       if (
         result.protocol !== PROTOCOL ||
         result.kind !== "capability_result" ||
@@ -209,7 +337,9 @@ export async function runProtocolWorker(): Promise<void> {
     }
     const invocationId = invocation.invocation_id;
     const request = invocation.input as BrowserSmokeRequest;
-    const capabilities = new CapabilityClient(peer, invocationId);
+    const control = new WorkerControlState(invocationId);
+    peer.attachControl(control);
+    const capabilities = new CapabilityClient(peer, invocationId, control);
     const bundle = await runBrowserSmoke(JSON.stringify(request), {
       clock: {
         async now() {
@@ -256,6 +386,7 @@ export async function runProtocolWorker(): Promise<void> {
     });
     capabilities.assertComplete();
     await peer.expectCleanEof();
+    control.markTerminal();
     await peer.writeTerminal({
       protocol: PROTOCOL,
       kind: "terminal_result",
@@ -264,6 +395,7 @@ export async function runProtocolWorker(): Promise<void> {
       result: bundle.result,
     });
   } catch (error) {
+    if (error instanceof WorkerCancelled) return;
     const code = peer.recordedFailure() ?? classifyFailure(error);
     try {
       await peer.writeFailure(code);
@@ -405,6 +537,7 @@ export class WorkerControlState {
       return this.#ack(value, "accepted");
     }
     if (this.#terminal) return this.#ack(value, "too_late");
+    if (Date.parse(value.deadline_utc) <= Date.now()) throw new Error("control.deadline_elapsed");
     this.#accepted = value;
     return this.#ack(value, "accepted");
   }
@@ -441,4 +574,35 @@ function sameAbort(left: AbortFrame, right: AbortFrame): boolean {
     left.invocation_id === right.invocation_id &&
     left.deadline_utc === right.deadline_utc
   );
+}
+
+function frameProtocol(raw: Uint8Array): string | undefined {
+  try {
+    const value = JSON.parse(new TextDecoder().decode(raw)) as unknown;
+    return isRecord(value) && typeof value.protocol === "string" ? value.protocol : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function frameString(raw: Uint8Array, field: string): string | undefined {
+  try {
+    const value = JSON.parse(new TextDecoder().decode(raw)) as unknown;
+    return isRecord(value) && typeof value[field] === "string" ? value[field] : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function controlFailureCode(
+  error: unknown,
+): "control.conflict" | "control.invalid_invocation" | "control.invalid_frame" | "control.deadline_elapsed" {
+  if (error instanceof Error && error.message === "control.conflict") return "control.conflict";
+  if (error instanceof Error && error.message === "control.invalid_invocation") {
+    return "control.invalid_invocation";
+  }
+  if (error instanceof Error && error.message === "control.deadline_elapsed") {
+    return "control.deadline_elapsed";
+  }
+  return "control.invalid_frame";
 }
