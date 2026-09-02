@@ -679,14 +679,9 @@ fn browser_control_report(
             Some(cleanup_receipt),
             None,
         ),
-        BrowserControlOutcome::StopUnconfirmed(residual) => (
-            "accepted",
-            "uncertain",
-            false,
-            false,
-            None,
-            Some(residual),
-        ),
+        BrowserControlOutcome::StopUnconfirmed(residual) => {
+            ("accepted", "uncertain", false, false, None, Some(residual))
+        }
     };
     ExecutorControlReport {
         schema_version: "qa.local-executor-control/v1".to_owned(),
