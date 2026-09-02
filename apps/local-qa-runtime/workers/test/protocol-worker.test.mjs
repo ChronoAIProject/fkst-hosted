@@ -4,7 +4,13 @@ import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
 
-import { validateLocalWorkerProtocolFailure } from "../../../../packages/qa-contracts/dist/index.js";
+import {
+  encodeLocalWorkerFrame,
+  validateLocalWorkerAbort,
+  validateLocalWorkerCancelAck,
+  validateLocalWorkerControlFailure,
+  validateLocalWorkerProtocolFailure,
+} from "../../../../packages/qa-contracts/dist/index.js";
 import { WorkerControlState } from "../dist/protocol-worker.js";
 
 const fixture = JSON.parse(await readFile(new URL("../../../../packages/qa-contracts/fixtures/qa.local-worker-protocol/v1/happy-path.json", import.meta.url), "utf8"));
@@ -15,7 +21,7 @@ const abort = {
   kind: "abort",
   control_id: "00000000-0000-0000-0000-000000000001",
   invocation_id: "invocation/0",
-  deadline_utc: "2026-09-02T12:00:00Z",
+  deadline_utc: "2099-09-02T12:00:00Z",
 };
 
 test("identical abort is idempotent and fences capabilities", () => {
@@ -34,7 +40,7 @@ test("conflicting control fails closed", () => {
     () =>
       state.acceptAbort(
         controlEncoder.encode(
-          JSON.stringify({ ...abort, deadline_utc: "2026-09-02T12:00:01Z" }),
+          JSON.stringify({ ...abort, deadline_utc: "2099-09-02T12:00:01Z" }),
         ),
       ),
     /control.conflict/,
@@ -73,6 +79,76 @@ test("walks one fragmented invocation through the fixed worker process", async (
   });
   assert.equal(exitCode, 0);
   assert.equal(Buffer.concat(stderr).length, 0);
+  assert.equal(stdout.trailing().length, 0);
+});
+
+test("acknowledges a fragmented abort while awaiting a capability result", async () => {
+  const child = spawnWorker();
+  const stdout = createFrameReader(child.stdout);
+  const stderr = [];
+  child.stderr.on("data", (chunk) => stderr.push(chunk));
+  child.stdin.write(fromHex(fixture.frames[0].wire_hex));
+  assert.deepEqual(await stdout.read(), fromHex(fixture.frames[1].wire_hex));
+
+  await writeFragmented(child.stdin, controlFrame(abort));
+  const acknowledgement = validateLocalWorkerCancelAck((await stdout.read()).subarray(4)).value();
+  assert.deepEqual(acknowledgement, {
+    protocol: "qa.local-worker-control/v1",
+    kind: "cancel_ack",
+    control_id: abort.control_id,
+    invocation_id: abort.invocation_id,
+    status: "accepted",
+  });
+  assert.equal(await waitForClose(child), 0);
+  assert.equal(stdout.trailing().length, 0);
+  assert.equal(Buffer.concat(stderr).length, 0);
+});
+
+test("acknowledges coalesced identical aborts idempotently", async () => {
+  const child = spawnWorker();
+  const stdout = createFrameReader(child.stdout);
+  child.stdin.write(fromHex(fixture.frames[0].wire_hex));
+  assert.deepEqual(await stdout.read(), fromHex(fixture.frames[1].wire_hex));
+
+  const frame = controlFrame(abort);
+  child.stdin.write(Buffer.concat([frame, frame]));
+  for (let index = 0; index < 2; index += 1) {
+    const acknowledgement = validateLocalWorkerCancelAck((await stdout.read()).subarray(4)).value();
+    assert.equal(acknowledgement.status, "accepted");
+    assert.equal(acknowledgement.control_id, abort.control_id);
+  }
+  assert.equal(await waitForClose(child), 0);
+  assert.equal(stdout.trailing().length, 0);
+});
+
+test("prioritizes a coalesced abort over its pending capability result", async () => {
+  const child = spawnWorker();
+  const stdout = createFrameReader(child.stdout);
+  child.stdin.write(fromHex(fixture.frames[0].wire_hex));
+  assert.deepEqual(await stdout.read(), fromHex(fixture.frames[1].wire_hex));
+
+  child.stdin.write(Buffer.concat([controlFrame(abort), fromHex(fixture.frames[2].wire_hex)]));
+  const acknowledgement = validateLocalWorkerCancelAck((await stdout.read()).subarray(4)).value();
+  assert.equal(acknowledgement.status, "accepted");
+  assert.equal(await waitForClose(child), 0);
+  assert.equal(stdout.trailing().length, 0);
+});
+
+test("emits a typed failure for a conflicting invocation", async () => {
+  const child = spawnWorker();
+  const stdout = createFrameReader(child.stdout);
+  child.stdin.write(fromHex(fixture.frames[0].wire_hex));
+  assert.deepEqual(await stdout.read(), fromHex(fixture.frames[1].wire_hex));
+
+  child.stdin.write(controlFrame({ ...abort, invocation_id: "invocation/conflict" }));
+  const failure = validateLocalWorkerControlFailure((await stdout.read()).subarray(4)).value();
+  assert.deepEqual(failure, {
+    protocol: "qa.local-worker-control/v1",
+    kind: "control_failure",
+    control_id: abort.control_id,
+    code: "control.invalid_invocation",
+  });
+  assert.equal(await waitForClose(child), 0);
   assert.equal(stdout.trailing().length, 0);
 });
 
@@ -128,6 +204,10 @@ test("rejects trailing input instead of publishing a success terminal", async ()
   assert.equal(stdout.trailing().length, 0);
   assert.match(Buffer.concat(stderr).toString(), /^fkst-local-qa-worker: protocol\.trailing_input\n$/);
 });
+
+function controlFrame(value) {
+  return Buffer.from(encodeLocalWorkerFrame(validateLocalWorkerAbort(controlEncoder.encode(JSON.stringify(value)))));
+}
 
 async function writeFragmented(stream, frame) {
   for (const chunk of [frame.subarray(0, 1), frame.subarray(1, 5), frame.subarray(5)]) {
