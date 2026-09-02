@@ -182,7 +182,7 @@ test("applies the shared identity-relation matrix", () => {
 });
 
 function fixture(relativePath: string): Record<string, unknown> {
-  return record(JSON.parse(readFileSync(new URL(`../fixtures/${relativePath}`, import.meta.url), "utf8")));
+  return record(JSON.parse(readFileSync(new URL(`../../fixtures/${relativePath}`, import.meta.url), "utf8")));
 }
 
 function raw(value: unknown): Uint8Array {

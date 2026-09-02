@@ -83,6 +83,12 @@ struct ActiveBrowserRun {
     worker: Option<WorkerControlHandle>,
 }
 
+enum BrowserControlOutcome {
+    TooLate(CleanupReceipt),
+    Stopped(CleanupReceipt),
+    StopUnconfirmed(SanitizedResidual),
+}
+
 pub(crate) struct BrowserWorkerExecutor {
     descriptor: ExecutorDescriptor,
     node_executable: PathBuf,
@@ -239,7 +245,7 @@ impl BrowserWorkerExecutor {
             &mut process,
             deadline,
         );
-        let result = match protocol {
+        match protocol {
             Ok(()) => Ok(()),
             Err(error) => {
                 let _ = close_browser(&mut browser, &self.counters);
@@ -252,8 +258,7 @@ impl BrowserWorkerExecutor {
                     Err(_) => Err(RunError::Contract("partial Browser staging cleanup failed")),
                 }
             }
-        };
-        result
+        }
     }
 
     fn ensure_not_cancelled(&self) -> Result<(), RunError> {
@@ -499,16 +504,11 @@ impl VersionedExecutor for BrowserWorkerExecutor {
             return Ok(browser_control_report(
                 request,
                 &self.descriptor,
-                "too_late",
-                "completed",
-                false,
-                true,
-                Some(CleanupReceipt {
+                BrowserControlOutcome::TooLate(CleanupReceipt {
                     receipt_id: request.control_id.clone(),
                     no_resources_remain: true,
                     resource_handles: Vec::new(),
                 }),
-                None,
             ));
         };
         if active_run.executor_run_id != request.executor_run_id {
@@ -528,11 +528,7 @@ impl VersionedExecutor for BrowserWorkerExecutor {
             Ok(browser_control_report(
                 request,
                 &self.descriptor,
-                "accepted",
-                "uncertain",
-                false,
-                true,
-                Some(CleanupReceipt {
+                BrowserControlOutcome::Stopped(CleanupReceipt {
                     receipt_id: request.control_id.clone(),
                     no_resources_remain: true,
                     resource_handles: active_run
@@ -541,18 +537,12 @@ impl VersionedExecutor for BrowserWorkerExecutor {
                         .into_iter()
                         .collect(),
                 }),
-                None,
             ))
         } else if wait.timed_out() {
             Ok(browser_control_report(
                 request,
                 &self.descriptor,
-                "accepted",
-                "uncertain",
-                false,
-                false,
-                None,
-                Some(SanitizedResidual {
+                BrowserControlOutcome::StopUnconfirmed(SanitizedResidual {
                     code: "worker.stop_unconfirmed".to_owned(),
                     summary: concat!(
                         "Exact Browser Worker cleanup was not observed before the ",
@@ -591,7 +581,7 @@ fn parse_utc_deadline(value: &str) -> Result<Duration, RunError> {
     if date_parts.next().is_some() {
         return Err(RunError::Contract("cancellation deadline is invalid"));
     }
-    let (whole_time, fraction) = time.split_once('.').map_or((time, ""), |parts| parts);
+    let (whole_time, fraction) = time.split_once('.').unwrap_or((time, ""));
     let mut time_parts = whole_time.split(':');
     let hour = parse_deadline_part(time_parts.next(), "hour")?;
     let minute = parse_deadline_part(time_parts.next(), "minute")?;
@@ -663,13 +653,41 @@ fn days_from_civil(mut year: i64, month: u32, day: u32) -> i64 {
 fn browser_control_report(
     request: &ExecutorControlRequest,
     descriptor: &ExecutorDescriptor,
-    status: &str,
-    effect_disposition: &str,
-    control_acknowledged: bool,
-    worker_stop_observed: bool,
-    cleanup_receipt: Option<CleanupReceipt>,
-    residual: Option<SanitizedResidual>,
+    outcome: BrowserControlOutcome,
 ) -> ExecutorControlReport {
+    let (
+        status,
+        effect_disposition,
+        control_acknowledged,
+        worker_stop_observed,
+        cleanup_receipt,
+        residual,
+    ) = match outcome {
+        BrowserControlOutcome::TooLate(cleanup_receipt) => (
+            "too_late",
+            "completed",
+            false,
+            true,
+            Some(cleanup_receipt),
+            None,
+        ),
+        BrowserControlOutcome::Stopped(cleanup_receipt) => (
+            "accepted",
+            "uncertain",
+            false,
+            true,
+            Some(cleanup_receipt),
+            None,
+        ),
+        BrowserControlOutcome::StopUnconfirmed(residual) => (
+            "accepted",
+            "uncertain",
+            false,
+            false,
+            None,
+            Some(residual),
+        ),
+    };
     ExecutorControlReport {
         schema_version: "qa.local-executor-control/v1".to_owned(),
         control_id: request.control_id.clone(),
