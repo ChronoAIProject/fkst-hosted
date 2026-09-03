@@ -214,11 +214,13 @@ export class ProtocolPeer {
   releaseInput(): Promise<void> {
     this.#inputRelease ??= (async () => {
       await this.#writeChain;
+      let returned: Promise<IteratorResult<Buffer>> | undefined;
       try {
-        await this.#iterator.return?.();
+        returned = this.#iterator.return?.();
       } finally {
         this.#input.destroy();
       }
+      await returned;
     })();
     return this.#inputRelease;
   }

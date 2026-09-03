@@ -64,6 +64,7 @@ test("terminal before abort reports too late without cancellation", () => {
 
 test("input teardown is idempotent and waits for queued output", async () => {
   const input = new PassThrough();
+  const events = [];
   let finishWrite;
   let resolveWriteStarted;
   const writeStarted = new Promise((resolve) => {
@@ -71,14 +72,29 @@ test("input teardown is idempotent and waits for queued output", async () => {
   });
   const output = new Writable({
     write(_chunk, _encoding, callback) {
-      finishWrite = callback;
+      finishWrite = () => {
+        events.push("write-completed");
+        callback();
+      };
       resolveWriteStarted();
+    },
+  });
+  let finishReturn;
+  const returnFinished = new Promise((resolve) => {
+    finishReturn = resolve;
+  });
+  input[Symbol.asyncIterator] = () => ({
+    return() {
+      events.push("return-started");
+      return returnFinished;
     },
   });
   let destroyCalls = 0;
   const destroy = input.destroy.bind(input);
   input.destroy = (error) => {
     destroyCalls += 1;
+    events.push("input-destroyed");
+    finishReturn({ done: true, value: undefined });
     return destroy(error);
   };
   const peer = new ProtocolPeer(input, output);
@@ -102,6 +118,7 @@ test("input teardown is idempotent and waits for queued output", async () => {
   await write;
   await firstRelease;
   assert.equal(input.destroyed, true);
+  assert.deepEqual(events, ["write-completed", "return-started", "input-destroyed"]);
 
   const completedDestroyCalls = destroyCalls;
   await peer.releaseInput();

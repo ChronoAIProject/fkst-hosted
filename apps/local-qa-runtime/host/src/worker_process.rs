@@ -651,7 +651,6 @@ fn run_session(
     }
 }
 
-
 fn frame_protocol(raw: &[u8]) -> Option<String> {
     let value: Value = serde_json::from_slice(raw).ok()?;
     value.get("protocol")?.as_str().map(str::to_owned)
