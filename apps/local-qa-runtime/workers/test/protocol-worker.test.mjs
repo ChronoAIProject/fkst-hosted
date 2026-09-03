@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { readFile } from "node:fs/promises";
+import { PassThrough, Writable } from "node:stream";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
 
@@ -11,7 +12,7 @@ import {
   validateLocalWorkerControlFailure,
   validateLocalWorkerProtocolFailure,
 } from "../../../../packages/qa-contracts/dist/index.js";
-import { WorkerControlState } from "../dist/protocol-worker.js";
+import { ProtocolPeer, WorkerControlState } from "../dist/protocol-worker.js";
 
 const fixture = JSON.parse(await readFile(new URL("../../../../packages/qa-contracts/fixtures/qa.local-worker-protocol/v1/happy-path.json", import.meta.url), "utf8"));
 const fromHex = (value) => Buffer.from(value, "hex");
@@ -61,6 +62,52 @@ test("terminal before abort reports too late without cancellation", () => {
   state.assertCapabilityAllowed();
 });
 
+test("input teardown is idempotent and waits for queued output", async () => {
+  const input = new PassThrough();
+  let finishWrite;
+  let resolveWriteStarted;
+  const writeStarted = new Promise((resolve) => {
+    resolveWriteStarted = resolve;
+  });
+  const output = new Writable({
+    write(_chunk, _encoding, callback) {
+      finishWrite = callback;
+      resolveWriteStarted();
+    },
+  });
+  let destroyCalls = 0;
+  const destroy = input.destroy.bind(input);
+  input.destroy = (error) => {
+    destroyCalls += 1;
+    return destroy(error);
+  };
+  const peer = new ProtocolPeer(input, output);
+  const write = peer.write(
+    {
+      protocol: "qa.local-worker-control/v1",
+      kind: "cancel_ack",
+      control_id: abort.control_id,
+      invocation_id: abort.invocation_id,
+      status: "accepted",
+    },
+    validateLocalWorkerCancelAck,
+  );
+  const firstRelease = peer.releaseInput();
+  const secondRelease = peer.releaseInput();
+
+  assert.equal(firstRelease, secondRelease);
+  await writeStarted;
+  assert.equal(input.destroyed, false);
+  finishWrite();
+  await write;
+  await firstRelease;
+  assert.equal(input.destroyed, true);
+
+  const completedDestroyCalls = destroyCalls;
+  await peer.releaseInput();
+  assert.equal(destroyCalls, completedDestroyCalls);
+});
+
 test("walks one fragmented invocation through the fixed worker process", async (context) => {
   const child = spawnWorker(context);
   const stdout = createFrameReader(child.stdout);
@@ -97,6 +144,7 @@ test("acknowledges a fragmented abort while awaiting a capability result", async
     invocation_id: abort.invocation_id,
     status: "accepted",
   });
+  assert.equal(child.stdin.writableEnded, false);
   assert.equal(await waitForClose(child), 0);
   assert.equal(stdout.trailing().length, 0);
   assert.equal(Buffer.concat(stderr).length, 0);
@@ -115,6 +163,7 @@ test("acknowledges coalesced identical aborts idempotently", async (context) => 
     assert.equal(acknowledgement.status, "accepted");
     assert.equal(acknowledgement.control_id, abort.control_id);
   }
+  assert.equal(child.stdin.writableEnded, false);
   assert.equal(await waitForClose(child), 0);
   assert.equal(stdout.trailing().length, 0);
 });
@@ -128,6 +177,7 @@ test("prioritizes a coalesced abort over its pending capability result", async (
   child.stdin.write(Buffer.concat([controlFrame(abort), fromHex(fixture.frames[2].wire_hex)]));
   const acknowledgement = validateLocalWorkerCancelAck((await stdout.read()).subarray(4)).value();
   assert.equal(acknowledgement.status, "accepted");
+  assert.equal(child.stdin.writableEnded, false);
   assert.equal(await waitForClose(child), 0);
   assert.equal(stdout.trailing().length, 0);
 });
@@ -146,6 +196,7 @@ test("emits a typed failure for a conflicting invocation", async (context) => {
     control_id: abort.control_id,
     code: "control.invalid_invocation",
   });
+  assert.equal(child.stdin.writableEnded, false);
   assert.equal(await waitForClose(child), 0);
   assert.equal(stdout.trailing().length, 0);
 });

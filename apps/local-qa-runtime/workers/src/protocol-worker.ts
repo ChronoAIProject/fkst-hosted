@@ -11,6 +11,7 @@ import {
   validateLocalWorkerTerminalResult,
   type ValidatedValue,
 } from "@chronoai/fkst-qa-contracts";
+import type { Readable, Writable } from "node:stream";
 
 import {
   BrowserSmokeWorkerError,
@@ -84,9 +85,11 @@ class ProtocolFailure extends Error {
   }
 }
 
-class ProtocolPeer {
+export class ProtocolPeer {
   readonly #decoder = new WireFrameDecoder();
-  readonly #iterator = process.stdin[Symbol.asyncIterator]();
+  readonly #input: Readable;
+  readonly #output: Writable;
+  readonly #iterator: AsyncIterator<Buffer>;
   readonly #pending: Uint8Array[] = [];
   #controlState: WorkerControlState | undefined;
   #cancelled = false;
@@ -94,6 +97,12 @@ class ProtocolPeer {
   #terminal = false;
   #recordedFailure: ProtocolFailureCode | undefined;
   #inputRelease: Promise<void> | undefined;
+
+  constructor(input: Readable = process.stdin, output: Writable = process.stdout) {
+    this.#input = input;
+    this.#output = output;
+    this.#iterator = input[Symbol.asyncIterator]();
+  }
 
   attachControl(state: WorkerControlState): void {
     if (this.#controlState !== undefined) throw new ProtocolFailure("protocol.invalid_sequence");
@@ -204,7 +213,12 @@ class ProtocolPeer {
 
   releaseInput(): Promise<void> {
     this.#inputRelease ??= (async () => {
-      await this.#iterator.return?.();
+      await this.#writeChain;
+      try {
+        await this.#iterator.return?.();
+      } finally {
+        this.#input.destroy();
+      }
     })();
     return this.#inputRelease;
   }
@@ -263,7 +277,7 @@ class ProtocolPeer {
       if (error instanceof ProtocolFailure) throw error;
       throw new ProtocolFailure("worker.internal_failure");
     }
-    const write = this.#writeChain.then(() => writeStdout(frame));
+    const write = this.#writeChain.then(() => writeStdout(this.#output, frame));
     this.#writeChain = write.catch(() => undefined);
     await write;
   }
@@ -427,14 +441,14 @@ function classifyFailure(error: unknown): ProtocolFailureCode {
   return "worker.internal_failure";
 }
 
-function writeStdout(frame: Uint8Array): Promise<void> {
+function writeStdout(output: Writable, frame: Uint8Array): Promise<void> {
   return new Promise((resolve, reject) => {
     let settled = false;
     let callbackDone = false;
     let drainDone = false;
     const cleanup = () => {
-      process.stdout.off("error", onError);
-      process.stdout.off("drain", onDrain);
+      output.off("error", onError);
+      output.off("drain", onDrain);
     };
     const fail = () => {
       if (settled) return;
@@ -453,8 +467,8 @@ function writeStdout(frame: Uint8Array): Promise<void> {
       drainDone = true;
       complete();
     };
-    process.stdout.once("error", onError);
-    const accepted = process.stdout.write(frame, (error) => {
+    output.once("error", onError);
+    const accepted = output.write(frame, (error) => {
       if (error !== undefined && error !== null) {
         fail();
         return;
@@ -463,7 +477,7 @@ function writeStdout(frame: Uint8Array): Promise<void> {
       complete();
     });
     drainDone = accepted;
-    if (!accepted) process.stdout.once("drain", onDrain);
+    if (!accepted) output.once("drain", onDrain);
   });
 }
 
