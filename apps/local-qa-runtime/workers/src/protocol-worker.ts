@@ -93,6 +93,7 @@ class ProtocolPeer {
   #writeChain = Promise.resolve();
   #terminal = false;
   #recordedFailure: ProtocolFailureCode | undefined;
+  #inputRelease: Promise<void> | undefined;
 
   attachControl(state: WorkerControlState): void {
     if (this.#controlState !== undefined) throw new ProtocolFailure("protocol.invalid_sequence");
@@ -199,6 +200,13 @@ class ProtocolPeer {
 
   recordedFailure(): ProtocolFailureCode | undefined {
     return this.#recordedFailure;
+  }
+
+  releaseInput(): Promise<void> {
+    this.#inputRelease ??= (async () => {
+      await this.#iterator.return?.();
+    })();
+    return this.#inputRelease;
   }
 
   async writeFailure(code: ProtocolFailureCode): Promise<void> {
@@ -395,7 +403,10 @@ export async function runProtocolWorker(): Promise<void> {
       result: bundle.result,
     });
   } catch (error) {
-    if (error instanceof WorkerCancelled) return;
+    if (error instanceof WorkerCancelled) {
+      await peer.releaseInput();
+      return;
+    }
     const code = peer.recordedFailure() ?? classifyFailure(error);
     try {
       await peer.writeFailure(code);
