@@ -16,6 +16,9 @@ import { WorkerControlState } from "../dist/protocol-worker.js";
 const fixture = JSON.parse(await readFile(new URL("../../../../packages/qa-contracts/fixtures/qa.local-worker-protocol/v1/happy-path.json", import.meta.url), "utf8"));
 const fromHex = (value) => Buffer.from(value, "hex");
 const controlEncoder = new TextEncoder();
+const workerCloseTimeoutMs = 5_000;
+const workerCleanupTimeoutMs = 1_000;
+const workerCloseStates = new WeakMap();
 const abort = {
   protocol: "qa.local-worker-control/v1",
   kind: "abort",
@@ -58,10 +61,8 @@ test("terminal before abort reports too late without cancellation", () => {
   state.assertCapabilityAllowed();
 });
 
-test("walks one fragmented invocation through the fixed worker process", async () => {
-  const child = spawn(process.execPath, [fileURLToPath(new URL("../dist/worker-main.js", import.meta.url))], {
-    stdio: ["pipe", "pipe", "pipe"],
-  });
+test("walks one fragmented invocation through the fixed worker process", async (context) => {
+  const child = spawnWorker(context);
   const stdout = createFrameReader(child.stdout);
   const stderr = [];
   child.stderr.on("data", (chunk) => stderr.push(chunk));
@@ -73,17 +74,14 @@ test("walks one fragmented invocation through the fixed worker process", async (
   }
   child.stdin.end();
   assert.deepEqual(await stdout.read(), fromHex(fixture.frames[15].wire_hex));
-  const exitCode = await new Promise((resolve, reject) => {
-    child.once("error", reject);
-    child.once("close", resolve);
-  });
+  const exitCode = await waitForClose(child);
   assert.equal(exitCode, 0);
   assert.equal(Buffer.concat(stderr).length, 0);
   assert.equal(stdout.trailing().length, 0);
 });
 
-test("acknowledges a fragmented abort while awaiting a capability result", async () => {
-  const child = spawnWorker();
+test("acknowledges a fragmented abort while awaiting a capability result", async (context) => {
+  const child = spawnWorker(context);
   const stdout = createFrameReader(child.stdout);
   const stderr = [];
   child.stderr.on("data", (chunk) => stderr.push(chunk));
@@ -104,8 +102,8 @@ test("acknowledges a fragmented abort while awaiting a capability result", async
   assert.equal(Buffer.concat(stderr).length, 0);
 });
 
-test("acknowledges coalesced identical aborts idempotently", async () => {
-  const child = spawnWorker();
+test("acknowledges coalesced identical aborts idempotently", async (context) => {
+  const child = spawnWorker(context);
   const stdout = createFrameReader(child.stdout);
   child.stdin.write(fromHex(fixture.frames[0].wire_hex));
   assert.deepEqual(await stdout.read(), fromHex(fixture.frames[1].wire_hex));
@@ -121,8 +119,8 @@ test("acknowledges coalesced identical aborts idempotently", async () => {
   assert.equal(stdout.trailing().length, 0);
 });
 
-test("prioritizes a coalesced abort over its pending capability result", async () => {
-  const child = spawnWorker();
+test("prioritizes a coalesced abort over its pending capability result", async (context) => {
+  const child = spawnWorker(context);
   const stdout = createFrameReader(child.stdout);
   child.stdin.write(fromHex(fixture.frames[0].wire_hex));
   assert.deepEqual(await stdout.read(), fromHex(fixture.frames[1].wire_hex));
@@ -134,8 +132,8 @@ test("prioritizes a coalesced abort over its pending capability result", async (
   assert.equal(stdout.trailing().length, 0);
 });
 
-test("emits a typed failure for a conflicting invocation", async () => {
-  const child = spawnWorker();
+test("emits a typed failure for a conflicting invocation", async (context) => {
+  const child = spawnWorker(context);
   const stdout = createFrameReader(child.stdout);
   child.stdin.write(fromHex(fixture.frames[0].wire_hex));
   assert.deepEqual(await stdout.read(), fromHex(fixture.frames[1].wire_hex));
@@ -186,8 +184,8 @@ test("rejects coalesced extra frames with one failure and no capability request"
   assert.match(outcome.stderr, /^fkst-local-qa-worker: protocol\.invalid_sequence\n$/);
 });
 
-test("rejects trailing input instead of publishing a success terminal", async () => {
-  const child = spawnWorker();
+test("rejects trailing input instead of publishing a success terminal", async (context) => {
+  const child = spawnWorker(context);
   const stdout = createFrameReader(child.stdout);
   const stderr = [];
   child.stderr.on("data", (chunk) => stderr.push(chunk));
@@ -215,10 +213,24 @@ async function writeFragmented(stream, frame) {
   }
 }
 
-function spawnWorker() {
-  return spawn(process.execPath, [fileURLToPath(new URL("../dist/worker-main.js", import.meta.url))], {
+function spawnWorker(context) {
+  const child = spawn(process.execPath, [fileURLToPath(new URL("../dist/worker-main.js", import.meta.url))], {
     stdio: ["pipe", "pipe", "pipe"],
   });
+  const state = { closed: false, promise: undefined };
+  state.promise = new Promise((resolve) => {
+    child.once("error", (error) => {
+      state.closed = true;
+      resolve({ error });
+    });
+    child.once("close", (exitCode) => {
+      state.closed = true;
+      resolve({ exitCode });
+    });
+  });
+  workerCloseStates.set(child, state);
+  context?.after(() => stopWorker(child));
+  return child;
 }
 
 async function runFailingWorker(chunks) {
@@ -236,10 +248,34 @@ async function runFailingWorker(chunks) {
   };
 }
 
-function waitForClose(child) {
-  return new Promise((resolve, reject) => {
-    child.once("error", reject);
-    child.once("close", resolve);
+async function waitForClose(child) {
+  const state = workerCloseStates.get(child);
+  assert.notEqual(state, undefined);
+  const outcome = await waitBounded(state.promise, workerCloseTimeoutMs);
+  if (outcome === undefined) {
+    await stopWorker(child);
+    throw new Error(`Worker did not exit within ${workerCloseTimeoutMs}ms`);
+  }
+  if (outcome.error !== undefined) throw outcome.error;
+  return outcome.exitCode;
+}
+
+async function stopWorker(child) {
+  const state = workerCloseStates.get(child);
+  assert.notEqual(state, undefined);
+  if (state.closed) return;
+  child.kill("SIGKILL");
+  const outcome = await waitBounded(state.promise, workerCleanupTimeoutMs);
+  if (outcome === undefined) throw new Error("Worker did not exit after test cleanup");
+}
+
+function waitBounded(promise, timeoutMs) {
+  return new Promise((resolve) => {
+    const timeout = setTimeout(() => resolve(undefined), timeoutMs);
+    promise.then((value) => {
+      clearTimeout(timeout);
+      resolve(value);
+    });
   });
 }
 
