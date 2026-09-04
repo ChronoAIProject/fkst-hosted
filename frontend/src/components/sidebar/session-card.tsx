@@ -7,7 +7,7 @@ import type { IssueDetail, SessionDetail } from '@/lib/api/types';
 import { Chip } from '@/components/ui/chip';
 import { CopyButton } from '@/components/ui/copy-button';
 import { SessionDetailDrawer } from '@/components/session-detail/session-detail-drawer';
-import { decodeSessionStatus } from '@/lib/api/derive';
+import { decodeSessionStatus, isRetiredWorkItem } from '@/lib/api/derive';
 
 /** One "created/updated/closed" timestamp: viewer-local RELATIVE text ("2 min
  *  ago") for at-a-glance recency, with the full, zone-qualified absolute value
@@ -122,6 +122,7 @@ export function SessionCard({
   const statusLabels = session.status_labels.filter(
     (label) => !(session.recovery && label === 'fkst-degraded')
   );
+  const actionableWorkIssues = session.work_issues.filter((issue) => !isRetiredWorkItem(issue));
 
   // Resting depth + a soft status-matched glow (red = invalid, green = live,
   // amber = starting, none otherwise) so a session's health reads at a glance
@@ -344,13 +345,13 @@ export function SessionCard({
         <span className="font-mono text-eyebrow text-ghost uppercase mb-1">{c.trigger}</span>
         <IssueLine issue={session.trigger} />
 
-        {session.work_issues.length > 0 && (
+        {actionableWorkIssues.length > 0 && (
           <>
             <span className="font-mono text-eyebrow text-ghost uppercase mt-2 mb-1">
-              {c.workIssues} · {session.work_issues.length}
+              {c.workIssues} · {actionableWorkIssues.length}
             </span>
             <div className="flex flex-col divide-y divide-[color-mix(in_oklab,var(--line)_55%,transparent)]">
-              {session.work_issues.map((issue) => (
+              {actionableWorkIssues.map((issue) => (
                 <IssueLine key={issue.number} issue={issue} />
               ))}
             </div>

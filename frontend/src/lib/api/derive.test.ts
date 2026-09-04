@@ -506,6 +506,25 @@ describe('decodeSessionStatus', () => {
     ).toBe('idle');
   });
 
+  it('does not treat retired open work as pending in the compatibility decoder', () => {
+    expect(
+      decodeSessionStatus(
+        sessionFixture({
+          status_labels: ['fkst-substrate-active'],
+          liveness: null,
+          work_issues: [
+            issueFixture({ number: 2, state: 'open', labels: ['fkst-session-retired'] }),
+            issueFixture({
+              number: 3,
+              state: 'open',
+              labels: ['fkst-session-retired', 'fkst-picked-up'],
+            }),
+          ],
+        })
+      ).phase
+    ).toBe('idle');
+  });
+
   it('does not read idle when a live pod runs or work is pending', () => {
     // Live pod → active, never idle, even with an empty work queue.
     expect(

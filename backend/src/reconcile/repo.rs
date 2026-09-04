@@ -486,11 +486,37 @@ pub async fn reconcile_repo(
         .await
         .map_err(|e| AppError::Internal(anyhow::anyhow!("list substrate-session pods: {e}")))?;
 
-    // 4. Gate each registration on the open-issue count of its work-label SET
-    //    (`work_labels_by_session`, resolved above): the trigger's explicit label plus
-    //    every label its packages auto-declare (`[github].work_labels`, resolved
-    //    transitively over `[event_deps]`). So a session wakes on any of its packages'
-    //    own labels without the operator restating them in the trigger issue.
+    let desired_sessions: HashSet<&str> = regs.iter().map(|reg| reg.session_id.as_str()).collect();
+    let orphan_retirement_observed = live.iter().any(|pod| {
+        !desired_sessions.contains(pod.session_id.as_str())
+            && matches!(
+                pod.liveness,
+                crate::reconcile::desired::PodLiveness::Starting
+                    | crate::reconcile::desired::PodLiveness::Live
+            )
+            && !pod.work_labels.is_empty()
+    });
+
+    // On a clean observation, admission runs before pending so a replacement can
+    // commit its trusted marker + retired removal before that work creates demand.
+    // A pass that still sees an old orphan defers admission entirely.
+    if !orphan_retirement_observed {
+        crate::reconcile::work_ack::ack_open_work_issues_with_bot(
+            &ctx.github,
+            ctx.listing.as_ref(),
+            ctx.comments.as_ref(),
+            &token,
+            repo,
+            &regs,
+            &effective_work_labels_by_session,
+            &ctx.config.access,
+            cfg.github_bot_login.as_deref(),
+        )
+        .await;
+    }
+
+    // 4. Gate each registration on the open-issue count of its work-label SET,
+    // after any clean-pass admission commit above.
     let gate = LabelCountPending::new_with_bot_login(
         ctx.listing.as_ref(),
         &token,
@@ -544,13 +570,12 @@ pub async fn reconcile_repo(
     });
     let mut retirement_incomplete = false;
     for action in actions {
-        if retirement_incomplete
-            && !matches!(
-                &action,
-                crate::reconcile::desired::ReconcileAction::RetireSession { .. }
-                    | crate::reconcile::desired::ReconcileAction::CleanupTerminal { .. }
-            )
-        {
+        let allowed_during_retirement = matches!(
+            &action,
+            crate::reconcile::desired::ReconcileAction::RetireSession { .. }
+                | crate::reconcile::desired::ReconcileAction::CleanupTerminal { .. }
+        );
+        if (retirement_planned || retirement_incomplete) && !allowed_during_retirement {
             continue;
         }
         if !execute(action, repo, ctx).await {
@@ -561,26 +586,8 @@ pub async fn reconcile_repo(
             );
         }
     }
-    if retirement_incomplete {
+    if retirement_incomplete || retirement_planned {
         return Ok(());
-    }
-
-    // A pass that retires an orphan never re-admits replacement work immediately.
-    // The next observation must first confirm the old runtime is absent/terminating;
-    // otherwise a failed stop could let that orphan re-retire the work next sweep.
-    if !retirement_planned {
-        crate::reconcile::work_ack::ack_open_work_issues_with_bot(
-            &ctx.github,
-            ctx.listing.as_ref(),
-            ctx.comments.as_ref(),
-            &token,
-            repo,
-            &regs,
-            &effective_work_labels_by_session,
-            &ctx.config.access,
-            cfg.github_bot_login.as_deref(),
-        )
-        .await;
     }
 
     // 5b. The schedule pass: a SECOND enumeration, over this repository's open

@@ -220,7 +220,6 @@ async fn replacement_session_readmits_retired_work_and_converges_after_restart()
     for profile in BackendProfile::ALL {
         let (_server, mut harness) = new_harness(profile, None).await;
         seed_valid(&harness, ("alice", AUTHOR_ID));
-        let original_id = session_id(TRIGGER);
         harness.full_resync().await;
 
         // Close the original trigger and register the replacement before the next
@@ -238,8 +237,10 @@ async fn replacement_session_readmits_retired_work_and_converges_after_restart()
         harness.full_resync().await;
 
         let replacement_id = session_id(replacement_trigger);
-        assert_eq!(harness.runtime_ids(), vec![replacement_id.clone()]);
-        assert!(!harness.runtime_ids().contains(&original_id));
+        assert!(
+            harness.runtime_ids().is_empty(),
+            "replacement stays absent until retired readmission commits ({profile:?})"
+        );
         let labels = harness.ledger.labels(WORK);
         assert!(labels.contains(&SUBSTRATE_RETIRED_LABEL.to_string()));
         assert!(!labels.contains(&WORK_PICKED_UP_LABEL.to_string()));
@@ -252,6 +253,7 @@ async fn replacement_session_readmits_retired_work_and_converges_after_restart()
         // Only the next observation, after the old runtime is gone, may commit the
         // replacement-specific marker and clear retired.
         harness.full_resync().await;
+        assert_eq!(harness.runtime_ids(), vec![replacement_id.clone()]);
         let labels = harness.ledger.labels(WORK);
         assert!(labels.contains(&WORK_PICKED_UP_LABEL.to_string()));
         assert!(!labels.contains(&SUBSTRATE_RETIRED_LABEL.to_string()));
@@ -270,6 +272,61 @@ async fn replacement_session_readmits_retired_work_and_converges_after_restart()
         harness.full_resync().await;
         assert_eq!(harness.runtime_ids(), vec![replacement_id]);
         assert_eq!(harness.ledger.effects(), effects, "{profile:?}");
+    }
+}
+
+#[tokio::test]
+async fn failed_orphan_stop_keeps_replacement_absent_until_a_clean_pass() {
+    for profile in BackendProfile::ALL {
+        let (_server, harness) = new_harness(profile, None).await;
+        seed_valid(&harness, ("alice", AUTHOR_ID));
+        let original_id = session_id(TRIGGER);
+        harness.full_resync().await;
+
+        harness.ledger.set_state(TRIGGER, "closed");
+        let replacement_trigger = TRIGGER + 1;
+        let replacement_id = session_id(replacement_trigger);
+        harness.ledger.put(issue(
+            replacement_trigger,
+            trigger_body("replacement-session", WORK_LABEL),
+            &[TRIGGER_LABEL],
+            "alice",
+            AUTHOR_ID,
+        ));
+        harness.fail_next_stop();
+        harness.full_resync().await;
+
+        assert_eq!(
+            harness.runtime_ids(),
+            vec![original_id.clone()],
+            "{profile:?}"
+        );
+        assert!(!harness.runtime_ids().contains(&replacement_id));
+        assert!(harness
+            .ledger
+            .labels(WORK)
+            .contains(&SUBSTRATE_RETIRED_LABEL.to_string()));
+
+        // The retry pass stops the surviving orphan but still cannot act on the
+        // stale pre-retirement pending snapshot.
+        harness.full_resync().await;
+        assert!(harness.runtime_ids().is_empty(), "{profile:?}");
+        assert!(harness
+            .ledger
+            .labels(WORK)
+            .contains(&SUBSTRATE_RETIRED_LABEL.to_string()));
+
+        // The first clean observation commits readmission before pending and spawn.
+        harness.full_resync().await;
+        assert_eq!(harness.runtime_ids(), vec![replacement_id]);
+        assert!(!harness
+            .ledger
+            .labels(WORK)
+            .contains(&SUBSTRATE_RETIRED_LABEL.to_string()));
+        assert!(harness
+            .ledger
+            .labels(WORK)
+            .contains(&WORK_PICKED_UP_LABEL.to_string()));
     }
 }
 

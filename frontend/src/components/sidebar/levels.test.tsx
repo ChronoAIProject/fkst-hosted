@@ -602,6 +602,34 @@ describe('SessionCard', () => {
     expect(chip.closest('[data-tour="session-card"]')).toHaveClass('min-w-0');
   });
 
+  it('excludes retired and partial-readmission work from the sidebar count and list', () => {
+    render(
+      wrap(
+        <SessionCard
+          owner="acme"
+          name="lab"
+          session={session({
+            work_issues: [
+              issue({ number: 8, title: 'retired work', labels: ['fkst-session-retired'] }),
+              issue({
+                number: 9,
+                title: 'partial readmission',
+                labels: ['fkst-session-retired', 'fkst-picked-up'],
+              }),
+              issue({ number: 10, title: 'active work' }),
+            ],
+          })}
+          onStop={() => {}}
+        />
+      )
+    );
+
+    expect(screen.getByText('Work issues · 1')).toBeInTheDocument();
+    expect(screen.queryByText('retired work')).not.toBeInTheDocument();
+    expect(screen.queryByText('partial readmission')).not.toBeInTheDocument();
+    expect(screen.getByText('active work')).toBeInTheDocument();
+  });
+
   it('uses the red degraded treatment from the typed projection', () => {
     render(
       wrap(

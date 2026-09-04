@@ -1,6 +1,7 @@
 //! Restartable runtime and environment-profile fakes for recovery chaos tests.
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 
 use async_trait::async_trait;
@@ -139,6 +140,7 @@ pub(super) struct ChaosBackend {
     pub profile: BackendProfile,
     pub runtimes: Arc<Mutex<HashMap<String, RuntimeRecord>>>,
     pub events: Arc<Mutex<BackendEvents>>,
+    pub fail_stops_remaining: Arc<AtomicUsize>,
     pub credential_cache: Mutex<HashMap<String, BTreeSet<String>>>,
 }
 
@@ -262,6 +264,15 @@ impl SessionBackend for ChaosBackend {
     }
 
     async fn stop_session(&self, session_id: &str, reason: KillReason) -> Result<(), BackendError> {
+        if self
+            .fail_stops_remaining
+            .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |remaining| {
+                remaining.checked_sub(1)
+            })
+            .is_ok()
+        {
+            return Err(BackendError::Other(anyhow::anyhow!("fixture stop failure")));
+        }
         if self.runtimes.lock().unwrap().remove(session_id).is_none() {
             return Err(BackendError::NotFound);
         }
