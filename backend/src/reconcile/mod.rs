@@ -145,10 +145,10 @@ pub const SUBSTRATE_ANNOUNCED_LABEL: &str = "fkst-substrate-active";
 /// session's `work_label`) once it has posted the one-time "picked up" acknowledgment
 /// ([`work_ack::ack_open_work_issues`]). A work issue is otherwise often silent from
 /// GitHub's side — the pod's output (e.g. the codex-triage package) lands elsewhere —
-/// so the author has no signal it was claimed. Mirrors [`SUBSTRATE_ANNOUNCED_LABEL`]:
-/// because the latch lives on the issue (not process memory), a control-plane restart
-/// re-reads it and never re-acks. There is no clear/removal path (like the announce
-/// latch) — an acknowledged work issue stays acknowledged for its lifetime.
+/// so the author has no signal it was claimed. Because the latch lives on the issue,
+/// a control-plane restart does not duplicate the acknowledgment. Retirement removes
+/// it only after the retired latch is authoritative; replacement admission restores it
+/// before clearing retired.
 pub const WORK_PICKED_UP_LABEL: &str = "fkst-picked-up";
 
 /// The clearable DURABLE latch added to a routed WORK issue whose author is neither
@@ -166,15 +166,11 @@ pub const WORK_UNAUTHORIZED_LABEL: &str = "fkst-unauthorized";
 pub const WORK_UNROUTED_LABEL: &str = "fkst-unrouted";
 
 /// The DURABLE latch label the reconciler adds to a WORK issue when its session is
-/// RETIRED — i.e. the session's trigger issue was closed, so the orphan pod is killed
-/// ([`desired::plan_repo`]'s orphan branch emits [`ReconcileAction::RetireWorkIssues`]).
-/// The still-open work issue is left OPEN but is no longer worked, so the executor
-/// comments "session retired, no longer worked", latches THIS label, and drops the now
-/// stale [`WORK_PICKED_UP_LABEL`]. Because the latch lives on the issue (not process
-/// memory) it is read back each reconcile: an already-retired issue is skipped, so the
-/// ~60s the orphan pod lingers before deletion never re-notifies. Mirrors the one-way
-/// [`SUBSTRATE_ANNOUNCED_LABEL`]/[`WORK_PICKED_UP_LABEL`] latches — there is no
-/// clear/removal path (unlike [`SUBSTRATE_INVALID_LABEL`]).
+/// RETIRED — i.e. the session's trigger issue was closed. The orphan retirement
+/// transaction latches THIS label and removes stale [`WORK_PICKED_UP_LABEL`] before
+/// stopping the runtime; a failed listing or durable label write keeps the runtime as
+/// the retry owner. An eligible replacement session later records its own trusted
+/// admission marker, restores picked-up, and removes THIS label last as the commit point.
 pub const SUBSTRATE_RETIRED_LABEL: &str = "fkst-session-retired";
 
 /// The label the session-health scrape ([`crate::k8s::health_scrape`]) latches onto

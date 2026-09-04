@@ -10,8 +10,9 @@
 //!
 //! Error discipline: any GitHub/Kubernetes READ that fails aborts the WHOLE repo
 //! with an `Err` (so no plan is ever executed on partial data — the loop logs it
-//! and retries next sweep). Per-ACTION effects are best-effort inside [`execute`],
-//! which never propagates, so one bad action never blocks the rest.
+//! and retries next sweep). Ordinary action effects remain best-effort; incomplete
+//! orphan retirement deliberately stops the pass while keeping its runtime as the
+//! next sweep's retry owner.
 
 use std::collections::{HashMap, HashSet};
 
@@ -478,24 +479,6 @@ pub async fn reconcile_repo(
     )
     .await;
 
-    // Best-effort, non-failing: give each open WORK issue (one carrying a session's
-    // work label) a visible, fkst-owned "picked up" acknowledgment — a work issue is
-    // otherwise often silent from GitHub's side, so the author has no signal it was
-    // claimed. Mirrors the announce latch (comment + durable label), reuses the token
-    // minted above, and gates on ≥1 registration; a failure here never aborts the
-    // reconcile.
-    crate::reconcile::work_ack::ack_open_work_issues_with_bot(
-        &ctx.github,
-        ctx.listing.as_ref(),
-        &token,
-        repo,
-        &regs,
-        &effective_work_labels_by_session,
-        &ctx.config.access,
-        cfg.github_bot_login.as_deref(),
-    )
-    .await;
-
     // 3. Observe the live pods for this repo (through the session backend).
     let live = ctx
         .backend
@@ -553,8 +536,51 @@ pub async fn reconcile_repo(
         actions = actions.len(),
         "reconcile repo: planned"
     );
+    let retirement_planned = actions.iter().any(|action| {
+        matches!(
+            action,
+            crate::reconcile::desired::ReconcileAction::RetireSession { .. }
+        )
+    });
+    let mut retirement_incomplete = false;
     for action in actions {
-        execute(action, repo, ctx).await;
+        if retirement_incomplete
+            && !matches!(
+                &action,
+                crate::reconcile::desired::ReconcileAction::RetireSession { .. }
+                    | crate::reconcile::desired::ReconcileAction::CleanupTerminal { .. }
+            )
+        {
+            continue;
+        }
+        if !execute(action, repo, ctx).await {
+            retirement_incomplete = true;
+            tracing::warn!(
+                owner_repo = %owner_repo,
+                "reconcile repo: retirement incomplete; keeping runtime as retry owner"
+            );
+        }
+    }
+    if retirement_incomplete {
+        return Ok(());
+    }
+
+    // A pass that retires an orphan never re-admits replacement work immediately.
+    // The next observation must first confirm the old runtime is absent/terminating;
+    // otherwise a failed stop could let that orphan re-retire the work next sweep.
+    if !retirement_planned {
+        crate::reconcile::work_ack::ack_open_work_issues_with_bot(
+            &ctx.github,
+            ctx.listing.as_ref(),
+            ctx.comments.as_ref(),
+            &token,
+            repo,
+            &regs,
+            &effective_work_labels_by_session,
+            &ctx.config.access,
+            cfg.github_bot_login.as_deref(),
+        )
+        .await;
     }
 
     // 5b. The schedule pass: a SECOND enumeration, over this repository's open

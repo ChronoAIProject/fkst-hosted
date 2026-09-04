@@ -9,21 +9,25 @@ use std::collections::{HashMap, HashSet};
 use secrecy::SecretString;
 
 use crate::access_policy::AccessPolicy;
+use crate::github_app::comments::{IssueComment, IssueCommentReader};
 use crate::github_app::listing::{GithubListing, IssueMetadata};
-use crate::github_app::GithubAppTokens;
+use crate::github_app::{GithubAppError, GithubAppTokens};
 use crate::models::RepoRef;
 use crate::reconcile::desired::SessionRegistration;
 use crate::reconcile::routing::{route_work_issue, WorkRouting};
 use crate::reconcile::work_authz::is_work_author_allowed_with_bot;
 
-use super::{WORK_PICKED_UP_LABEL, WORK_UNAUTHORIZED_LABEL, WORK_UNROUTED_LABEL};
+use super::{
+    SUBSTRATE_RETIRED_LABEL, WORK_PICKED_UP_LABEL, WORK_UNAUTHORIZED_LABEL, WORK_UNROUTED_LABEL,
+};
 
-pub fn work_ack_comment(session_name: &str, work_label: &str) -> String {
+pub fn work_ack_comment(session_name: &str, work_label: &str, session_id: &str) -> String {
     format!(
         "👀 **Picked up by fkst session `{session_name}`.**\n\n\
          A fkst pod is working this repo's `{work_label}` issues, including this one. \
          The session posts its progress on this issue as it works, and the outcome \
-         will be a pull request (or, for issue-producing sessions, linked issues)."
+         will be a pull request (or, for issue-producing sessions, linked issues).\n\n\
+         <!-- fkst-work-admission:v1 session={session_id} -->"
     )
 }
 
@@ -53,9 +57,11 @@ pub fn work_unrouted_comment() -> &'static str {
 /// Process all open work issues for the active registrations in one repository.
 /// Every read/write is best-effort; a failed label listing skips only that label,
 /// and every durable feedback path is retried on a later reconcile as appropriate.
+#[allow(clippy::too_many_arguments)]
 pub async fn ack_open_work_issues(
     github: &GithubAppTokens,
     listing: &dyn GithubListing,
+    comments: &dyn IssueCommentReader,
     token: &SecretString,
     repo: &RepoRef,
     regs: &[SessionRegistration],
@@ -65,6 +71,7 @@ pub async fn ack_open_work_issues(
     ack_open_work_issues_with_bot(
         github,
         listing,
+        comments,
         token,
         repo,
         regs,
@@ -82,6 +89,7 @@ pub async fn ack_open_work_issues(
 pub async fn ack_open_work_issues_with_bot(
     github: &GithubAppTokens,
     listing: &dyn GithubListing,
+    comments: &dyn IssueCommentReader,
     token: &SecretString,
     repo: &RepoRef,
     regs: &[SessionRegistration],
@@ -92,6 +100,8 @@ pub async fn ack_open_work_issues_with_bot(
     if regs.is_empty() {
         return;
     }
+    let derived_bot_login = github.app_slug().map(|slug| format!("{slug}[bot]"));
+    let github_bot_login = github_bot_login.or(derived_bot_login.as_deref());
 
     let mut unique_labels = Vec::new();
     let mut seen_labels = HashSet::new();
@@ -172,7 +182,31 @@ pub async fn ack_open_work_issues_with_bot(
             if carries_unauthorized {
                 clear_unauthorized(github, repo, issue.number).await;
             }
-            if carries_label(issue, WORK_PICKED_UP_LABEL) {
+
+            let carries_picked_up = carries_label(issue, WORK_PICKED_UP_LABEL);
+            let carries_retired = carries_label(issue, SUBSTRATE_RETIRED_LABEL);
+            if carries_retired {
+                if !ensure_readmission_marker(
+                    github,
+                    comments,
+                    token,
+                    repo,
+                    issue.number,
+                    reg,
+                    first_matching_label(issue, labels),
+                    github_bot_login,
+                )
+                .await
+                {
+                    continue;
+                }
+                if !carries_picked_up && !add_picked_up(github, repo, issue.number).await {
+                    continue;
+                }
+                clear_retired(github, repo, issue.number).await;
+                continue;
+            }
+            if carries_picked_up {
                 continue;
             }
             ack_issue(
@@ -181,6 +215,7 @@ pub async fn ack_open_work_issues_with_bot(
                 issue.number,
                 &reg.def.name,
                 first_matching_label(issue, labels),
+                &reg.session_id,
             )
             .await;
         }
@@ -295,16 +330,84 @@ async fn ack_issue(
     number: i64,
     session_name: &str,
     work_label: &str,
-) {
+    session_id: &str,
+) -> bool {
     let owner_repo = format!("{}/{}", repo.owner, repo.name);
-    let comment = work_ack_comment(session_name, work_label);
+    let comment = work_ack_comment(session_name, work_label, session_id);
     if let Err(error) = github
         .post_issue_comment(&owner_repo, number as u64, &comment)
         .await
     {
         tracing::warn!(owner_repo = %owner_repo, issue = number, error = %error, "work-ack: issue comment failed");
     }
-    if let Err(error) = github
+    add_picked_up(github, repo, number).await
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn ensure_readmission_marker(
+    github: &GithubAppTokens,
+    comments: &dyn IssueCommentReader,
+    token: &SecretString,
+    repo: &RepoRef,
+    number: i64,
+    reg: &SessionRegistration,
+    work_label: &str,
+    github_bot_login: Option<&str>,
+) -> bool {
+    let marker = work_ack_marker(&reg.session_id);
+    let history = match comments
+        .list_recent_issue_comments(token, &repo.owner, &repo.name, number as u64, 10)
+        .await
+    {
+        Ok(history) => history,
+        Err(error) => {
+            tracing::warn!(owner = %repo.owner, name = %repo.name, issue = number, error = %error, "work-ack: readmission marker lookup failed; keeping retired authoritative");
+            return false;
+        }
+    };
+    if has_trusted_marker(&history, &marker, github_bot_login) {
+        return true;
+    }
+
+    let owner_repo = format!("{}/{}", repo.owner, repo.name);
+    let comment = work_ack_comment(&reg.def.name, work_label, &reg.session_id);
+    match github
+        .post_issue_comment(&owner_repo, number as u64, &comment)
+        .await
+    {
+        Ok(()) => true,
+        Err(error) => {
+            tracing::warn!(owner_repo = %owner_repo, issue = number, error = %error, "work-ack: required readmission comment failed; keeping retired authoritative");
+            false
+        }
+    }
+}
+
+fn work_ack_marker(session_id: &str) -> String {
+    format!("<!-- fkst-work-admission:v1 session={session_id} -->")
+}
+
+fn has_trusted_marker(
+    comments: &[IssueComment],
+    marker: &str,
+    github_bot_login: Option<&str>,
+) -> bool {
+    let Some(bot_login) = github_bot_login else {
+        return false;
+    };
+    comments.iter().any(|comment| {
+        same_bot_login(&comment.user_login, bot_login) && comment.body.contains(marker)
+    })
+}
+
+fn same_bot_login(left: &str, right: &str) -> bool {
+    let normalize = |login: &str| login.trim().trim_end_matches("[bot]").to_ascii_lowercase();
+    !left.is_empty() && normalize(left) == normalize(right)
+}
+
+async fn add_picked_up(github: &GithubAppTokens, repo: &RepoRef, number: i64) -> bool {
+    let owner_repo = format!("{}/{}", repo.owner, repo.name);
+    match github
         .add_issue_labels(
             &owner_repo,
             number as u64,
@@ -312,7 +415,25 @@ async fn ack_issue(
         )
         .await
     {
-        tracing::warn!(owner_repo = %owner_repo, issue = number, error = %error, "work-ack: latch picked-up label failed");
+        Ok(()) => true,
+        Err(error) => {
+            tracing::warn!(owner_repo = %owner_repo, issue = number, error = %error, "work-ack: latch picked-up label failed");
+            false
+        }
+    }
+}
+
+async fn clear_retired(github: &GithubAppTokens, repo: &RepoRef, number: i64) {
+    let owner_repo = format!("{}/{}", repo.owner, repo.name);
+    match github
+        .remove_issue_label(&owner_repo, number as u64, SUBSTRATE_RETIRED_LABEL)
+        .await
+    {
+        Ok(()) => {}
+        Err(GithubAppError::NotFound { .. }) => {}
+        Err(error) => {
+            tracing::warn!(owner_repo = %owner_repo, issue = number, error = %error, "work-ack: clearing retired label failed; will retry next reconcile");
+        }
     }
 }
 

@@ -216,6 +216,64 @@ async fn closed_work_and_closed_trigger_never_resurrect_a_runtime() {
 }
 
 #[tokio::test]
+async fn replacement_session_readmits_retired_work_and_converges_after_restart() {
+    for profile in BackendProfile::ALL {
+        let (_server, mut harness) = new_harness(profile, None).await;
+        seed_valid(&harness, ("alice", AUTHOR_ID));
+        let original_id = session_id(TRIGGER);
+        harness.full_resync().await;
+
+        // Close the original trigger and register the replacement before the next
+        // pass, while the original runtime still exists. The old orphan retirement
+        // must run before replacement admission and must not win later in the pass.
+        harness.ledger.set_state(TRIGGER, "closed");
+        let replacement_trigger = TRIGGER + 1;
+        harness.ledger.put(issue(
+            replacement_trigger,
+            trigger_body("replacement-session", WORK_LABEL),
+            &[TRIGGER_LABEL],
+            "alice",
+            AUTHOR_ID,
+        ));
+        harness.full_resync().await;
+
+        let replacement_id = session_id(replacement_trigger);
+        assert_eq!(harness.runtime_ids(), vec![replacement_id.clone()]);
+        assert!(!harness.runtime_ids().contains(&original_id));
+        let labels = harness.ledger.labels(WORK);
+        assert!(labels.contains(&SUBSTRATE_RETIRED_LABEL.to_string()));
+        assert!(!labels.contains(&WORK_PICKED_UP_LABEL.to_string()));
+        assert!(!harness
+            .ledger
+            .comments(WORK)
+            .iter()
+            .any(|body| body.contains("replacement-session")));
+
+        // Only the next observation, after the old runtime is gone, may commit the
+        // replacement-specific marker and clear retired.
+        harness.full_resync().await;
+        let labels = harness.ledger.labels(WORK);
+        assert!(labels.contains(&WORK_PICKED_UP_LABEL.to_string()));
+        assert!(!labels.contains(&SUBSTRATE_RETIRED_LABEL.to_string()));
+        assert!(harness
+            .ledger
+            .comments(WORK)
+            .iter()
+            .any(|body| body.contains("replacement-session")));
+        let effects = harness.ledger.effects();
+
+        harness.full_resync().await;
+        assert_eq!(harness.runtime_ids(), vec![replacement_id.clone()]);
+        assert_eq!(harness.ledger.effects(), effects, "{profile:?}");
+
+        harness.restart_controller();
+        harness.full_resync().await;
+        assert_eq!(harness.runtime_ids(), vec![replacement_id]);
+        assert_eq!(harness.ledger.effects(), effects, "{profile:?}");
+    }
+}
+
+#[tokio::test]
 async fn invalid_trigger_feedback_is_durable_and_never_spawns() {
     for profile in BackendProfile::ALL {
         let (_server, mut harness) = new_harness(profile, None).await;

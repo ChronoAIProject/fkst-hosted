@@ -9,6 +9,7 @@ use crate::github_app::GithubAppError;
 use crate::goals::trigger_parse::PackageRef;
 use crate::models::{GithubActor, RepoRef};
 use crate::reconcile::desired::{SessionDef, SessionRegistration};
+use crate::reconcile::SUBSTRATE_RETIRED_LABEL;
 
 struct FakeListing {
     count: Result<u64, GithubAppError>,
@@ -113,11 +114,20 @@ fn repo() -> RepoRef {
 }
 
 fn issue(author_id: i64, author_login: &str, assignees: &[&str]) -> IssueSummary {
+    issue_with_labels(author_id, author_login, assignees, &["fkst-run"])
+}
+
+fn issue_with_labels(
+    author_id: i64,
+    author_login: &str,
+    assignees: &[&str],
+    labels: &[&str],
+) -> IssueSummary {
     IssueSummary {
         number: 5,
         title: "work item".to_string(),
         body: "content must never be consulted".to_string(),
-        labels: vec!["fkst-run".to_string()],
+        labels: labels.iter().map(|label| (*label).to_string()).collect(),
         state: "open".to_string(),
         assignees: assignees.iter().map(|value| value.to_string()).collect(),
         user_login: author_login.to_string(),
@@ -202,6 +212,22 @@ async fn positive_count_with_only_wrong_or_ambiguous_assignees_is_not_pending() 
 async fn routed_authorized_issue_is_pending() {
     let listing = FakeListing::ok(1, vec![issue(7, "alice", &["ALICE"])]);
     assert!(pending(&listing, &registration(), &access(""))
+        .await
+        .unwrap());
+}
+
+#[tokio::test]
+async fn retired_issue_is_not_pending_until_readmission_clears_the_latch() {
+    let listing = FakeListing::ok(
+        1,
+        vec![issue_with_labels(
+            7,
+            "alice",
+            &["alice"],
+            &["fkst-run", SUBSTRATE_RETIRED_LABEL],
+        )],
+    );
+    assert!(!pending(&listing, &registration(), &access(""))
         .await
         .unwrap());
 }
