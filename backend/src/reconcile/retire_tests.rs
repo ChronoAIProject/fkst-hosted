@@ -2,8 +2,8 @@
 //! runs against a recording fake [`GithubApi`] (so no network is touched) plus a fake
 //! [`GithubListing`] whose returned issues (or error) are fixed per construction.
 //! Covers: retiring an un-retired open work issue (comment + retired label + drop the
-//! stale picked-up label), skipping an already-retired one, the empty-list no-op, and
-//! swallowing a list/comment failure. Mirrors `work_ack_tests`.
+//! stale picked-up label), converging a partially retired one, the empty-list no-op,
+//! and swallowing a list/comment failure. Mirrors `work_ack_tests`.
 
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Mutex;
@@ -37,15 +37,24 @@ struct RecordingApi {
     comments: Mutex<Vec<Call>>,
     labels_added: Mutex<Vec<LabelCall>>,
     labels_removed: Mutex<Vec<RemoveCall>>,
+    events: Mutex<Vec<&'static str>>,
     /// When set, `create_issue_comment` fails — exercising the best-effort comment
     /// arm (the latch + un-latch must still happen, mirroring the announce/ack arms).
     fail_comment: bool,
+    fail_label: bool,
 }
 
 impl RecordingApi {
     fn with_comment_failure() -> Self {
         Self {
             fail_comment: true,
+            ..Self::default()
+        }
+    }
+
+    fn with_label_failure() -> Self {
+        Self {
+            fail_label: true,
             ..Self::default()
         }
     }
@@ -85,6 +94,7 @@ impl GithubApi for RecordingApi {
         if self.fail_comment {
             return Err(GithubAppError::Http("boom".to_string()));
         }
+        self.events.lock().unwrap().push("comment");
         self.comments.lock().unwrap().push((
             owner.to_string(),
             repo.to_string(),
@@ -102,6 +112,10 @@ impl GithubApi for RecordingApi {
         number: u64,
         labels: &[String],
     ) -> Result<(), GithubAppError> {
+        if self.fail_label {
+            return Err(GithubAppError::Http("boom".to_string()));
+        }
+        self.events.lock().unwrap().push("label");
         self.labels_added.lock().unwrap().push((
             owner.to_string(),
             repo.to_string(),
@@ -119,6 +133,7 @@ impl GithubApi for RecordingApi {
         number: u64,
         label: &str,
     ) -> Result<(), GithubAppError> {
+        self.events.lock().unwrap().push("remove");
         self.labels_removed.lock().unwrap().push((
             owner.to_string(),
             repo.to_string(),
@@ -346,10 +361,9 @@ async fn retire_work_issues_lists_every_label_and_dedups_a_shared_issue() {
 }
 
 #[tokio::test]
-async fn skips_an_already_retired_issue() {
+async fn already_retired_issue_without_stale_pickup_is_untouched() {
     let api = std::sync::Arc::new(RecordingApi::default());
     let github = tokens(api.clone());
-    // The issue already carries the retired latch → must be skipped entirely.
     let listing = FakeListing::ok(vec![issue(5, &["fkst-run", SUBSTRATE_RETIRED_LABEL])]);
 
     retire_open_work_issues(
@@ -373,8 +387,60 @@ async fn skips_an_already_retired_issue() {
     );
     assert!(
         api.labels_removed.lock().unwrap().is_empty(),
-        "an already-retired issue is not touched again"
+        "an already-retired issue without stale pickup is not touched again"
     );
+}
+
+#[tokio::test]
+async fn already_retired_issue_repairs_a_stale_picked_up_label() {
+    let api = std::sync::Arc::new(RecordingApi::default());
+    let github = tokens(api.clone());
+    let listing = FakeListing::ok(vec![issue(
+        5,
+        &["fkst-run", SUBSTRATE_RETIRED_LABEL, WORK_PICKED_UP_LABEL],
+    )]);
+
+    retire_open_work_issues(
+        &github,
+        &listing,
+        &token(),
+        &repo(),
+        "fkst-run",
+        &["fkst-run".to_string()],
+        &mut std::collections::HashSet::new(),
+    )
+    .await;
+
+    assert!(api.comments.lock().unwrap().is_empty());
+    assert!(api.labels_added.lock().unwrap().is_empty());
+    assert_eq!(
+        api.labels_removed.lock().unwrap()[0].3,
+        WORK_PICKED_UP_LABEL
+    );
+    assert_eq!(*api.events.lock().unwrap(), ["remove"]);
+}
+
+#[tokio::test]
+async fn failed_retired_latch_does_not_remove_picked_up() {
+    let api = std::sync::Arc::new(RecordingApi::with_label_failure());
+    let github = tokens(api.clone());
+    let listing = FakeListing::ok(vec![issue(5, &["fkst-run", WORK_PICKED_UP_LABEL])]);
+
+    let complete = retire_open_work_issues(
+        &github,
+        &listing,
+        &token(),
+        &repo(),
+        "fkst-run",
+        &["fkst-run".to_string()],
+        &mut std::collections::HashSet::new(),
+    )
+    .await;
+
+    assert!(!complete);
+    assert!(api.labels_added.lock().unwrap().is_empty());
+    assert!(api.labels_removed.lock().unwrap().is_empty());
+    assert_eq!(*api.events.lock().unwrap(), ["comment"]);
 }
 
 #[tokio::test]
@@ -406,8 +472,8 @@ async fn swallows_a_listing_failure() {
     let github = tokens(api.clone());
     let listing = FakeListing::err();
 
-    // Must not panic/propagate — the failure is logged and skipped.
-    retire_open_work_issues(
+    // Must not panic/propagate — the failure is logged and reported incomplete.
+    let complete = retire_open_work_issues(
         &github,
         &listing,
         &token(),
@@ -418,6 +484,7 @@ async fn swallows_a_listing_failure() {
     )
     .await;
 
+    assert!(!complete);
     assert_eq!(listing.list_calls(), 1, "the list was attempted once");
     assert!(
         api.comments.lock().unwrap().is_empty(),

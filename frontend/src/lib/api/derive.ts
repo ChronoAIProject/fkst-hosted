@@ -365,6 +365,12 @@ export interface DecodedWorkItem {
  *  labels. */
 const DEV_LABEL_PREFIX = 'fkst-dev:';
 
+/** Retired remains authoritative through partial readmission, so any open issue
+ *  carrying this latch is excluded from actionable work projections. */
+export function isRetiredWorkItem(issue: IssueDetail): boolean {
+  return issue.state === 'open' && issue.labels.includes(SESSION_LABELS.retired);
+}
+
 /** Decode one work issue's state from its `fkst-dev:*` labels and open/closed
  *  state. A closed issue is `done` regardless of any stale in-flight marker —
  *  the devloop closes it when its PR merges. Open issues resolve highest-signal
@@ -372,6 +378,7 @@ const DEV_LABEL_PREFIX = 'fkst-dev:';
  *  the pre-work latches, falling back to `queued` (waiting) or `other`. */
 export function decodeWorkItemStatus(issue: IssueDetail): DecodedWorkItem {
   if (issue.state === 'closed') return { state: 'done', tone: 'good' };
+  if (isRetiredWorkItem(issue)) return { state: 'other', tone: 'neutral' };
 
   const suffixes = new Set(
     issue.labels

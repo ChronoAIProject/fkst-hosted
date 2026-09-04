@@ -4,9 +4,9 @@
 //! The planner ([`crate::reconcile::desired::plan_repo`]) is a pure function; this
 //! module is its effectful other half. Every effect is IDEMPOTENT and BEST-EFFORT:
 //! a spawn is a 409-tolerant create, a kill/cleanup is a 404-tolerant delete, a
-//! flag/clear is an additive label + one comment. Nothing here ever panics or
-//! aborts the caller — every failure is logged with context and swallowed at THIS
-//! boundary so one bad action never stalls the reconcile of the rest of the repo.
+//! flag/clear is an additive label + one comment. Ordinary action failures are logged
+//! and swallowed at this boundary. The one transactional exception is orphan retirement:
+//! `false` keeps its runtime alive and tells the driver to retry before later actions.
 //!
 //! This file is the ACTION ROUTER plus the GitHub issue effects. The effects that
 //! change whether a runtime exists live next door, one file per direction, because
@@ -65,10 +65,9 @@ pub struct ReconcileCtx {
     pub github: GithubAppTokens,
     /// Read-side GitHub transport the driver enumerates issues + counts work with.
     pub listing: Arc<dyn GithubListing>,
-    /// Author-and-timestamp-aware comment reads. Separate from `listing` because
-    /// only the schedule pass needs comment PROVENANCE, and it needs it for a
-    /// security reason: run records live on an issue anyone may comment on, so an
-    /// untrusted author's marker must never be read as durable state.
+    /// Author-and-timestamp-aware comment reads. Schedule run records and work
+    /// readmission markers live on issues anyone may comment on, so both must verify
+    /// the configured App authored a marker before treating it as durable state.
     pub comments: Arc<dyn crate::github_app::comments::IssueCommentReader>,
     /// Unauthenticated HTTP client for the package-ref reachability pre-flight.
     pub http: reqwest::Client,
@@ -100,11 +99,11 @@ pub struct ReconcileCtx {
     pub identity_gate: crate::runtime_identity::IdentityGate,
 }
 
-/// Execute ONE action for the repo it belongs to. Best-effort: logs and swallows
-/// every error at this boundary (see the module docs). `repo` scopes the GitHub
-/// issue effects (flag/clear); the pod effects address the deterministic
-/// `fkst-sess-<session_id>` pod directly.
-pub async fn execute(action: ReconcileAction, repo: &RepoRef, ctx: &ReconcileCtx) {
+/// Execute ONE action for the repo it belongs to. Returns `false` only when an
+/// orphan retirement is incomplete and its runtime must remain as the durable retry
+/// owner; all ordinary best-effort actions return `true`. `repo` scopes GitHub issue
+/// effects, while runtime effects address the deterministic session directly.
+pub async fn execute(action: ReconcileAction, repo: &RepoRef, ctx: &ReconcileCtx) -> bool {
     let owner_repo = format!("{}/{}", repo.owner, repo.name);
     match action {
         // The session's FULL effective work-label set (explicit ∪ package-discovered)
@@ -129,13 +128,22 @@ pub async fn execute(action: ReconcileAction, repo: &RepoRef, ctx: &ReconcileCtx
         ReconcileAction::CleanupTerminal { session_id, audit } => {
             execute_runtime::cleanup_terminal(&session_id, repo, &audit, ctx).await
         }
-        ReconcileAction::RetireWorkIssues { work_labels } => {
-            // Retire the still-open work issues across EVERY label the retired session
-            // claimed (its full effective set, recovered from the pod annotation). An
-            // empty set (a pre-multi-label pod that recorded no label) has none to notify.
-            if !work_labels.is_empty() {
-                retire_work_issues(&ctx.github, ctx.listing.as_ref(), repo, &work_labels).await
+        ReconcileAction::RetireSession {
+            session_id,
+            work_labels,
+            audit,
+        } => {
+            if !retire_work_issues(&ctx.github, ctx.listing.as_ref(), repo, &work_labels).await {
+                return false;
             }
+            execute_runtime::kill(
+                &session_id,
+                crate::reconcile::desired::KillReason::TriggerClosed,
+                repo,
+                &audit,
+                ctx,
+            )
+            .await;
         }
         ReconcileAction::FlagInvalid {
             trigger_issue,
@@ -196,7 +204,7 @@ pub async fn execute(action: ReconcileAction, repo: &RepoRef, ctx: &ReconcileCtx
                         error = %error,
                         "reconcile announce: effective work-label validation failed"
                     );
-                    return;
+                    return true;
                 }
             };
             let effective_explicit = work_label
@@ -231,6 +239,7 @@ pub async fn execute(action: ReconcileAction, repo: &RepoRef, ctx: &ReconcileCtx
             reject_config_change(&ctx.github, &owner_repo, trigger_issue).await
         }
     }
+    true
 }
 
 // --- GitHub issue effects (testable against a fake transport) -----------------

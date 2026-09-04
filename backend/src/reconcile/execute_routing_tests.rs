@@ -298,6 +298,50 @@ async fn kill_action_routes_to_stop_session_with_reason() {
 }
 
 #[tokio::test]
+async fn retirement_failure_keeps_the_orphan_runtime_for_retry() {
+    let backend = Arc::new(FakeSessionBackend::default());
+    let mut ctx = test_ctx(backend.clone());
+    ctx.listing = Arc::new(FakeListing::failing_issue_list());
+
+    let complete = execute(
+        ReconcileAction::RetireSession {
+            session_id: "orphan".to_string(),
+            work_labels: vec!["fkst-run".to_string()],
+            audit: Default::default(),
+        },
+        &test_repo(),
+        &ctx,
+    )
+    .await;
+
+    assert!(!complete);
+    assert!(backend.stopped.lock().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn completed_retirement_stops_the_orphan_runtime() {
+    let backend = Arc::new(FakeSessionBackend::default());
+    let ctx = test_ctx(backend.clone());
+
+    let complete = execute(
+        ReconcileAction::RetireSession {
+            session_id: "orphan".to_string(),
+            work_labels: vec!["fkst-run".to_string()],
+            audit: Default::default(),
+        },
+        &test_repo(),
+        &ctx,
+    )
+    .await;
+
+    assert!(complete);
+    assert_eq!(
+        backend.stopped.lock().unwrap().as_slice(),
+        &[("orphan".to_string(), KillReason::TriggerClosed)]
+    );
+}
+
+#[tokio::test]
 async fn cleanup_terminal_action_routes_to_remove_terminal() {
     let backend = Arc::new(FakeSessionBackend::default());
     let ctx = test_ctx(backend.clone());

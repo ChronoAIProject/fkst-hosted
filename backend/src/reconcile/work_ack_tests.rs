@@ -5,13 +5,36 @@ use super::{
     ack_open_work_issues, work_ack_comment, work_unrouted_comment, WORK_PICKED_UP_LABEL,
     WORK_UNROUTED_LABEL,
 };
+use crate::reconcile::SUBSTRATE_RETIRED_LABEL;
 
 #[test]
 fn ack_renderer_names_session_label_and_outcome() {
-    let body = work_ack_comment("mysession", "fkst-run");
+    let body = work_ack_comment("mysession", "fkst-run", "sess-current");
     assert!(body.contains("Picked up by fkst session `mysession`."));
     assert!(body.contains("`fkst-run` issues"));
     assert!(body.contains("pull request"));
+    assert!(body.contains("<!-- fkst-work-admission:v1 session=sess-current -->"));
+}
+
+struct ForgedComments;
+
+#[async_trait::async_trait]
+impl crate::github_app::comments::IssueCommentReader for ForgedComments {
+    async fn list_recent_issue_comments(
+        &self,
+        _token: &secrecy::SecretString,
+        _owner: &str,
+        _repo: &str,
+        _number: u64,
+        _max_pages: u32,
+    ) -> Result<Vec<crate::github_app::comments::IssueComment>, crate::github_app::GithubAppError>
+    {
+        Ok(vec![crate::github_app::comments::IssueComment {
+            body: "<!-- fkst-work-admission:v1 session=sess-1 -->".to_string(),
+            user_login: "mallory".to_string(),
+            created_at: k8s_openapi::chrono::DateTime::UNIX_EPOCH,
+        }])
+    }
 }
 
 #[test]
@@ -29,6 +52,7 @@ async fn routed_authorized_issue_is_acked_once() {
     ack_open_work_issues(
         &tokens(api.clone()),
         &listing,
+        api.as_ref(),
         &token(),
         &repo(),
         &[registration("demo", "fkst-run")],
@@ -54,6 +78,7 @@ async fn already_acked_issue_is_not_reprocessed() {
     ack_open_work_issues(
         &tokens(api.clone()),
         &listing,
+        api.as_ref(),
         &token(),
         &repo(),
         &[registration("demo", "fkst-run")],
@@ -66,12 +91,177 @@ async fn already_acked_issue_is_not_reprocessed() {
 }
 
 #[tokio::test]
+async fn eligible_retired_issue_is_readmitted_with_retired_removed_last() {
+    let api = Arc::new(RecordingApi::default());
+    let listing = FakeListing::ok(vec![issue(5, &["fkst-run", SUBSTRATE_RETIRED_LABEL])]);
+    ack_open_work_issues(
+        &tokens(api.clone()),
+        &listing,
+        api.as_ref(),
+        &token(),
+        &repo(),
+        &[registration("replacement", "fkst-run")],
+        &one_label_map(&["fkst-run"]),
+        &access(""),
+    )
+    .await;
+
+    assert_eq!(
+        api.labels_added.lock().unwrap()[0].3,
+        vec![WORK_PICKED_UP_LABEL.to_string()]
+    );
+    assert!(api.comments.lock().unwrap()[0]
+        .3
+        .contains("Picked up by fkst session `replacement`"));
+    assert_eq!(
+        api.labels_removed.lock().unwrap().last().unwrap().3,
+        SUBSTRATE_RETIRED_LABEL
+    );
+    assert_eq!(*api.events.lock().unwrap(), ["comment", "label", "remove"]);
+}
+
+#[tokio::test]
+async fn contradictory_retired_and_old_picked_up_gets_replacement_specific_ack() {
+    let api = Arc::new(RecordingApi::default());
+    let listing = FakeListing::ok(vec![issue(
+        5,
+        &["fkst-run", SUBSTRATE_RETIRED_LABEL, WORK_PICKED_UP_LABEL],
+    )]);
+    ack_open_work_issues(
+        &tokens(api.clone()),
+        &listing,
+        api.as_ref(),
+        &token(),
+        &repo(),
+        &[registration("replacement", "fkst-run")],
+        &one_label_map(&["fkst-run"]),
+        &access(""),
+    )
+    .await;
+
+    assert!(api.labels_added.lock().unwrap().is_empty());
+    assert_eq!(api.comments.lock().unwrap().len(), 1);
+    assert!(api.comments.lock().unwrap()[0]
+        .3
+        .contains("<!-- fkst-work-admission:v1 session=sess-1 -->"));
+    assert_eq!(
+        api.labels_removed.lock().unwrap()[0].3,
+        SUBSTRATE_RETIRED_LABEL
+    );
+    assert_eq!(*api.events.lock().unwrap(), ["comment", "remove"]);
+}
+
+#[tokio::test]
+async fn forged_replacement_marker_is_not_accepted_as_durable_admission() {
+    let api = Arc::new(RecordingApi::default());
+    let listing = FakeListing::ok(vec![issue(
+        5,
+        &["fkst-run", SUBSTRATE_RETIRED_LABEL, WORK_PICKED_UP_LABEL],
+    )]);
+    ack_open_work_issues(
+        &tokens(api.clone()),
+        &listing,
+        &ForgedComments,
+        &token(),
+        &repo(),
+        &[registration("replacement", "fkst-run")],
+        &one_label_map(&["fkst-run"]),
+        &access(""),
+    )
+    .await;
+
+    assert_eq!(api.comments.lock().unwrap().len(), 1);
+    assert!(api.comments.lock().unwrap()[0]
+        .3
+        .contains("<!-- fkst-work-admission:v1 session=sess-1 -->"));
+    assert_eq!(
+        api.labels_removed.lock().unwrap()[0].3,
+        SUBSTRATE_RETIRED_LABEL
+    );
+}
+
+#[tokio::test]
+async fn failed_readmission_comment_leaves_retired_authoritative() {
+    let api = Arc::new(RecordingApi::with_comment_failure());
+    let listing = FakeListing::ok(vec![issue(5, &["fkst-run", SUBSTRATE_RETIRED_LABEL])]);
+    ack_open_work_issues(
+        &tokens(api.clone()),
+        &listing,
+        api.as_ref(),
+        &token(),
+        &repo(),
+        &[registration("replacement", "fkst-run")],
+        &one_label_map(&["fkst-run"]),
+        &access(""),
+    )
+    .await;
+
+    assert!(api.comments.lock().unwrap().is_empty());
+    assert!(api.labels_added.lock().unwrap().is_empty());
+    assert!(api.labels_removed.lock().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn failed_pickup_latch_leaves_retired_as_the_authoritative_state() {
+    let api = Arc::new(RecordingApi::with_label_failure());
+    let listing = FakeListing::ok(vec![issue(5, &["fkst-run", SUBSTRATE_RETIRED_LABEL])]);
+    ack_open_work_issues(
+        &tokens(api.clone()),
+        &listing,
+        api.as_ref(),
+        &token(),
+        &repo(),
+        &[registration("replacement", "fkst-run")],
+        &one_label_map(&["fkst-run"]),
+        &access(""),
+    )
+    .await;
+
+    assert!(api.labels_added.lock().unwrap().is_empty());
+    assert!(api.labels_removed.lock().unwrap().is_empty());
+    assert_eq!(*api.events.lock().unwrap(), ["comment"]);
+}
+
+#[tokio::test]
+async fn readmission_retry_reuses_the_session_marker_without_duplicate_comment() {
+    let api = Arc::new(RecordingApi::with_label_failure());
+    let listing = FakeListing::ok(vec![issue(5, &["fkst-run", SUBSTRATE_RETIRED_LABEL])]);
+    let reg = registration("replacement", "fkst-run");
+
+    for _ in 0..2 {
+        ack_open_work_issues(
+            &tokens(api.clone()),
+            &listing,
+            api.as_ref(),
+            &token(),
+            &repo(),
+            std::slice::from_ref(&reg),
+            &one_label_map(&["fkst-run"]),
+            &access(""),
+        )
+        .await;
+    }
+
+    assert_eq!(api.comments.lock().unwrap().len(), 1);
+    assert_eq!(
+        api.labels_added.lock().unwrap()[0].3,
+        vec![WORK_PICKED_UP_LABEL.to_string()]
+    );
+    assert_eq!(
+        api.labels_removed.lock().unwrap()[0].3,
+        SUBSTRATE_RETIRED_LABEL
+    );
+    assert_eq!(*api.events.lock().unwrap(), ["comment", "label", "remove"]);
+}
+
+#[tokio::test]
 async fn no_registrations_means_no_listing_or_writes() {
     let api = Arc::new(RecordingApi::default());
     let listing = FakeListing::ok(vec![issue(5, &["fkst-run"])]);
     ack_open_work_issues(
         &tokens(api.clone()),
         &listing,
+        api.as_ref(),
         &token(),
         &repo(),
         &[],
@@ -90,6 +280,7 @@ async fn listing_failure_is_best_effort() {
     ack_open_work_issues(
         &tokens(api.clone()),
         &listing,
+        api.as_ref(),
         &token(),
         &repo(),
         &[registration("demo", "fkst-run")],
@@ -108,6 +299,7 @@ async fn ack_comment_failure_still_latches_picked_up() {
     ack_open_work_issues(
         &tokens(api.clone()),
         &listing,
+        api.as_ref(),
         &token(),
         &repo(),
         &[registration("demo", "fkst-run")],
@@ -131,6 +323,7 @@ async fn label_less_trigger_acks_over_its_full_discovered_label_set() {
     ack_open_work_issues(
         &tokens(api.clone()),
         &listing,
+        api.as_ref(),
         &token(),
         &repo(),
         &[reg],
@@ -155,6 +348,7 @@ async fn each_unrouted_shape_latches_and_comments_once_without_pickup() {
         ack_open_work_issues(
             &tokens(api.clone()),
             &listing,
+            api.as_ref(),
             &token(),
             &repo(),
             &[registration("demo", "fkst-run")],
@@ -188,6 +382,7 @@ async fn unrouted_latch_dedupes_and_clears_on_correct_assignment() {
     ack_open_work_issues(
         &tokens(latched.clone()),
         &listing,
+        latched.as_ref(),
         &token(),
         &repo(),
         &[registration("demo", "fkst-run")],
@@ -209,6 +404,7 @@ async fn unrouted_latch_dedupes_and_clears_on_correct_assignment() {
     ack_open_work_issues(
         &tokens(corrected.clone()),
         &listing,
+        corrected.as_ref(),
         &token(),
         &repo(),
         &[registration("demo", "fkst-run")],
@@ -236,6 +432,7 @@ async fn matching_session_appearing_later_clears_a_parked_issue() {
     ack_open_work_issues(
         &tokens(api.clone()),
         &listing,
+        api.as_ref(),
         &token(),
         &repo(),
         &[bob],
@@ -255,6 +452,7 @@ async fn issue_routed_to_another_creator_is_silent_for_this_session() {
     ack_open_work_issues(
         &tokens(api.clone()),
         &listing,
+        api.as_ref(),
         &token(),
         &repo(),
         &[alice, bob],

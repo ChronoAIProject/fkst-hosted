@@ -258,14 +258,15 @@ pub enum ReconcileAction {
         /// Correlation + attribution for the deletion's lifecycle record.
         audit: RuntimeAudit,
     },
-    /// Retire-notify the still-OPEN work issues of a session whose trigger issue was
-    /// closed (session retired). Emitted from the orphan-pod branch alongside the
-    /// `Kill { TriggerClosed }`, carrying the orphan pod's FULL effective `work_labels`
-    /// set so the executor can list EACH label's open issues, comment "session retired,
-    /// no longer worked", latch [`crate::reconcile::SUBSTRATE_RETIRED_LABEL`], and drop
-    /// the now-stale picked-up label — leaving each issue OPEN. A multi-label session
-    /// (epic #594 I4) retires across every label it claimed.
-    RetireWorkIssues { work_labels: Vec<String> },
+    /// Retire an orphaned session transactionally: converge every still-open work
+    /// issue to the retired state first, then stop the runtime only after all label
+    /// listings and durable label writes succeed. Keeping the runtime present on a
+    /// partial failure preserves the next reconcile's retry owner.
+    RetireSession {
+        session_id: String,
+        work_labels: Vec<String>,
+        audit: RuntimeAudit,
+    },
     /// Flag an invalid trigger issue (comment + label), first observation only.
     FlagInvalid { trigger_issue: i64, detail: String },
     /// Clear the invalid flag from an issue that now parses.
@@ -405,6 +406,7 @@ pub fn plan_repo(
     cfg: &ReconcileConfig,
 ) -> Vec<ReconcileAction> {
     let mut actions = Vec::new();
+    let mut retirement_actions = Vec::new();
 
     // Index the observed pods by session id so a registration can find its pod.
     let live_by_session: HashMap<&str, &LivePod> =
@@ -545,20 +547,17 @@ pub fn plan_repo(
         }
         match pod.liveness {
             PodLiveness::Starting | PodLiveness::Live => {
-                actions.push(ReconcileAction::Kill {
-                    session_id: pod.session_id.clone(),
-                    reason: KillReason::TriggerClosed,
-                    // No registration left: the runtime's own stamp is the only
-                    // attribution evidence, and an unstamped one carries none.
-                    audit: RuntimeAudit::from_observed(pod),
-                });
-                // Same cycle as the kill: retire-notify the still-open work issues so
-                // they no longer look claimed (a retired session is no longer working
-                // them). Only when the pod recorded ≥1 work label — an older pod without
-                // the annotation carries an empty set, so there is nothing to list.
-                if !pod.work_labels.is_empty() {
-                    actions.push(ReconcileAction::RetireWorkIssues {
+                if pod.work_labels.is_empty() {
+                    actions.push(ReconcileAction::Kill {
+                        session_id: pod.session_id.clone(),
+                        reason: KillReason::TriggerClosed,
+                        audit: RuntimeAudit::from_observed(pod),
+                    });
+                } else {
+                    retirement_actions.push(ReconcileAction::RetireSession {
+                        session_id: pod.session_id.clone(),
                         work_labels: pod.work_labels.clone(),
+                        audit: RuntimeAudit::from_observed(pod),
                     });
                 }
             }
@@ -571,6 +570,12 @@ pub fn plan_repo(
             PodLiveness::Absent | PodLiveness::Terminating => {}
         }
     }
+
+    // Retirement transactions run before registration actions. This prevents an
+    // old orphan from re-retiring work after an active replacement has admitted it,
+    // and lets the driver stop before spawn/ack when retirement needs a retry.
+    retirement_actions.extend(actions);
+    actions = retirement_actions;
 
     // --- 3. Invalid trigger issues -> flag once (not already latched) ---------
     for (issue, detail) in invalid {
