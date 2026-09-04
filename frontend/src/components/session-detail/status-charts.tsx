@@ -3,7 +3,7 @@ import { useReducedMotion } from 'framer-motion';
 import { Cell, Pie, PieChart, ResponsiveContainer, Tooltip } from 'recharts';
 import { useContent } from '@/i18n';
 import type { IssueDetail } from '@/lib/api/types';
-import { decodeWorkItemStatus } from '@/lib/api/derive';
+import { decodeWorkItemStatus, isRetiredWorkItem } from '@/lib/api/derive';
 import { Note, SectionLabel } from './parts';
 
 // At-a-glance Status-tab charts. The donut follows the dataviz method: a nominal
@@ -44,6 +44,7 @@ export function countWorkItems(issues: IssueDetail[]): WorkItemCounts {
     queued: 0,
   };
   for (const issue of issues) {
+    if (isRetiredWorkItem(issue)) continue;
     counts.total += 1;
     switch (decodeWorkItemStatus(issue).state) {
       case 'done':
@@ -108,7 +109,15 @@ const STAT_TONE = {
 /** A tinted count stat (label + value) used under the progress meter. The label
  *  stays muted; only the value takes the semaphore hue so a glance reads the
  *  numbers, not a wall of color. */
-function Stat({ tone, label, value }: { tone: keyof typeof STAT_TONE; label: string; value: number }) {
+function Stat({
+  tone,
+  label,
+  value,
+}: {
+  tone: keyof typeof STAT_TONE;
+  label: string;
+  value: number;
+}) {
   return (
     <span className="font-mono text-[10.5px] text-ghost">
       {label} <span className={`${STAT_TONE[tone]} font-semibold`}>{value}</span>
@@ -126,7 +135,9 @@ export function ProgressCard({ counts }: { counts: WorkItemCounts }) {
   return (
     <StatusCard label={t.overviewProgress} aria-label={t.overviewProgress}>
       <div className="flex items-baseline gap-1.5">
-        <span className="font-display text-display-md grad-text-fg leading-none">{counts.done}</span>
+        <span className="font-display text-display-md grad-text-fg leading-none">
+          {counts.done}
+        </span>
         <span className="font-mono text-[13px] text-ghost">/ {counts.total}</span>
       </div>
       {/* Gradient meter: the accent fill tweens its width as counts advance
@@ -171,7 +182,10 @@ interface DonutSlice {
 /** Slice descriptors in a stable order. Done + ready both read green (per the
  *  design tokens) but ready is lightened toward fg so two adjacent green arcs
  *  stay distinguishable; the legend label carries the meaning regardless. */
-function donutSlices(counts: WorkItemCounts, t: ReturnType<typeof useContent>['dashboard']['detail']): DonutSlice[] {
+function donutSlices(
+  counts: WorkItemCounts,
+  t: ReturnType<typeof useContent>['dashboard']['detail']
+): DonutSlice[] {
   return [
     { key: 'done', label: t.work.done, value: counts.done, color: 'var(--green)' },
     { key: 'inProgress', label: t.statInProgress, value: counts.inProgress, color: 'var(--amber)' },
@@ -249,7 +263,9 @@ export function WorkDonut({ counts }: { counts: WorkItemCounts }) {
             {/* HTML overlay — renders regardless of the SVG's measured size, so
                 the total is always legible and testable. */}
             <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
-              <span className="font-display text-[22px] leading-none grad-text-fg">{counts.total}</span>
+              <span className="font-display text-[22px] leading-none grad-text-fg">
+                {counts.total}
+              </span>
               <span className="font-mono text-[9px] text-ghost uppercase tracking-[0.14em]">
                 {t.donutTotalLabel}
               </span>

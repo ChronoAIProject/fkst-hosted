@@ -603,6 +603,14 @@ describe('decodeWorkItemStatus', () => {
     expect(withLabels(['bug', 'enhancement'])).toEqual({ state: 'queued', tone: 'neutral' });
     expect(withLabels(['fkst-dev:mystery'])).toEqual({ state: 'other', tone: 'neutral' });
   });
+
+  it('does not expose open retired work as queued or actionable', () => {
+    expect(withLabels(['fkst-session-retired'])).toEqual({ state: 'other', tone: 'neutral' });
+    expect(withLabels(['fkst-session-retired', 'fkst-picked-up'])).toEqual({
+      state: 'other',
+      tone: 'neutral',
+    });
+  });
 });
 
 describe('packageRole', () => {

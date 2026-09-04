@@ -53,6 +53,27 @@ describe('WorkItemsPane', () => {
     expect(pane.querySelector('.overflow-y-auto')).toBeNull();
   });
 
+  it('does not count or render retired and partial-readmission issues', () => {
+    render(
+      <WorkItemsPane
+        issues={[
+          issue({ number: 7, title: 'retired', labels: ['fkst-session-retired'] }),
+          issue({
+            number: 8,
+            title: 'partial readmission',
+            labels: ['fkst-session-retired', 'fkst-picked-up'],
+          }),
+          issue({ number: 9, title: 'actionable' }),
+        ]}
+      />
+    );
+    const pane = screen.getByRole('region', { name: 'Work items' });
+    expect(within(pane).getByText('· 1')).toBeInTheDocument();
+    expect(within(pane).queryByText('retired')).not.toBeInTheDocument();
+    expect(within(pane).queryByText('partial readmission')).not.toBeInTheDocument();
+    expect(within(pane).getByText('actionable')).toBeInTheDocument();
+  });
+
   it('scrolls a long backlog inside the pane', () => {
     // Beside the timeline (#5842), the list must overflow INSIDE its pane rather
     // than growing the grid row and scrolling the timeline out of view.

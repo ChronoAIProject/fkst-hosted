@@ -81,6 +81,23 @@ describe('countWorkItems (pure grouping)', () => {
       queued: 0,
     });
   });
+
+  it('excludes retired and partial-readmission issues from every count', () => {
+    expect(
+      countWorkItems([
+        issue({ number: 1, labels: ['fkst-session-retired'] }),
+        issue({ number: 2, labels: ['fkst-session-retired', 'fkst-picked-up'] }),
+        issue({ number: 3 }),
+      ])
+    ).toEqual({
+      total: 1,
+      done: 0,
+      ready: 0,
+      inProgress: 0,
+      failed: 0,
+      queued: 1,
+    });
+  });
 });
 
 describe('ProgressCard', () => {
