@@ -493,6 +493,7 @@ pub async fn reconcile_repo(
                 pod.liveness,
                 crate::reconcile::desired::PodLiveness::Starting
                     | crate::reconcile::desired::PodLiveness::Live
+                    | crate::reconcile::desired::PodLiveness::Terminating
                     | crate::reconcile::desired::PodLiveness::Terminal
             )
     });
