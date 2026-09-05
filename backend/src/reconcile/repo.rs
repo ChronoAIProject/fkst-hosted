@@ -501,6 +501,8 @@ pub async fn reconcile_repo(
             repo,
             &observed_regs,
             &effective_work_labels_by_session,
+            &ctx.config.access,
+            cfg.github_bot_login.as_deref(),
         )
         .await?
     };

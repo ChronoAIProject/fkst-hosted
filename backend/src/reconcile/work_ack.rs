@@ -91,6 +91,8 @@ pub async fn sessions_with_routed_retired_work(
     repo: &RepoRef,
     regs: &[SessionRegistration],
     work_labels_by_session: &HashMap<String, Vec<String>>,
+    global_admins: &AccessPolicy,
+    github_bot_login: Option<&str>,
 ) -> Result<HashSet<String>, GithubAppError> {
     let mut retired_sessions = HashSet::new();
     let mut seen_labels = HashSet::new();
@@ -115,6 +117,13 @@ pub async fn sessions_with_routed_retired_work(
                 for candidate in regs {
                     if issue_matches_labels(&issue, labels_for(candidate, work_labels_by_session))
                         && route_work_issue(&issue, &candidate.creator_login) == WorkRouting::Routed
+                        && is_work_author_allowed_with_bot(
+                            candidate,
+                            global_admins,
+                            issue.user_id,
+                            &issue.user_login,
+                            github_bot_login,
+                        )
                     {
                         retired_sessions.insert(candidate.session_id.clone());
                     }

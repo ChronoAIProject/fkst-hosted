@@ -493,6 +493,34 @@ async fn same_trigger_reopen_waits_for_the_prior_incarnation_to_disappear() {
 }
 
 #[tokio::test]
+async fn unauthorized_retired_work_does_not_stop_a_current_runtime() {
+    for profile in BackendProfile::ALL {
+        let (_server, harness) = new_harness(profile, None).await;
+        seed_valid(&harness, ("alice", AUTHOR_ID));
+        let current_id = session_id(TRIGGER);
+        harness.full_resync().await;
+
+        let unauthorized = WORK + 1;
+        harness.ledger.put(issue(
+            unauthorized,
+            "unauthorized retired work",
+            &[WORK_LABEL, SUBSTRATE_RETIRED_LABEL],
+            "mallory",
+            AUTHOR_ID + 1,
+        ));
+        harness.ledger.set_assignees(unauthorized, &["alice"]);
+
+        harness.full_resync().await;
+        assert_eq!(harness.runtime_ids(), vec![current_id], "{profile:?}");
+        assert!(harness.stops().is_empty(), "{profile:?}");
+        assert!(harness
+            .ledger
+            .labels(unauthorized)
+            .contains(&WORK_UNAUTHORIZED_LABEL.to_string()));
+    }
+}
+
+#[tokio::test]
 async fn invalid_trigger_feedback_is_durable_and_never_spawns() {
     for profile in BackendProfile::ALL {
         let (_server, mut harness) = new_harness(profile, None).await;
