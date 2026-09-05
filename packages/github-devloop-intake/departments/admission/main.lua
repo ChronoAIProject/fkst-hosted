@@ -30,7 +30,7 @@ local spec = {
 local operator_policy = nil
 local function reintake_policy()
   if operator_policy == nil then
-    operator_policy = operator_commands.operator_author_policy(exec_sync)
+    operator_policy = operator_commands.operator_author_policy_strict(exec_sync)
   end
   return operator_policy
 end
@@ -51,7 +51,7 @@ local function raise_reintake_refusal(repo, issue_number, proposal_id, command, 
 end
 
 local function handle_pending_reintake(repo, issue, current, proposal_id, source_ref, claim_verified)
-  local command = core.pending_reintake_command(current.comments, reintake_policy())
+  local command = core.pending_reintake_command(current.comments, reintake_policy)
   if command == nil then
     return false
   end
@@ -215,7 +215,7 @@ end
 local function handle_creator_scoped_known_issue(entity, repo, issue_number, proposal_id)
   local _, _, current = current_issue_from_source_ref(entity.source_ref, entity.updated_at)
   devloop_logging.log_forged_markers("admission", proposal_id, current.comments)
-  if core.pending_reintake_command(current.comments, reintake_policy()) == nil then
+  if core.pending_reintake_command(current.comments, reintake_policy) == nil then
     log_known_state_skip(proposal_id, "entity")
     return
   end
