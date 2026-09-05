@@ -1,6 +1,7 @@
 //! Restartable runtime and environment-profile fakes for recovery chaos tests.
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 
 use async_trait::async_trait;
@@ -120,7 +121,8 @@ pub(super) struct RuntimeRecord {
     repo: RepoRef,
     trigger_issue: i64,
     config_hash: String,
-    work_labels: Vec<String>,
+    pub(super) work_labels: Vec<String>,
+    pub(super) liveness: PodLiveness,
     created_at: DateTime<Utc>,
     last_pending_at: Option<DateTime<Utc>>,
     /// The runtime's stamped metadata, so the fixture exercises the REAL
@@ -139,6 +141,7 @@ pub(super) struct ChaosBackend {
     pub profile: BackendProfile,
     pub runtimes: Arc<Mutex<HashMap<String, RuntimeRecord>>>,
     pub events: Arc<Mutex<BackendEvents>>,
+    pub fail_stops_remaining: Arc<AtomicUsize>,
     pub credential_cache: Mutex<HashMap<String, BTreeSet<String>>>,
 }
 
@@ -194,6 +197,7 @@ impl SessionBackend for ChaosBackend {
                     trigger_issue: spec.trigger_issue_number,
                     config_hash: spec.config_hash.clone(),
                     work_labels: crate::k8s::work_label_wire::split_work_labels(&spec.work_label),
+                    liveness: PodLiveness::Live,
                     created_at: Utc::now(),
                     last_pending_at: None,
                     metadata: stamp_pairs(&K8S_IDENTITY_KEYS, &spec.identity())
@@ -244,7 +248,7 @@ impl SessionBackend for ChaosBackend {
             .map(|runtime| LivePod {
                 session_id: runtime.session_id.clone(),
                 trigger_issue: runtime.trigger_issue,
-                liveness: PodLiveness::Live,
+                liveness: runtime.liveness,
                 created_at: runtime.created_at,
                 last_pending_at: runtime.last_pending_at,
                 config_hash: Some(runtime.config_hash.clone()),
@@ -262,6 +266,15 @@ impl SessionBackend for ChaosBackend {
     }
 
     async fn stop_session(&self, session_id: &str, reason: KillReason) -> Result<(), BackendError> {
+        if self
+            .fail_stops_remaining
+            .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |remaining| {
+                remaining.checked_sub(1)
+            })
+            .is_ok()
+        {
+            return Err(BackendError::Other(anyhow::anyhow!("fixture stop failure")));
+        }
         if self.runtimes.lock().unwrap().remove(session_id).is_none() {
             return Err(BackendError::NotFound);
         }

@@ -220,7 +220,6 @@ async fn replacement_session_readmits_retired_work_and_converges_after_restart()
     for profile in BackendProfile::ALL {
         let (_server, mut harness) = new_harness(profile, None).await;
         seed_valid(&harness, ("alice", AUTHOR_ID));
-        let original_id = session_id(TRIGGER);
         harness.full_resync().await;
 
         // Close the original trigger and register the replacement before the next
@@ -238,8 +237,10 @@ async fn replacement_session_readmits_retired_work_and_converges_after_restart()
         harness.full_resync().await;
 
         let replacement_id = session_id(replacement_trigger);
-        assert_eq!(harness.runtime_ids(), vec![replacement_id.clone()]);
-        assert!(!harness.runtime_ids().contains(&original_id));
+        assert!(
+            harness.runtime_ids().is_empty(),
+            "replacement stays absent until retired readmission commits ({profile:?})"
+        );
         let labels = harness.ledger.labels(WORK);
         assert!(labels.contains(&SUBSTRATE_RETIRED_LABEL.to_string()));
         assert!(!labels.contains(&WORK_PICKED_UP_LABEL.to_string()));
@@ -252,6 +253,7 @@ async fn replacement_session_readmits_retired_work_and_converges_after_restart()
         // Only the next observation, after the old runtime is gone, may commit the
         // replacement-specific marker and clear retired.
         harness.full_resync().await;
+        assert_eq!(harness.runtime_ids(), vec![replacement_id.clone()]);
         let labels = harness.ledger.labels(WORK);
         assert!(labels.contains(&WORK_PICKED_UP_LABEL.to_string()));
         assert!(!labels.contains(&SUBSTRATE_RETIRED_LABEL.to_string()));
@@ -270,6 +272,251 @@ async fn replacement_session_readmits_retired_work_and_converges_after_restart()
         harness.full_resync().await;
         assert_eq!(harness.runtime_ids(), vec![replacement_id]);
         assert_eq!(harness.ledger.effects(), effects, "{profile:?}");
+    }
+}
+
+#[tokio::test]
+async fn failed_orphan_stop_keeps_replacement_absent_until_a_clean_pass() {
+    for profile in BackendProfile::ALL {
+        let (_server, harness) = new_harness(profile, None).await;
+        seed_valid(&harness, ("alice", AUTHOR_ID));
+        let original_id = session_id(TRIGGER);
+        harness.full_resync().await;
+
+        harness.ledger.set_state(TRIGGER, "closed");
+        let replacement_trigger = TRIGGER + 1;
+        let replacement_id = session_id(replacement_trigger);
+        harness.ledger.put(issue(
+            replacement_trigger,
+            trigger_body("replacement-session", WORK_LABEL),
+            &[TRIGGER_LABEL],
+            "alice",
+            AUTHOR_ID,
+        ));
+        harness.fail_next_stop();
+        harness.full_resync().await;
+
+        assert_eq!(
+            harness.runtime_ids(),
+            vec![original_id.clone()],
+            "{profile:?}"
+        );
+        assert!(!harness.runtime_ids().contains(&replacement_id));
+        assert!(harness
+            .ledger
+            .labels(WORK)
+            .contains(&SUBSTRATE_RETIRED_LABEL.to_string()));
+
+        // The retry pass stops the surviving orphan but still cannot act on the
+        // stale pre-retirement pending snapshot.
+        harness.full_resync().await;
+        assert!(harness.runtime_ids().is_empty(), "{profile:?}");
+        assert!(harness
+            .ledger
+            .labels(WORK)
+            .contains(&SUBSTRATE_RETIRED_LABEL.to_string()));
+
+        // The first clean observation commits readmission before pending and spawn.
+        harness.full_resync().await;
+        assert_eq!(harness.runtime_ids(), vec![replacement_id]);
+        assert!(!harness
+            .ledger
+            .labels(WORK)
+            .contains(&SUBSTRATE_RETIRED_LABEL.to_string()));
+        assert!(harness
+            .ledger
+            .labels(WORK)
+            .contains(&WORK_PICKED_UP_LABEL.to_string()));
+    }
+}
+
+#[tokio::test]
+async fn label_less_live_orphan_blocks_replacement_through_a_failed_stop() {
+    for profile in BackendProfile::ALL {
+        let (_server, harness) = new_harness(profile, None).await;
+        seed_valid(&harness, ("alice", AUTHOR_ID));
+        let original_id = session_id(TRIGGER);
+        harness.full_resync().await;
+        harness.clear_runtime_work_labels(&original_id);
+
+        harness.ledger.set_state(TRIGGER, "closed");
+        let replacement_trigger = TRIGGER + 1;
+        let replacement_id = session_id(replacement_trigger);
+        harness.ledger.put(issue(
+            replacement_trigger,
+            trigger_body("replacement-session", WORK_LABEL),
+            &[TRIGGER_LABEL],
+            "alice",
+            AUTHOR_ID,
+        ));
+        harness.fail_next_stop();
+        harness.full_resync().await;
+
+        assert_eq!(harness.runtime_ids(), vec![original_id], "{profile:?}");
+        assert!(!harness.runtime_ids().contains(&replacement_id));
+
+        harness.full_resync().await;
+        assert!(harness.runtime_ids().is_empty(), "{profile:?}");
+
+        harness.full_resync().await;
+        assert_eq!(harness.runtime_ids(), vec![replacement_id], "{profile:?}");
+    }
+}
+
+#[tokio::test]
+async fn terminal_orphan_cleanup_blocks_replacement_until_the_next_pass() {
+    for profile in BackendProfile::ALL {
+        let (_server, harness) = new_harness(profile, None).await;
+        seed_valid(&harness, ("alice", AUTHOR_ID));
+        let original_id = session_id(TRIGGER);
+        harness.full_resync().await;
+        harness.set_runtime_liveness(
+            &original_id,
+            crate::reconcile::desired::PodLiveness::Terminal,
+        );
+
+        harness.ledger.set_state(TRIGGER, "closed");
+        let replacement_trigger = TRIGGER + 1;
+        let replacement_id = session_id(replacement_trigger);
+        harness.ledger.put(issue(
+            replacement_trigger,
+            trigger_body("replacement-session", WORK_LABEL),
+            &[TRIGGER_LABEL],
+            "alice",
+            AUTHOR_ID,
+        ));
+        harness.full_resync().await;
+
+        assert!(harness.runtime_ids().is_empty(), "{profile:?}");
+        assert!(!harness.runtime_ids().contains(&replacement_id));
+
+        harness.full_resync().await;
+        assert_eq!(harness.runtime_ids(), vec![replacement_id], "{profile:?}");
+    }
+}
+
+#[tokio::test]
+async fn terminating_orphan_blocks_replacement_until_runtime_disappears() {
+    for profile in BackendProfile::ALL {
+        let (_server, harness) = new_harness(profile, None).await;
+        seed_valid(&harness, ("alice", AUTHOR_ID));
+        let original_id = session_id(TRIGGER);
+        harness.full_resync().await;
+        harness.set_runtime_liveness(
+            &original_id,
+            crate::reconcile::desired::PodLiveness::Terminating,
+        );
+
+        harness.ledger.set_state(TRIGGER, "closed");
+        let replacement_trigger = TRIGGER + 1;
+        let replacement_id = session_id(replacement_trigger);
+        harness.ledger.put(issue(
+            replacement_trigger,
+            trigger_body("replacement-session", WORK_LABEL),
+            &[TRIGGER_LABEL],
+            "alice",
+            AUTHOR_ID,
+        ));
+
+        harness.full_resync().await;
+        assert_eq!(
+            harness.runtime_ids(),
+            vec![original_id.clone()],
+            "{profile:?}"
+        );
+        assert!(!harness.runtime_ids().contains(&replacement_id));
+
+        harness.delete_runtime(&original_id);
+        harness.full_resync().await;
+        assert_eq!(harness.runtime_ids(), vec![replacement_id], "{profile:?}");
+    }
+}
+
+#[tokio::test]
+async fn same_trigger_reopen_waits_for_the_prior_incarnation_to_disappear() {
+    for profile in BackendProfile::ALL {
+        for liveness in [
+            crate::reconcile::desired::PodLiveness::Starting,
+            crate::reconcile::desired::PodLiveness::Live,
+            crate::reconcile::desired::PodLiveness::Terminating,
+            crate::reconcile::desired::PodLiveness::Terminal,
+        ] {
+            let (_server, harness) = new_harness(profile, None).await;
+            seed_valid(&harness, ("alice", AUTHOR_ID));
+            let same_id = session_id(TRIGGER);
+            harness.full_resync().await;
+            assert_eq!(harness.ensures().len(), 1);
+
+            harness.ledger.set_state(TRIGGER, "closed");
+            harness.fail_next_stop();
+            harness.full_resync().await;
+            assert_eq!(harness.runtime_ids(), vec![same_id.clone()]);
+            assert!(harness
+                .ledger
+                .labels(WORK)
+                .contains(&SUBSTRATE_RETIRED_LABEL.to_string()));
+
+            harness.set_runtime_liveness(&same_id, liveness);
+            harness.ledger.set_state(TRIGGER, "open");
+            harness.full_resync().await;
+
+            assert_eq!(
+                harness.ensures().len(),
+                1,
+                "reopen must not reuse the prior {liveness:?} incarnation ({profile:?})"
+            );
+            assert!(harness
+                .ledger
+                .labels(WORK)
+                .contains(&SUBSTRATE_RETIRED_LABEL.to_string()));
+
+            if liveness == crate::reconcile::desired::PodLiveness::Terminating {
+                assert_eq!(harness.runtime_ids(), vec![same_id.clone()]);
+                harness.delete_runtime(&same_id);
+            } else {
+                assert!(harness.runtime_ids().is_empty(), "{profile:?} {liveness:?}");
+            }
+
+            harness.full_resync().await;
+            assert_eq!(harness.runtime_ids(), vec![same_id.clone()]);
+            assert_eq!(harness.ensures().len(), 2);
+            assert!(!harness
+                .ledger
+                .labels(WORK)
+                .contains(&SUBSTRATE_RETIRED_LABEL.to_string()));
+            assert!(harness
+                .ledger
+                .labels(WORK)
+                .contains(&WORK_PICKED_UP_LABEL.to_string()));
+        }
+    }
+}
+
+#[tokio::test]
+async fn unauthorized_retired_work_does_not_stop_a_current_runtime() {
+    for profile in BackendProfile::ALL {
+        let (_server, harness) = new_harness(profile, None).await;
+        seed_valid(&harness, ("alice", AUTHOR_ID));
+        let current_id = session_id(TRIGGER);
+        harness.full_resync().await;
+
+        let unauthorized = WORK + 1;
+        harness.ledger.put(issue(
+            unauthorized,
+            "unauthorized retired work",
+            &[WORK_LABEL, SUBSTRATE_RETIRED_LABEL],
+            "mallory",
+            AUTHOR_ID + 1,
+        ));
+        harness.ledger.set_assignees(unauthorized, &["alice"]);
+
+        harness.full_resync().await;
+        assert_eq!(harness.runtime_ids(), vec![current_id], "{profile:?}");
+        assert!(harness.stops().is_empty(), "{profile:?}");
+        assert!(harness
+            .ledger
+            .labels(unauthorized)
+            .contains(&WORK_UNAUTHORIZED_LABEL.to_string()));
     }
 }
 

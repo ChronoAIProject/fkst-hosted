@@ -486,18 +486,78 @@ pub async fn reconcile_repo(
         .await
         .map_err(|e| AppError::Internal(anyhow::anyhow!("list substrate-session pods: {e}")))?;
 
-    // 4. Gate each registration on the open-issue count of its work-label SET
-    //    (`work_labels_by_session`, resolved above): the trigger's explicit label plus
-    //    every label its packages auto-declare (`[github].work_labels`, resolved
-    //    transitively over `[event_deps]`). So a session wakes on any of its packages'
-    //    own labels without the operator restating them in the trigger issue.
+    let observed_sessions: HashSet<&str> = live.iter().map(|pod| pod.session_id.as_str()).collect();
+    let observed_regs: Vec<_> = regs
+        .iter()
+        .filter(|reg| observed_sessions.contains(reg.session_id.as_str()))
+        .cloned()
+        .collect();
+    let routed_retired_sessions = if observed_regs.is_empty() {
+        HashSet::new()
+    } else {
+        crate::reconcile::work_ack::sessions_with_routed_retired_work(
+            ctx.listing.as_ref(),
+            &token,
+            repo,
+            &observed_regs,
+            &effective_work_labels_by_session,
+            &ctx.config.access,
+            cfg.github_bot_login.as_deref(),
+        )
+        .await?
+    };
+    let pre_reopen_sessions: HashSet<&str> = live
+        .iter()
+        .filter(|pod| routed_retired_sessions.contains(&pod.session_id))
+        .map(|pod| pod.session_id.as_str())
+        .collect();
+    let planning_regs: Vec<_> = regs
+        .iter()
+        .filter(|reg| !pre_reopen_sessions.contains(reg.session_id.as_str()))
+        .cloned()
+        .collect();
+    let planning_sessions: HashSet<&str> = planning_regs
+        .iter()
+        .map(|reg| reg.session_id.as_str())
+        .collect();
+    let orphan_barrier_observed = live.iter().any(|pod| {
+        !planning_sessions.contains(pod.session_id.as_str())
+            && matches!(
+                pod.liveness,
+                crate::reconcile::desired::PodLiveness::Starting
+                    | crate::reconcile::desired::PodLiveness::Live
+                    | crate::reconcile::desired::PodLiveness::Terminating
+                    | crate::reconcile::desired::PodLiveness::Terminal
+            )
+    });
+
+    // On a clean observation, admission runs before pending so a replacement can
+    // commit its trusted marker + retired removal before that work creates demand.
+    // A pass that still sees an old orphan defers admission entirely.
+    if !orphan_barrier_observed {
+        crate::reconcile::work_ack::ack_open_work_issues_with_bot(
+            &ctx.github,
+            ctx.listing.as_ref(),
+            ctx.comments.as_ref(),
+            &token,
+            repo,
+            &regs,
+            &effective_work_labels_by_session,
+            &ctx.config.access,
+            cfg.github_bot_login.as_deref(),
+        )
+        .await;
+    }
+
+    // 4. Gate each registration on the open-issue count of its work-label SET,
+    // after any clean-pass admission commit above.
     let gate = LabelCountPending::new_with_bot_login(
         ctx.listing.as_ref(),
         &token,
         cfg.github_bot_login.as_deref(),
     );
     let mut pending: HashMap<String, bool> = HashMap::new();
-    for reg in &regs {
+    for reg in &planning_regs {
         let labels = effective_work_labels_by_session
             .get(&reg.session_id)
             .cloned()
@@ -510,7 +570,7 @@ pub async fn reconcile_repo(
 
     // 5. Plan (pure), then execute each action best-effort.
     let mut actions = plan_repo(
-        &regs,
+        &planning_regs,
         &logical_work_labels_by_session,
         &invalid,
         &live,
@@ -536,21 +596,18 @@ pub async fn reconcile_repo(
         actions = actions.len(),
         "reconcile repo: planned"
     );
-    let retirement_planned = actions.iter().any(|action| {
-        matches!(
-            action,
-            crate::reconcile::desired::ReconcileAction::RetireSession { .. }
-        )
-    });
     let mut retirement_incomplete = false;
     for action in actions {
-        if retirement_incomplete
-            && !matches!(
-                &action,
-                crate::reconcile::desired::ReconcileAction::RetireSession { .. }
-                    | crate::reconcile::desired::ReconcileAction::CleanupTerminal { .. }
-            )
-        {
+        let allowed_during_orphan_barrier = matches!(
+            &action,
+            crate::reconcile::desired::ReconcileAction::RetireSession { .. }
+                | crate::reconcile::desired::ReconcileAction::CleanupTerminal { .. }
+                | crate::reconcile::desired::ReconcileAction::Kill {
+                    reason: crate::reconcile::desired::KillReason::TriggerClosed,
+                    ..
+                }
+        );
+        if (orphan_barrier_observed || retirement_incomplete) && !allowed_during_orphan_barrier {
             continue;
         }
         if !execute(action, repo, ctx).await {
@@ -561,26 +618,8 @@ pub async fn reconcile_repo(
             );
         }
     }
-    if retirement_incomplete {
+    if retirement_incomplete || orphan_barrier_observed {
         return Ok(());
-    }
-
-    // A pass that retires an orphan never re-admits replacement work immediately.
-    // The next observation must first confirm the old runtime is absent/terminating;
-    // otherwise a failed stop could let that orphan re-retire the work next sweep.
-    if !retirement_planned {
-        crate::reconcile::work_ack::ack_open_work_issues_with_bot(
-            &ctx.github,
-            ctx.listing.as_ref(),
-            ctx.comments.as_ref(),
-            &token,
-            repo,
-            &regs,
-            &effective_work_labels_by_session,
-            &ctx.config.access,
-            cfg.github_bot_login.as_deref(),
-        )
-        .await;
     }
 
     // 5b. The schedule pass: a SECOND enumeration, over this repository's open

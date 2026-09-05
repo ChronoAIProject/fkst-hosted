@@ -110,6 +110,25 @@ describe('fallbackRecovery', () => {
     ).toMatchObject({ state: 'degraded', reason: 'runtime_health_degraded', open_work_items: 2 });
   });
 
+  it('excludes retired and partial-readmission work from fallback counts', () => {
+    expect(
+      fallbackRecovery(
+        session({
+          liveness: 'starting',
+          status_labels: [],
+          work_issues: [
+            issue({ number: 9, labels: ['fkst-session-retired'] }),
+            issue({ number: 10, labels: ['fkst-session-retired', 'fkst-picked-up'] }),
+          ],
+        })
+      )
+    ).toMatchObject({
+      state: 'unknown',
+      reason: 'runtime_observation_unavailable',
+      open_work_items: 0,
+    });
+  });
+
   it('reports an idle session as having no pending work', () => {
     expect(
       fallbackRecovery(
