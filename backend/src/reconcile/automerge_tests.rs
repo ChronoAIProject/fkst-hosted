@@ -395,3 +395,64 @@ fn linked_issue_number_is_none_for_garbage() {
         None
     );
 }
+
+/// A mergeable bot PR whose head is an Evolution-owned sync branch.
+fn evolution_sync_pr(number: u64, author: &str) -> PullRequestSummary {
+    pr_with(
+        number,
+        author,
+        "fkst/evolution/c0ceeffb6f8cb4b3",
+        "docs(evolution): synchronize product artifacts through abc1234",
+    )
+}
+
+#[tokio::test]
+async fn evolution_sync_prs_are_excluded_from_the_generic_hook() {
+    // REGRESSION GUARD. Evolution's merge is path-scoped, current-head-scoped and
+    // gated on an Evolution-owned required check. This hook is none of those — it
+    // merges any mergeable bot PR once ANY session on the repo opted in. If the
+    // exclusion regresses, enrolling Evolution on a repository that already had an
+    // auto-merge session hands the artifact PRs to this path and bypasses every
+    // gate that makes autonomous artifact merging safe.
+    let api = Arc::new(FakePrApi {
+        pulls: vec![evolution_sync_pr(1, "fkst-bot"), pr(2, "fkst-bot")],
+        mergeable: HashMap::from([(1, Some(true)), (2, Some(true))]),
+        ..Default::default()
+    });
+    let github = tokens(api.clone());
+
+    auto_merge_bot_pull_requests(&github, "acme/site", Some("fkst-bot"), true).await;
+
+    assert_eq!(
+        *api.merged.lock().unwrap(),
+        vec![2],
+        "the ordinary bot PR merges and the Evolution sync PR does not"
+    );
+    assert!(
+        !api.mergeable_queried.lock().unwrap().contains(&1),
+        "an Evolution sync PR is filtered before it is even queried for mergeable"
+    );
+}
+
+#[tokio::test]
+async fn a_fork_branch_named_like_a_lane_is_not_exempted() {
+    // A fork head ref is a bare branch name the contributor controls. Treating it
+    // as Evolution-owned would let anyone opt their PR out of the repository's
+    // configured auto-merge behavior by choosing a branch name.
+    let mut forked = evolution_sync_pr(5, "fkst-bot");
+    forked.head_repo_full_name = Some("attacker/site".to_string());
+    let api = Arc::new(FakePrApi {
+        pulls: vec![forked],
+        mergeable: HashMap::from([(5, Some(true))]),
+        ..Default::default()
+    });
+    let github = tokens(api.clone());
+
+    auto_merge_bot_pull_requests(&github, "acme/site", Some("fkst-bot"), true).await;
+
+    assert_eq!(
+        *api.merged.lock().unwrap(),
+        vec![5],
+        "a fork branch merely named like a lane is treated as an ordinary PR"
+    );
+}

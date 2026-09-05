@@ -1,0 +1,151 @@
+# Artifact plan — what the generator produces, and what each artifact represents.
+#
+# GENERATOR INPUT, not Evolution state. It deliberately lives outside
+# `.fkst/evolution/`: section 12.3 classifies everything under that root as
+# either human intent or Evolution output, and this is neither. Putting it under
+# the root would also fold the generator's own configuration into the output
+# fingerprint it computes, which is circular.
+#
+# In the eventual package composition (section 28.1) this file is replaced by the
+# producer roles' own declarations in `fkst-packages`.
+
+schemaVersion: 1
+
+generator:
+  # `{commit}` is substituted with the observed head at build time, so the
+  # recorded reference is always post-resolution (section 28.4) — a symbolic
+  # branch or tag never reaches the fingerprint.
+  manifestRef: "ChronoAIProject/fkst-hosted@{commit}:tools/evolution/artifact-plan.yaml"
+  packages:
+    - directory: "tools/evolution"
+      ref: "ChronoAIProject/fkst-hosted@{commit}:tools/evolution"
+  engineVersion: "fkst-evolution-tools/0.1.0"
+  # Provenance only (section 17.4) and recorded honestly: in this first proof the
+  # producer roles are performed by an assistant rather than by packaged prompts,
+  # so this names the model that actually authored the artifacts. It never enters
+  # a convergence-bearing fingerprint — a model roll must not regenerate the
+  # fleet.
+  model: "anthropic/claude-opus-5"
+
+verification:
+  - id: "jny_2f7c"
+    status: "passed"
+    evidence: ".fkst/evolution/journeys/queue-work-item.spec.ts"
+    checkRunName: "fkst-evolution/journey.jny_2f7c"
+    # Section 17.7.1 requires the check-run output to record WHICH role produced
+    # the result, so a later reader can tell a controller transcription from
+    # independent observation. Stated here rather than implied.
+    provenance: >-
+      demo-producer role, executed in the generation environment; the controller
+      transcribes the result and does not independently observe it.
+
+artifacts:
+  - id: "docs.queue-work-item"
+    kind: "documentation"
+    locale: "en"
+    audience: "session-owner"
+    capabilities: ["cap_9d41"]
+    journeys: ["jny_2f7c"]
+    repositoryPath: ".fkst/evolution/docs/queue-work-item.md"
+    status: "current"
+    required: true
+    verification: "passed"
+
+  - id: "skill.queue-work-item"
+    kind: "skills"
+    locale: "en"
+    audience: "agent"
+    capabilities: ["cap_9d41"]
+    journeys: ["jny_2f7c"]
+    repositoryPath: ".fkst/evolution/skills/queue-work-item/SKILL.md"
+    status: "current"
+    required: true
+    verification: "passed"
+
+  - id: "journey.queue-work-item"
+    kind: "journeys"
+    locale: "en"
+    audience: "session-owner"
+    capabilities: ["cap_9d41"]
+    journeys: ["jny_2f7c"]
+    repositoryPath: ".fkst/evolution/journeys/queue-work-item.spec.ts"
+    status: "current"
+    required: true
+    verification: "passed"
+
+  - id: "screenshot.sessions-level"
+    kind: "screenshots"
+    locale: "en"
+    audience: "session-owner"
+    capabilities: ["cap_9d41"]
+    journeys: ["jny_2f7c"]
+    repositoryPath: ".fkst/evolution/screenshots/sessions-level.png"
+    status: "current"
+    required: true
+    verification: "passed"
+
+  - id: "screenshot.work-composer"
+    kind: "screenshots"
+    locale: "en"
+    audience: "session-owner"
+    capabilities: ["cap_9d41"]
+    journeys: ["jny_2f7c"]
+    repositoryPath: ".fkst/evolution/screenshots/work-composer.png"
+    status: "current"
+    required: true
+    verification: "passed"
+
+  - id: "screenshot.session-detail"
+    kind: "screenshots"
+    locale: "en"
+    audience: "session-owner"
+    capabilities: ["cap_9d41"]
+    journeys: ["jny_2f7c"]
+    repositoryPath: ".fkst/evolution/screenshots/session-detail.png"
+    status: "current"
+    required: true
+    verification: "passed"
+
+  # The EDITABLE source is the slides artifact (section 23.8 wants it committed
+  # and portable). The rendered PDF below is its derived companion.
+  - id: "deck.product-intro"
+    kind: "slides"
+    locale: "en"
+    audience: "customer-onboarding"
+    capabilities: ["cap_9d41"]
+    journeys: ["jny_2f7c"]
+    repositoryPath: ".fkst/evolution/slides/product-intro.md"
+    status: "current"
+    required: true
+    verification: "passed"
+
+  # `required: false` — informational (section 17.7.2 rule 4). The rendered PDF
+  # is reproducible from the committed source, so a missing render is a render
+  # problem, not a reason to call the repository non-converged.
+  - id: "deck.product-intro.pdf"
+    kind: "slides"
+    locale: "en"
+    audience: "customer-onboarding"
+    capabilities: ["cap_9d41"]
+    journeys: ["jny_2f7c"]
+    release:
+      repository: "ChronoAIProject/fkst-hosted"
+      assetBaseName: "product-intro"
+      localPath: "tools/evolution/out/product-intro.pdf"
+    status: "current"
+    required: false
+    verification: "passed"
+
+  - id: "video.queue-work-item"
+    kind: "video"
+    locale: "en"
+    audience: "customer-onboarding"
+    capabilities: ["cap_9d41"]
+    journeys: ["jny_2f7c"]
+    release:
+      repository: "ChronoAIProject/fkst-hosted"
+      assetBaseName: "queue-work-item"
+      localPath: "tools/evolution/out/queue-work-item.mp4"
+    status: "current"
+    required: true
+    verification: "passed"

@@ -1,0 +1,68 @@
+# Observed product capabilities (spec section 14.2).
+#
+# EVOLUTION-MAINTAINED. This is a machine claim about what the product currently
+# DOES, kept separate from `intent/` — the human claim about what it is FOR — so
+# that an inference can never silently become product strategy.
+#
+# Identifiers are opaque and allocated once (section 14.2.1). They are NOT
+# derived from the title, path, or summary, so a rename cannot produce a
+# different identifier by construction. A capability that can no longer be
+# matched to a product function is marked `unknown` and raised for owner
+# adjudication — never deleted, and never reallocated.
+
+schemaVersion: 1
+
+capabilities:
+  - id: "cap_9d41"
+    title: "Queue work for a running session"
+    status: "available"
+    summary: >-
+      Open a work issue against a running session directly from the dashboard.
+      The issue is created as the signed-in user and stamped with one of the
+      session's effective work labels, so the reconciler claims it for that
+      session.
+    audiences:
+      - "session-owner"
+      - "repository-maintainer"
+    interfaces:
+      - kind: "ui"
+        entrypoint: "/dashboard"
+        detail: >-
+          Drill to a repository's sessions, select one, then "Add work item".
+          The label selector offers the session's complete effective set,
+          including labels discovered from its packages.
+      - kind: "api"
+        entrypoint: "POST /api/v1/repos/{owner}/{name}/sessions/{issue_number}/work-items"
+    limitations:
+      # Every entry below is a documented response of the handler, not an
+      # inference from reading the happy path.
+      - >-
+        Work authority is limited to the session's effective creator, logins
+        frozen under its Session Collaborators, and deployment global
+        administrators. Repository admin or maintain permission alone is not work
+        authority; anyone else receives 403.
+      - "A closed session trigger is rejected with 409."
+      - >-
+        The session must expose at least one applicable work label and the
+        selected label must be one of them, otherwise the request is rejected
+        with 422.
+      - >-
+        The issue is opened as the signed-in user, so GitHub's own repository
+        permissions still apply on top of the deployment's authority check.
+      - "A blank title is rejected with 400. An omitted body opens a body-less issue."
+    journeys:
+      - "jny_2f7c"
+    evidence:
+      - kind: "source"
+        ref: "backend/src/routes/canvas/work_item.rs"
+      - kind: "schema"
+        ref: "GET /openapi.json#/paths/~1repos~1{owner}~1{name}~1sessions~1{issue_number}~1work-items"
+      - kind: "test"
+        ref: "frontend/e2e/dashboard.spec.ts"
+      - kind: "test"
+        ref: "frontend/src/lib/api/canvas.test.ts"
+      - kind: "journey"
+        ref: ".fkst/evolution/journeys/queue-work-item.spec.ts"
+    introducedBy: "802380a11ec7f5687ec9505b5f302c29ae517053"
+    lastChangedBy: "0515fef6f7e42d761f02083423b77c0a3e933e7f"
+    verification: "passed"

@@ -1,0 +1,81 @@
+# Semantic product change record (spec section 15).
+#
+# The source commit SHA is the identity; the path shard is derived from it
+# (section 15.2), so a record's location is always computable from its identity
+# alone. Reprocessing this commit updates this same file rather than adding
+# another record. Once merged the record is immutable except for schema
+# migration or correction of a demonstrable factual error.
+
+schemaVersion: 1
+sourceCommit: "802380a11ec7f5687ec9505b5f302c29ae517053"
+sourceParents:
+  - "05d718594cdc30c249a5ef41bff1636fc6320fd3"
+pullRequest:
+  number: 558
+  url: "https://github.com/ChronoAIProject/fkst-hosted/pull/558"
+  headCommit: "802380a11ec7f5687ec9505b5f302c29ae517053"
+
+classification: "product-change"
+summary: >-
+  Session owners can queue a work item onto a running session from the
+  dashboard, instead of hand-writing a labelled issue on GitHub.
+
+capabilities:
+  added:
+    - "cap_9d41"
+  changed: []
+  deprecated: []
+  # `removed` is reserved for a capability the product genuinely no longer
+  # offers. A false removal is a user-visible claim that generated release notes
+  # and the repository timeline will publish, so a non-empty list here requires
+  # human review (sections 14.2.2, 27.3). Renames, merges and splits use the
+  # relation lists below instead — encoding a merge as removals would publish
+  # "features removed" about a product that lost nothing.
+  removed: []
+  renamed: []
+  merged: []
+  split: []
+
+journeys:
+  added:
+    - "jny_2f7c"
+  changed: []
+  removed: []
+  renamed: []
+  merged: []
+  split: []
+
+artifactImpact:
+  documentation:
+    - "docs.queue-work-item"
+  skills:
+    - "skill.queue-work-item"
+  screenshots:
+    - "screenshot.sessions-level"
+    - "screenshot.work-composer"
+    - "screenshot.session-detail"
+  videos:
+    - "video.queue-work-item"
+  slides:
+    - "deck.product-intro"
+
+migrations: []
+
+limitations:
+  - >-
+    Authoring a work item requires being the session's effective creator, a
+    listed Session Collaborator, or a deployment global administrator.
+  - "The session's trigger issue must still be open."
+  - "The selected label must be one of the session's applicable work labels."
+
+evidence:
+  - kind: "pull-request"
+    ref: "#558"
+  - kind: "source"
+    ref: "backend/src/routes/canvas/work_item.rs"
+  - kind: "test"
+    ref: "frontend/e2e/dashboard.spec.ts"
+  - kind: "journey"
+    ref: ".fkst/evolution/journeys/queue-work-item.spec.ts"
+
+verification: "passed"

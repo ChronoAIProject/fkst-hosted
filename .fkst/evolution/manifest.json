@@ -1,0 +1,259 @@
+{
+  "schemaVersion": 1,
+  "source": {
+    "repository": "ChronoAIProject/fkst-hosted",
+    "branch": "@default",
+    "observedHead": "706e980946749563d5434e45dec784a40d6ceb7f",
+    "previousCoveredHead": "706e980946749563d5434e45dec784a40d6ceb7f",
+    "historyRelation": "fast-forward",
+    "productRelevantFingerprint": "sha256:8e424c927f1c946e2ab1e501588e60ed4e7adb5c27cba8dbbaa8d427db181c95",
+    "coverageFingerprint": "sha256:331f7bb4e39e5a99392d2093e2a6b4c369e13d4c8b8468355cfa3b73389f6c5e",
+    "inputFingerprint": "sha256:7e5ebb93ffcf952912d890f823431fd853a69c464900c137acbaa3d2759416bf",
+    "lastFullRebuildFor": null
+  },
+  "artifactRepository": {
+    "repository": "ChronoAIProject/fkst-hosted",
+    "branch": "@default"
+  },
+  "generator": {
+    "manifestRef": "ChronoAIProject/fkst-hosted@706e980946749563d5434e45dec784a40d6ceb7f:tools/evolution/artifact-plan.yaml",
+    "packages": [
+      "ChronoAIProject/fkst-hosted@b0e8fd75ec143702c640c3a3ede47efb30befefc:tools/evolution"
+    ],
+    "generatorEpoch": 1,
+    "pinnedFingerprint": "sha256:5b6a9289c28d5d609a56b316f5badd6dd8f6055beb2f1439f5317b258f84917b",
+    "provenanceOnly": [
+      "engineVersion",
+      "model",
+      "toolchain",
+      "envFingerprint"
+    ],
+    "engineVersion": "fkst-evolution-tools/0.1.0",
+    "model": "anthropic/claude-opus-5",
+    "toolchain": {
+      "node": "v25.5.0",
+      "ffmpeg": "8.1.1",
+      "playwright": "1.60.0",
+      "slideRenderer": "chromium-pdf via playwright 1.60.0"
+    },
+    "envFingerprint": "sha256:0a763d2993ea8dadd223fe58f908059ca2f71d5b84a5deaa457c85d220cde5f6"
+  },
+  "outputFingerprint": "sha256:acce49ca3116d494807aad3dcc24c711c807a8d2a7c29775423242a346626c63",
+  "verification": {
+    "status": "passed",
+    "verifiedAt": "2026-08-06T11:00:00Z",
+    "checks": [
+      {
+        "id": "jny_2f7c",
+        "status": "passed",
+        "evidence": ".fkst/evolution/journeys/queue-work-item.spec.ts",
+        "checkRun": {
+          "repository": "ChronoAIProject/fkst-hosted",
+          "headSha": "706e980946749563d5434e45dec784a40d6ceb7f",
+          "id": null,
+          "name": "fkst-evolution/journey.jny_2f7c"
+        },
+        "provenance": "demo-producer role, executed in the generation environment; the controller transcribes the result and does not independently observe it."
+      }
+    ]
+  },
+  "artifacts": [
+    {
+      "id": "docs.queue-work-item",
+      "kind": "documentation",
+      "locale": "en",
+      "audience": "session-owner",
+      "capabilities": [
+        "cap_9d41"
+      ],
+      "journeys": [
+        "jny_2f7c"
+      ],
+      "sourceCommit": "706e980946749563d5434e45dec784a40d6ceb7f",
+      "inputFingerprint": "sha256:7e5ebb93ffcf952912d890f823431fd853a69c464900c137acbaa3d2759416bf",
+      "generatorPinnedFingerprint": "sha256:5b6a9289c28d5d609a56b316f5badd6dd8f6055beb2f1439f5317b258f84917b",
+      "repositoryPath": ".fkst/evolution/docs/queue-work-item.md",
+      "contentHash": "sha256:12d83ad653cf2f473c42e3ed29ab4b7321adaa1ba7782bfc5b2d0df2694b9c58",
+      "status": "current",
+      "required": true,
+      "verification": "passed",
+      "updatedAt": "2026-08-06T11:00:00Z"
+    },
+    {
+      "id": "skill.queue-work-item",
+      "kind": "skills",
+      "locale": "en",
+      "audience": "agent",
+      "capabilities": [
+        "cap_9d41"
+      ],
+      "journeys": [
+        "jny_2f7c"
+      ],
+      "sourceCommit": "706e980946749563d5434e45dec784a40d6ceb7f",
+      "inputFingerprint": "sha256:7e5ebb93ffcf952912d890f823431fd853a69c464900c137acbaa3d2759416bf",
+      "generatorPinnedFingerprint": "sha256:5b6a9289c28d5d609a56b316f5badd6dd8f6055beb2f1439f5317b258f84917b",
+      "repositoryPath": ".fkst/evolution/skills/queue-work-item/SKILL.md",
+      "contentHash": "sha256:75696fa01dd51e2d0786802a4a93cf4fe8a1d428b7051a05de95ad82106bc6e9",
+      "status": "current",
+      "required": true,
+      "verification": "passed",
+      "updatedAt": "2026-08-06T11:00:00Z"
+    },
+    {
+      "id": "journey.queue-work-item",
+      "kind": "journeys",
+      "locale": "en",
+      "audience": "session-owner",
+      "capabilities": [
+        "cap_9d41"
+      ],
+      "journeys": [
+        "jny_2f7c"
+      ],
+      "sourceCommit": "706e980946749563d5434e45dec784a40d6ceb7f",
+      "inputFingerprint": "sha256:7e5ebb93ffcf952912d890f823431fd853a69c464900c137acbaa3d2759416bf",
+      "generatorPinnedFingerprint": "sha256:5b6a9289c28d5d609a56b316f5badd6dd8f6055beb2f1439f5317b258f84917b",
+      "repositoryPath": ".fkst/evolution/journeys/queue-work-item.spec.ts",
+      "contentHash": "sha256:80b5359ced637345a4a5d8b647d9722c0acae5802cee67a0995d9b23ea01fa06",
+      "status": "current",
+      "required": true,
+      "verification": "passed",
+      "updatedAt": "2026-08-06T11:00:00Z"
+    },
+    {
+      "id": "screenshot.sessions-level",
+      "kind": "screenshots",
+      "locale": "en",
+      "audience": "session-owner",
+      "capabilities": [
+        "cap_9d41"
+      ],
+      "journeys": [
+        "jny_2f7c"
+      ],
+      "sourceCommit": "706e980946749563d5434e45dec784a40d6ceb7f",
+      "inputFingerprint": "sha256:7e5ebb93ffcf952912d890f823431fd853a69c464900c137acbaa3d2759416bf",
+      "generatorPinnedFingerprint": "sha256:5b6a9289c28d5d609a56b316f5badd6dd8f6055beb2f1439f5317b258f84917b",
+      "repositoryPath": ".fkst/evolution/screenshots/sessions-level.png",
+      "contentHash": "sha256:9cd6d0c8f99ab95ca452452c2ce0bcb0c5a7a35d2fb7b55c4f721d9c99d23bf7",
+      "status": "current",
+      "required": true,
+      "verification": "passed",
+      "updatedAt": "2026-08-06T11:00:00Z"
+    },
+    {
+      "id": "screenshot.work-composer",
+      "kind": "screenshots",
+      "locale": "en",
+      "audience": "session-owner",
+      "capabilities": [
+        "cap_9d41"
+      ],
+      "journeys": [
+        "jny_2f7c"
+      ],
+      "sourceCommit": "706e980946749563d5434e45dec784a40d6ceb7f",
+      "inputFingerprint": "sha256:7e5ebb93ffcf952912d890f823431fd853a69c464900c137acbaa3d2759416bf",
+      "generatorPinnedFingerprint": "sha256:5b6a9289c28d5d609a56b316f5badd6dd8f6055beb2f1439f5317b258f84917b",
+      "repositoryPath": ".fkst/evolution/screenshots/work-composer.png",
+      "contentHash": "sha256:5a99f7864a60330426d82a3d9e836b037f07511eb2e1a51a88b6bbd6fa1b218e",
+      "status": "current",
+      "required": true,
+      "verification": "passed",
+      "updatedAt": "2026-08-06T11:00:00Z"
+    },
+    {
+      "id": "screenshot.session-detail",
+      "kind": "screenshots",
+      "locale": "en",
+      "audience": "session-owner",
+      "capabilities": [
+        "cap_9d41"
+      ],
+      "journeys": [
+        "jny_2f7c"
+      ],
+      "sourceCommit": "706e980946749563d5434e45dec784a40d6ceb7f",
+      "inputFingerprint": "sha256:7e5ebb93ffcf952912d890f823431fd853a69c464900c137acbaa3d2759416bf",
+      "generatorPinnedFingerprint": "sha256:5b6a9289c28d5d609a56b316f5badd6dd8f6055beb2f1439f5317b258f84917b",
+      "repositoryPath": ".fkst/evolution/screenshots/session-detail.png",
+      "contentHash": "sha256:9d9146306b4502809d9907e1e8383ec8d12ae36648fd03d83c0684a86cd3cc39",
+      "status": "current",
+      "required": true,
+      "verification": "passed",
+      "updatedAt": "2026-08-06T11:00:00Z"
+    },
+    {
+      "id": "deck.product-intro",
+      "kind": "slides",
+      "locale": "en",
+      "audience": "customer-onboarding",
+      "capabilities": [
+        "cap_9d41"
+      ],
+      "journeys": [
+        "jny_2f7c"
+      ],
+      "sourceCommit": "706e980946749563d5434e45dec784a40d6ceb7f",
+      "inputFingerprint": "sha256:7e5ebb93ffcf952912d890f823431fd853a69c464900c137acbaa3d2759416bf",
+      "generatorPinnedFingerprint": "sha256:5b6a9289c28d5d609a56b316f5badd6dd8f6055beb2f1439f5317b258f84917b",
+      "repositoryPath": ".fkst/evolution/slides/product-intro.md",
+      "contentHash": "sha256:5fc39550b1787bb075300eba43e95808dbb5c65bd2e492ffcb8c35ddd4aea8ae",
+      "status": "current",
+      "required": true,
+      "verification": "passed",
+      "updatedAt": "2026-08-06T11:00:00Z"
+    },
+    {
+      "id": "deck.product-intro.pdf",
+      "kind": "slides",
+      "locale": "en",
+      "audience": "customer-onboarding",
+      "capabilities": [
+        "cap_9d41"
+      ],
+      "journeys": [
+        "jny_2f7c"
+      ],
+      "sourceCommit": "706e980946749563d5434e45dec784a40d6ceb7f",
+      "inputFingerprint": "sha256:7e5ebb93ffcf952912d890f823431fd853a69c464900c137acbaa3d2759416bf",
+      "generatorPinnedFingerprint": "sha256:5b6a9289c28d5d609a56b316f5badd6dd8f6055beb2f1439f5317b258f84917b",
+      "release": {
+        "repository": "ChronoAIProject/fkst-hosted",
+        "tag": "fkst-evolution/7e5ebb93ffcf9529",
+        "asset": "product-intro.sha256-23614e24df4af31e.pdf"
+      },
+      "contentHash": "sha256:23614e24df4af31e1675d7afbd33ae0d5b2f8e8968fbe9b379d2aabf3e4ccc51",
+      "status": "current",
+      "required": false,
+      "verification": "passed",
+      "updatedAt": "2026-08-06T11:00:00Z"
+    },
+    {
+      "id": "video.queue-work-item",
+      "kind": "video",
+      "locale": "en",
+      "audience": "customer-onboarding",
+      "capabilities": [
+        "cap_9d41"
+      ],
+      "journeys": [
+        "jny_2f7c"
+      ],
+      "sourceCommit": "706e980946749563d5434e45dec784a40d6ceb7f",
+      "inputFingerprint": "sha256:7e5ebb93ffcf952912d890f823431fd853a69c464900c137acbaa3d2759416bf",
+      "generatorPinnedFingerprint": "sha256:5b6a9289c28d5d609a56b316f5badd6dd8f6055beb2f1439f5317b258f84917b",
+      "release": {
+        "repository": "ChronoAIProject/fkst-hosted",
+        "tag": "fkst-evolution/7e5ebb93ffcf9529",
+        "asset": "queue-work-item.sha256-258e093f3cee68f2.mp4"
+      },
+      "contentHash": "sha256:258e093f3cee68f2c0f19f30c1a7108c41ed13d14a3f23a0b0b41ba174289c63",
+      "status": "current",
+      "required": true,
+      "verification": "passed",
+      "updatedAt": "2026-08-06T11:00:00Z"
+    }
+  ]
+}
