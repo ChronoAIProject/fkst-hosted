@@ -5,6 +5,7 @@ local defaults = {
   bot_login = "fkst-test-bot",
   managed_bot_logins = "fkst-test-bot,ElonSG",
   authorized_logins = "trusted-human",
+  session_creator = "",
 }
 
 local function run_env(run_opts)
@@ -27,6 +28,7 @@ function M.values(run_opts)
     bot_login = value_or_default(env, "FKST_GITHUB_BOT_LOGIN", defaults.bot_login),
     managed_bot_logins = value_or_default(env, "FKST_DEVLOOP_MANAGED_BOT_LOGINS", defaults.managed_bot_logins),
     authorized_logins = value_or_default(env, "FKST_GITHUB_AUTHORIZED_LOGINS", defaults.authorized_logins),
+    session_creator = value_or_default(env, "FKST_SESSION_CREATOR", defaults.session_creator),
   }
 end
 
@@ -81,6 +83,7 @@ function M.mock_env(t, run_opts, opts)
     mock_read(t, "FKST_GITHUB_BOT_LOGIN", values.bot_login)
     mock_read(t, "FKST_DEVLOOP_MANAGED_BOT_LOGINS", values.managed_bot_logins)
     mock_read(t, "FKST_GITHUB_AUTHORIZED_LOGINS", values.authorized_logins)
+    mock_read(t, "FKST_SESSION_CREATOR", values.session_creator)
   end
   return values
 end

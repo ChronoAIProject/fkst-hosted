@@ -10,6 +10,7 @@ local h = require("tests.devloop_helpers")
 local t = h.t
 local operator_commands = require("devloop.operator_commands")
 local github_author_policy = require("devloop.github_author_policy")
+local devloop_base = require("devloop.base")
 
 local BOT = "fkst-test-bot"
 
@@ -101,5 +102,14 @@ return {
     t.is_true(policy ~= nil)
     t.is_true(github_author_policy.is_authorized(policy, BOT))
     t.is_true(not github_author_policy.is_authorized(policy, "session-creator"))
+  end,
+
+  test_policy_environment_read_failure_is_exposed = function()
+    devloop_base.configure_trusted_bot_login(BOT)
+    t.mock_command('printf %s "$FKST_DEVLOOP_MANAGED_BOT_LOGINS"', {
+      stdout = "", stderr = "env read failed", exit_code = 1,
+    })
+    local ok = pcall(operator_commands.operator_author_policy_strict)
+    t.is_true(not ok)
   end,
 }
