@@ -17,7 +17,7 @@ use crate::github_app::api::{
 use crate::github_app::listing::{GithubListing, InstallationSummary, IssueSummary};
 use crate::github_app::{GithubAppError, GithubAppTokens};
 use crate::models::{GithubActor, RepoRef};
-use crate::reconcile::desired::KillReason;
+use crate::reconcile::desired::{KillReason, PodLiveness};
 use crate::reconcile::{
     new_active_repos, new_ensured_templates, reconcile_channel, reconcile_repo,
 };
@@ -549,6 +549,25 @@ impl ChaosHarness {
 
     pub fn fail_next_stop(&self) {
         self.fail_stops_remaining.store(1, Ordering::SeqCst);
+    }
+
+    pub fn clear_runtime_work_labels(&self, session_id: &str) {
+        self.runtimes
+            .lock()
+            .unwrap()
+            .get_mut(session_id)
+            .unwrap()
+            .work_labels
+            .clear();
+    }
+
+    pub fn set_runtime_liveness(&self, session_id: &str, liveness: PodLiveness) {
+        self.runtimes
+            .lock()
+            .unwrap()
+            .get_mut(session_id)
+            .unwrap()
+            .liveness = liveness;
     }
 
     pub fn runtime_ids(&self) -> Vec<String> {
