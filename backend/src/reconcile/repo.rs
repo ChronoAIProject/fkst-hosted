@@ -487,20 +487,20 @@ pub async fn reconcile_repo(
         .map_err(|e| AppError::Internal(anyhow::anyhow!("list substrate-session pods: {e}")))?;
 
     let desired_sessions: HashSet<&str> = regs.iter().map(|reg| reg.session_id.as_str()).collect();
-    let orphan_retirement_observed = live.iter().any(|pod| {
+    let orphan_barrier_observed = live.iter().any(|pod| {
         !desired_sessions.contains(pod.session_id.as_str())
             && matches!(
                 pod.liveness,
                 crate::reconcile::desired::PodLiveness::Starting
                     | crate::reconcile::desired::PodLiveness::Live
+                    | crate::reconcile::desired::PodLiveness::Terminal
             )
-            && !pod.work_labels.is_empty()
     });
 
     // On a clean observation, admission runs before pending so a replacement can
     // commit its trusted marker + retired removal before that work creates demand.
     // A pass that still sees an old orphan defers admission entirely.
-    if !orphan_retirement_observed {
+    if !orphan_barrier_observed {
         crate::reconcile::work_ack::ack_open_work_issues_with_bot(
             &ctx.github,
             ctx.listing.as_ref(),
@@ -562,20 +562,18 @@ pub async fn reconcile_repo(
         actions = actions.len(),
         "reconcile repo: planned"
     );
-    let retirement_planned = actions.iter().any(|action| {
-        matches!(
-            action,
-            crate::reconcile::desired::ReconcileAction::RetireSession { .. }
-        )
-    });
     let mut retirement_incomplete = false;
     for action in actions {
-        let allowed_during_retirement = matches!(
+        let allowed_during_orphan_barrier = matches!(
             &action,
             crate::reconcile::desired::ReconcileAction::RetireSession { .. }
                 | crate::reconcile::desired::ReconcileAction::CleanupTerminal { .. }
+                | crate::reconcile::desired::ReconcileAction::Kill {
+                    reason: crate::reconcile::desired::KillReason::TriggerClosed,
+                    ..
+                }
         );
-        if (retirement_planned || retirement_incomplete) && !allowed_during_retirement {
+        if (orphan_barrier_observed || retirement_incomplete) && !allowed_during_orphan_barrier {
             continue;
         }
         if !execute(action, repo, ctx).await {
@@ -586,7 +584,7 @@ pub async fn reconcile_repo(
             );
         }
     }
-    if retirement_incomplete || retirement_planned {
+    if retirement_incomplete || orphan_barrier_observed {
         return Ok(());
     }
 

@@ -121,7 +121,8 @@ pub(super) struct RuntimeRecord {
     repo: RepoRef,
     trigger_issue: i64,
     config_hash: String,
-    work_labels: Vec<String>,
+    pub(super) work_labels: Vec<String>,
+    pub(super) liveness: PodLiveness,
     created_at: DateTime<Utc>,
     last_pending_at: Option<DateTime<Utc>>,
     /// The runtime's stamped metadata, so the fixture exercises the REAL
@@ -196,6 +197,7 @@ impl SessionBackend for ChaosBackend {
                     trigger_issue: spec.trigger_issue_number,
                     config_hash: spec.config_hash.clone(),
                     work_labels: crate::k8s::work_label_wire::split_work_labels(&spec.work_label),
+                    liveness: PodLiveness::Live,
                     created_at: Utc::now(),
                     last_pending_at: None,
                     metadata: stamp_pairs(&K8S_IDENTITY_KEYS, &spec.identity())
@@ -246,7 +248,7 @@ impl SessionBackend for ChaosBackend {
             .map(|runtime| LivePod {
                 session_id: runtime.session_id.clone(),
                 trigger_issue: runtime.trigger_issue,
-                liveness: PodLiveness::Live,
+                liveness: runtime.liveness,
                 created_at: runtime.created_at,
                 last_pending_at: runtime.last_pending_at,
                 config_hash: Some(runtime.config_hash.clone()),

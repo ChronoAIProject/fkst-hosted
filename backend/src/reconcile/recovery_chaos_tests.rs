@@ -331,6 +331,71 @@ async fn failed_orphan_stop_keeps_replacement_absent_until_a_clean_pass() {
 }
 
 #[tokio::test]
+async fn label_less_live_orphan_blocks_replacement_through_a_failed_stop() {
+    for profile in BackendProfile::ALL {
+        let (_server, harness) = new_harness(profile, None).await;
+        seed_valid(&harness, ("alice", AUTHOR_ID));
+        let original_id = session_id(TRIGGER);
+        harness.full_resync().await;
+        harness.clear_runtime_work_labels(&original_id);
+
+        harness.ledger.set_state(TRIGGER, "closed");
+        let replacement_trigger = TRIGGER + 1;
+        let replacement_id = session_id(replacement_trigger);
+        harness.ledger.put(issue(
+            replacement_trigger,
+            trigger_body("replacement-session", WORK_LABEL),
+            &[TRIGGER_LABEL],
+            "alice",
+            AUTHOR_ID,
+        ));
+        harness.fail_next_stop();
+        harness.full_resync().await;
+
+        assert_eq!(harness.runtime_ids(), vec![original_id], "{profile:?}");
+        assert!(!harness.runtime_ids().contains(&replacement_id));
+
+        harness.full_resync().await;
+        assert!(harness.runtime_ids().is_empty(), "{profile:?}");
+
+        harness.full_resync().await;
+        assert_eq!(harness.runtime_ids(), vec![replacement_id], "{profile:?}");
+    }
+}
+
+#[tokio::test]
+async fn terminal_orphan_cleanup_blocks_replacement_until_the_next_pass() {
+    for profile in BackendProfile::ALL {
+        let (_server, harness) = new_harness(profile, None).await;
+        seed_valid(&harness, ("alice", AUTHOR_ID));
+        let original_id = session_id(TRIGGER);
+        harness.full_resync().await;
+        harness.set_runtime_liveness(
+            &original_id,
+            crate::reconcile::desired::PodLiveness::Terminal,
+        );
+
+        harness.ledger.set_state(TRIGGER, "closed");
+        let replacement_trigger = TRIGGER + 1;
+        let replacement_id = session_id(replacement_trigger);
+        harness.ledger.put(issue(
+            replacement_trigger,
+            trigger_body("replacement-session", WORK_LABEL),
+            &[TRIGGER_LABEL],
+            "alice",
+            AUTHOR_ID,
+        ));
+        harness.full_resync().await;
+
+        assert!(harness.runtime_ids().is_empty(), "{profile:?}");
+        assert!(!harness.runtime_ids().contains(&replacement_id));
+
+        harness.full_resync().await;
+        assert_eq!(harness.runtime_ids(), vec![replacement_id], "{profile:?}");
+    }
+}
+
+#[tokio::test]
 async fn invalid_trigger_feedback_is_durable_and_never_spawns() {
     for profile in BackendProfile::ALL {
         let (_server, mut harness) = new_harness(profile, None).await;

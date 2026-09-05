@@ -1,6 +1,6 @@
 import { useContent, useLang } from '@/i18n';
 import { formatIsoSgt } from '@/lib/format';
-import { decodeSessionStatus, type SessionPhase } from '@/lib/api/derive';
+import { decodeSessionStatus, isRetiredWorkItem, type SessionPhase } from '@/lib/api/derive';
 import type { SessionDetail } from '@/lib/api/types';
 import { staggerStyle } from '@/components/ui/motion';
 import { ScrollArea } from '@/components/ui/scroll-area';
@@ -86,6 +86,7 @@ export function buildTimeline(session: SessionDetail): TimelineNode[] {
   // 2. Each work item: a queued moment (creation) and, if closed, a finished
   //    moment (its close) — interleaved chronologically with everything else.
   for (const issue of session.work_issues) {
+    if (isRetiredWorkItem(issue)) continue;
     const ref = { number: issue.number, title: issue.title, html_url: issue.html_url };
     nodes.push({
       key: `work-${issue.number}-queued`,

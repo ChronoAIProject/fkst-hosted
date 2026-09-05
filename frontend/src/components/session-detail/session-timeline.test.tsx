@@ -86,6 +86,24 @@ describe('buildTimeline', () => {
     expect(nodes.at(-1)).toMatchObject({ kind: 'now', phase: 'active', tone: 'live' });
   });
 
+  it('excludes retired and partial-readmission work events', () => {
+    const nodes = buildTimeline(
+      session({
+        work_issues: [
+          issue({ number: 10, title: 'retired', labels: ['fkst-session-retired'] }),
+          issue({
+            number: 11,
+            title: 'partial readmission',
+            labels: ['fkst-session-retired', 'fkst-picked-up'],
+          }),
+          issue({ number: 12, title: 'active' }),
+        ],
+      })
+    );
+
+    expect(nodes.map((node) => node.key)).toEqual(['started', 'work-12-queued', 'now']);
+  });
+
   it('always begins with a started node and ends with the now node', () => {
     const nodes = buildTimeline(session({ work_issues: [], prs: [] }));
     expect(nodes.map((n) => n.kind)).toEqual(['started', 'now']);
@@ -139,6 +157,28 @@ describe('SessionTimeline', () => {
     ).toBeInTheDocument();
     // Timestamps are rendered in SGT (Asia/Singapore) with the zone suffix.
     expect(screen.getAllByText(/SGT/).length).toBeGreaterThan(0);
+  });
+
+  it('does not render retired or partial-readmission work references', () => {
+    render(
+      <SessionTimeline
+        session={session({
+          work_issues: [
+            issue({ number: 10, title: 'retired', labels: ['fkst-session-retired'] }),
+            issue({
+              number: 11,
+              title: 'partial readmission',
+              labels: ['fkst-session-retired', 'fkst-picked-up'],
+            }),
+            issue({ number: 12, title: 'active' }),
+          ],
+        })}
+      />
+    );
+
+    expect(screen.queryByRole('link', { name: /#10/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: /#11/ })).not.toBeInTheDocument();
+    expect(screen.getByRole('link', { name: /#12/ })).toBeInTheDocument();
   });
 
   it('is a pane the caller can size, and scrolls its own history', () => {
