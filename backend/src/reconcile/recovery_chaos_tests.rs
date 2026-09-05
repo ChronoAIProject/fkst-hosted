@@ -433,6 +433,66 @@ async fn terminating_orphan_blocks_replacement_until_runtime_disappears() {
 }
 
 #[tokio::test]
+async fn same_trigger_reopen_waits_for_the_prior_incarnation_to_disappear() {
+    for profile in BackendProfile::ALL {
+        for liveness in [
+            crate::reconcile::desired::PodLiveness::Starting,
+            crate::reconcile::desired::PodLiveness::Live,
+            crate::reconcile::desired::PodLiveness::Terminating,
+            crate::reconcile::desired::PodLiveness::Terminal,
+        ] {
+            let (_server, harness) = new_harness(profile, None).await;
+            seed_valid(&harness, ("alice", AUTHOR_ID));
+            let same_id = session_id(TRIGGER);
+            harness.full_resync().await;
+            assert_eq!(harness.ensures().len(), 1);
+
+            harness.ledger.set_state(TRIGGER, "closed");
+            harness.fail_next_stop();
+            harness.full_resync().await;
+            assert_eq!(harness.runtime_ids(), vec![same_id.clone()]);
+            assert!(harness
+                .ledger
+                .labels(WORK)
+                .contains(&SUBSTRATE_RETIRED_LABEL.to_string()));
+
+            harness.set_runtime_liveness(&same_id, liveness);
+            harness.ledger.set_state(TRIGGER, "open");
+            harness.full_resync().await;
+
+            assert_eq!(
+                harness.ensures().len(),
+                1,
+                "reopen must not reuse the prior {liveness:?} incarnation ({profile:?})"
+            );
+            assert!(harness
+                .ledger
+                .labels(WORK)
+                .contains(&SUBSTRATE_RETIRED_LABEL.to_string()));
+
+            if liveness == crate::reconcile::desired::PodLiveness::Terminating {
+                assert_eq!(harness.runtime_ids(), vec![same_id.clone()]);
+                harness.delete_runtime(&same_id);
+            } else {
+                assert!(harness.runtime_ids().is_empty(), "{profile:?} {liveness:?}");
+            }
+
+            harness.full_resync().await;
+            assert_eq!(harness.runtime_ids(), vec![same_id.clone()]);
+            assert_eq!(harness.ensures().len(), 2);
+            assert!(!harness
+                .ledger
+                .labels(WORK)
+                .contains(&SUBSTRATE_RETIRED_LABEL.to_string()));
+            assert!(harness
+                .ledger
+                .labels(WORK)
+                .contains(&WORK_PICKED_UP_LABEL.to_string()));
+        }
+    }
+}
+
+#[tokio::test]
 async fn invalid_trigger_feedback_is_durable_and_never_spawns() {
     for profile in BackendProfile::ALL {
         let (_server, mut harness) = new_harness(profile, None).await;

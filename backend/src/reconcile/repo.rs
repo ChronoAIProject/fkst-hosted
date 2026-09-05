@@ -486,9 +486,40 @@ pub async fn reconcile_repo(
         .await
         .map_err(|e| AppError::Internal(anyhow::anyhow!("list substrate-session pods: {e}")))?;
 
-    let desired_sessions: HashSet<&str> = regs.iter().map(|reg| reg.session_id.as_str()).collect();
+    let observed_sessions: HashSet<&str> = live.iter().map(|pod| pod.session_id.as_str()).collect();
+    let observed_regs: Vec<_> = regs
+        .iter()
+        .filter(|reg| observed_sessions.contains(reg.session_id.as_str()))
+        .cloned()
+        .collect();
+    let routed_retired_sessions = if observed_regs.is_empty() {
+        HashSet::new()
+    } else {
+        crate::reconcile::work_ack::sessions_with_routed_retired_work(
+            ctx.listing.as_ref(),
+            &token,
+            repo,
+            &observed_regs,
+            &effective_work_labels_by_session,
+        )
+        .await?
+    };
+    let pre_reopen_sessions: HashSet<&str> = live
+        .iter()
+        .filter(|pod| routed_retired_sessions.contains(&pod.session_id))
+        .map(|pod| pod.session_id.as_str())
+        .collect();
+    let planning_regs: Vec<_> = regs
+        .iter()
+        .filter(|reg| !pre_reopen_sessions.contains(reg.session_id.as_str()))
+        .cloned()
+        .collect();
+    let planning_sessions: HashSet<&str> = planning_regs
+        .iter()
+        .map(|reg| reg.session_id.as_str())
+        .collect();
     let orphan_barrier_observed = live.iter().any(|pod| {
-        !desired_sessions.contains(pod.session_id.as_str())
+        !planning_sessions.contains(pod.session_id.as_str())
             && matches!(
                 pod.liveness,
                 crate::reconcile::desired::PodLiveness::Starting
@@ -524,7 +555,7 @@ pub async fn reconcile_repo(
         cfg.github_bot_login.as_deref(),
     );
     let mut pending: HashMap<String, bool> = HashMap::new();
-    for reg in &regs {
+    for reg in &planning_regs {
         let labels = effective_work_labels_by_session
             .get(&reg.session_id)
             .cloned()
@@ -537,7 +568,7 @@ pub async fn reconcile_repo(
 
     // 5. Plan (pure), then execute each action best-effort.
     let mut actions = plan_repo(
-        &regs,
+        &planning_regs,
         &logical_work_labels_by_session,
         &invalid,
         &live,
