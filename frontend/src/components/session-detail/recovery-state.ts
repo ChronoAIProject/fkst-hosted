@@ -1,4 +1,4 @@
-import { decodeSessionStatus, isRetiredWorkItem } from '@/lib/api/derive';
+import { decodeSessionStatus } from '@/lib/api/derive';
 import type { SessionDetail, SessionRecoveryProjection } from '@/lib/api/types';
 
 // The two session-level rules the Status and Engine tabs both depend on. Pure
@@ -23,9 +23,7 @@ export function isRuntimeLive(session: SessionDetail): boolean {
  * disappearing.
  */
 export function fallbackRecovery(session: SessionDetail): SessionRecoveryProjection {
-  const openWork = session.work_issues.filter(
-    (issue) => issue.state === 'open' && !isRetiredWorkItem(issue)
-  ).length;
+  const openWork = session.work_issues.filter((issue) => issue.state === 'open').length;
   const status = decodeSessionStatus(session);
   const runtime = session.liveness ?? 'unknown';
 

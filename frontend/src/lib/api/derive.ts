@@ -269,9 +269,7 @@ export function decodeSessionStatus(session: SessionDetail): DecodedSessionStatu
   const announced = has(SESSION_LABELS.active);
   // Open work items are what keep a session's pod alive; with none pending the
   // reconciler idles/reaps the pod to save resources (the manual's IDLE state).
-  const hasOpenWork = session.work_issues.some(
-    (issue) => issue.state === 'open' && !isRetiredWorkItem(issue)
-  );
+  const hasOpenWork = session.work_issues.some((issue) => issue.state === 'open');
 
   let phase: SessionPhase;
   let health: SessionHealth;
