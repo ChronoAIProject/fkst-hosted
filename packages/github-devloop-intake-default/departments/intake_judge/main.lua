@@ -118,7 +118,7 @@ local function read_current_for_candidate(repo, issue_number, candidate, event_t
   end
 
   local reintake_command = operator_commands.operator_command_fact(current.comments, "reintake",
-    operator_commands.operator_author_policy(exec_sync))
+    operator_commands.operator_author_policy_strict)
   local has_pending_reintake = reintake_command ~= nil and not operator_commands.has_operator_command_response(current.comments, reintake_command)
   if has_pending_reintake and not m_facts.has_intake_history_marker(current.comments, candidate.proposal_id) then
     local refusal = operator_commands.build_operator_issue_command_refusal_request(repo,

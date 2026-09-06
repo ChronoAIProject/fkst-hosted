@@ -62,20 +62,25 @@ local function parse_command(body)
   return nil
 end
 
+local function read_env_strict(name, exec)
+  local run = exec or exec_sync
+  if type(run) ~= "function" then
+    error("github-devloop: operator-policy-env-reader-unavailable")
+  end
+  local out = run(devloop_base.read_env_command(name))
+  if type(out) ~= "table" or out.exit_code ~= 0 then
+    error("github-devloop: operator-policy-env-read-failed: " .. tostring(name))
+  end
+  return strings.trim(out.stdout or "")
+end
+
+local function append_csv_logins(logins, raw)
+  for login in tostring(raw or ""):gmatch("[^,%s]+") do
+    table.insert(logins, login)
+  end
+end
+
 --- Who may issue an operator command on this session's issues.
---
--- Historically this was the trusted bot alone, which made `fkst: reintake` --
--- the documented re-entry edge out of `blocked` -- usable only by the refine
--- department writing it into its own amendment. A human operator's command was
--- dropped in silence, so an issue whose refinement budget was spent could never
--- be recovered (prod: #5714 had to be closed and recreated).
---
--- The tier here is the one that already governs work authorship: the trusted
--- bot(s), the session's authorized logins, and the session creator. Global
--- admins are deliberately absent -- the control plane does not publish them to
--- the pod -- so an admin who is not also a contributor still cannot command a
--- session. Returning nil keeps the bot-only behaviour for callers that pass no
--- policy.
 function C.operator_author_policy(exec)
   local extra = {}
   local creator = devloop_config.session_creator(exec)
@@ -89,15 +94,33 @@ function C.operator_author_policy(exec)
   return policy
 end
 
---- Is this comment's author allowed to command the loop?
---
--- Canonicalization matters: the whitelist stores folded logins, so a raw
--- `trust_set[author]` lookup would reject `Chronoai-Shining` and every
--- `<slug>[bot]` spelling. is_authorized folds first.
-local function is_trusted_operator(comment, policy)
-  if policy == nil then
-    return parsers_misc._is_trusted_comment(comment)
+--- Strict issue-recovery policy: a failed environment read must not silently
+--- narrow authorization to the bot-only fallback.
+function C.operator_author_policy_strict(exec)
+  local bot_login = devloop_base.configured_trusted_bot_login()
+  if bot_login == nil or bot_login == "" then
+    bot_login = read_env_strict("FKST_GITHUB_BOT_LOGIN", exec)
   end
+  if bot_login == "" then
+    error("github-devloop: operator-policy-bot-login-required")
+  end
+  local logins = { bot_login }
+  append_csv_logins(logins, read_env_strict("FKST_DEVLOOP_MANAGED_BOT_LOGINS", exec))
+  append_csv_logins(logins, read_env_strict("FKST_GITHUB_AUTHORIZED_LOGINS", exec))
+  local creator = read_env_strict("FKST_SESSION_CREATOR", exec)
+  if creator ~= "" then table.insert(logins, creator) end
+  return github_author_policy.from_logins(logins)
+end
+
+--- Is this comment's author allowed to command the loop?
+local function is_trusted_operator(comment, policy)
+  if parsers_misc._is_trusted_comment(comment) then
+    return true
+  end
+  if policy == nil then
+    return false
+  end
+  if type(policy) == "function" then policy = policy() end
   return github_author_policy.is_authorized(policy, parsers_misc._comment_author_login(comment))
 end
 

@@ -240,7 +240,7 @@ local function maybe_canonicalize_implementing_merged_delegated_pr(issue, propos
 end
 
 local function maybe_apply_issue_rereview_command(issue, proposal_id, current, state, event_ts)
-  local command = operator_commands.operator_command_fact(current.comments, "rereview")
+  local command = operator_commands.operator_command_fact(current.comments, "rereview", operator_commands.operator_author_policy_strict)
   if command == nil then
     return false
   end
@@ -357,7 +357,7 @@ local function source_ref_matches(left, right)
 end
 
 local function maybe_apply_issue_reready_command(issue, proposal_id, current, state, link)
-  local command = operator_commands.operator_command_fact(current.comments, "reready")
+  local command = operator_commands.operator_command_fact(current.comments, "reready", operator_commands.operator_author_policy_strict)
   if command == nil then
     return false
   end
@@ -418,7 +418,7 @@ local function has_unmet_blocker(gate, blocker_number)
 end
 
 local function maybe_apply_issue_dependency_waiver_command(issue, proposal_id, current, state)
-  local command = operator_commands.operator_command_fact(current.comments, "dependency-waiver")
+  local command = operator_commands.operator_command_fact(current.comments, "dependency-waiver", operator_commands.operator_author_policy_strict)
   if command == nil then
     return false
   end
@@ -491,7 +491,7 @@ local function maybe_apply_issue_dependency_waiver_command(issue, proposal_id, c
 end
 
 local function maybe_apply_issue_reimplement_command(issue, proposal_id, current, state, snapshot)
-  local command = operator_commands.operator_command_fact(current.comments, "reimplement")
+  local command = operator_commands.operator_command_fact(current.comments, "reimplement", operator_commands.operator_author_policy_strict)
   if command == nil then
     return false
   end

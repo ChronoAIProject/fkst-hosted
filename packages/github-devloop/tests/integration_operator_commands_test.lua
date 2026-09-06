@@ -50,7 +50,7 @@ local function trusted_issue_command(command, id)
   return {
     id = id or ("IC_" .. tostring(command) .. "_issue_1"),
     body = "fkst: " .. tostring(command),
-    author_login = "fkst-test-bot",
+    author_login = "trusted-human",
     created_at = "2026-06-04T03:00:00Z",
   }
 end
@@ -322,6 +322,21 @@ return {
     local comment_raise = find_raise(result.raises, "github-proxy.github_issue_comment_request")
     t.is_true(comment_raise.payload.body:find("operator command refused", 1, true) ~= nil)
     t.eq(find_raise(result.raises, "devloop_ready"), nil)
+  end,
+
+  test_issue_dependency_waiver_from_authorized_human_reaches_state_validation = function()
+    local event = issue()
+    local command = trusted_issue_command("dependency-waiver 60", "IC_issue_dependency_waiver")
+    mock_issue_state({ "fkst-dev:enabled", "fkst-dev:thinking" }, "OPEN", {
+      core.state_marker(base_ids.proposal_id(event.repo, event.number), "thinking", payloads_builders.build_proposal(event).dedup_key),
+      command,
+    })
+
+    local result = run_observe(event, opts("operator-issue-dependency-waiver-human"))
+    t.eq(result.exit_code, 0)
+    local response = find_issue_comment_raise(result.raises, "dependency-waiver requires dependency_wait state")
+    t.is_true(response ~= nil)
+    t.is_true(response.payload.body:find('outcome="refused"', 1, true) ~= nil)
   end,
 
   test_issue_reimplement_command_reenters_impl_failed = function()

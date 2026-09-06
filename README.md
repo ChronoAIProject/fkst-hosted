@@ -172,6 +172,13 @@ Composed packages (`kind = "package.composed"`):
 - `integration-coverage-producer`: scans integration-edge coverage gaps and files bounded issue
   requests for uncovered edges.
 
+### Devloop operator commands
+
+Issue recovery commands accept the configured trusted bot, `FKST_GITHUB_AUTHORIZED_LOGINS`, and
+`FKST_SESSION_CREATOR`. This includes `fkst: rereview`, `fkst: reready`, `fkst: reintake`,
+`fkst: reimplement`, and `fkst: dependency-waiver <issue>`. Other commenters cannot trigger
+lifecycle effects. Callers that omit the explicit issue-recovery policy remain bot-only.
+
 ## Architecture Overview
 
 The package contract has three levels:
