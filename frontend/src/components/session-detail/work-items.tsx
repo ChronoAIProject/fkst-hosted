@@ -2,7 +2,7 @@ import { useContent } from '@/i18n';
 import { Chip } from '@/components/ui/chip';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import type { IssueDetail } from '@/lib/api/types';
-import { decodeWorkItemStatus, isRetiredWorkItem, type WorkItemTone } from '@/lib/api/derive';
+import { decodeWorkItemStatus, type WorkItemTone } from '@/lib/api/derive';
 import { Note } from './parts';
 import { StatusCard } from './status-charts';
 import { WORK_TONE } from './tones';
@@ -64,7 +64,6 @@ export function WorkItemsPane({
   className?: string;
 }) {
   const t = useContent().dashboard.detail;
-  const actionableIssues = issues.filter((issue) => !isRetiredWorkItem(issue));
   return (
     <StatusCard
       aria-label={t.workItems}
@@ -72,18 +71,16 @@ export function WorkItemsPane({
       label={
         <>
           {t.workItems}
-          {actionableIssues.length > 0 && (
-            <span className="ml-2 lowercase">· {actionableIssues.length}</span>
-          )}
+          {issues.length > 0 && <span className="ml-2 lowercase">· {issues.length}</span>}
         </>
       }
     >
-      {actionableIssues.length === 0 ? (
+      {issues.length === 0 ? (
         <Note>{t.noWorkItems}</Note>
       ) : (
         <ScrollArea className="pr-1 max-h-[18rem] md:max-h-none">
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-1 xl:grid-cols-2 gap-2">
-            {actionableIssues.map((issue) => (
+            {issues.map((issue) => (
               <WorkItemRow key={issue.number} issue={issue} />
             ))}
           </div>

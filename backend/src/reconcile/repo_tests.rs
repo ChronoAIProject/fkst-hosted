@@ -370,11 +370,14 @@ async fn definitive_unauthorized_announced_trigger_orphans_and_retires_live_sess
     let actions = plan_runtime(&classified, &live, &announced);
     assert!(actions.iter().any(|action| matches!(
         action,
-        ReconcileAction::RetireSession {
-            session_id,
-            work_labels,
+        ReconcileAction::Kill {
+            reason: KillReason::TriggerClosed,
             ..
-        } if session_id == &derive_session_id(42, "acme", "site", 7)
-            && work_labels == &["fkst-run".to_string()]
+        }
+    )));
+    assert!(actions.iter().any(|action| matches!(
+        action,
+        ReconcileAction::RetireWorkIssues { work_labels }
+            if work_labels == &["fkst-run".to_string()]
     )));
 }

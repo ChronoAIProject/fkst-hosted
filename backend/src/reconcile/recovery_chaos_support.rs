@@ -195,9 +195,9 @@ impl GithubLedger {
     }
 }
 
-/// Durable comments survive controller reconstruction. The work-readmission path
-/// consumes their trusted session marker; schedule records remain absent in these
-/// lifecycle-only scenarios.
+/// The chaos fixtures drive session lifecycle, not schedules, so the ledger has no
+/// comment history to serve. Answering empty keeps the schedule pass a no-op there
+/// instead of adding a second fake for a surface these scenarios never touch.
 #[async_trait]
 impl crate::github_app::comments::IssueCommentReader for GithubLedger {
     async fn list_recent_issue_comments(
@@ -205,18 +205,10 @@ impl crate::github_app::comments::IssueCommentReader for GithubLedger {
         _token: &SecretString,
         _owner: &str,
         _repo: &str,
-        number: u64,
+        _number: u64,
         _max_pages: u32,
     ) -> Result<Vec<crate::github_app::comments::IssueComment>, GithubAppError> {
-        Ok(self
-            .comments(number as i64)
-            .into_iter()
-            .map(|body| crate::github_app::comments::IssueComment {
-                body,
-                user_login: "fkst-test[bot]".to_string(),
-                created_at: k8s_openapi::chrono::DateTime::UNIX_EPOCH,
-            })
-            .collect())
+        Ok(Vec::new())
     }
 }
 
@@ -473,7 +465,6 @@ impl ChaosHarness {
         )
         .expect("fixture config");
         config.github_api_base_url = github_api_base.to_string();
-        config.reconcile.github_bot_login = Some("fkst-test[bot]".to_string());
         let ledger = Arc::new(GithubLedger::new());
         let runtimes = Arc::new(Mutex::new(HashMap::new()));
         let events = Arc::new(Mutex::new(BackendEvents::default()));

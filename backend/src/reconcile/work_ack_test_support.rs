@@ -26,7 +26,7 @@ pub(super) struct RecordingApi {
     pub(super) labels_removed: Mutex<Vec<Call>>,
     pub(super) events: Mutex<Vec<&'static str>>,
     fail_comment: bool,
-    fail_labels_remaining: AtomicUsize,
+    fail_label: bool,
 }
 
 impl RecordingApi {
@@ -39,7 +39,7 @@ impl RecordingApi {
 
     pub(super) fn with_label_failure() -> Self {
         Self {
-            fail_labels_remaining: AtomicUsize::new(1),
+            fail_label: true,
             ..Self::default()
         }
     }
@@ -97,13 +97,7 @@ impl GithubApi for RecordingApi {
         number: u64,
         labels: &[String],
     ) -> Result<(), GithubAppError> {
-        if self
-            .fail_labels_remaining
-            .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |remaining| {
-                remaining.checked_sub(1)
-            })
-            .is_ok()
-        {
+        if self.fail_label {
             return Err(GithubAppError::Http("boom".to_string()));
         }
         self.events.lock().unwrap().push("label");
@@ -132,31 +126,6 @@ impl GithubApi for RecordingApi {
             label.to_string(),
         ));
         Ok(())
-    }
-}
-
-#[async_trait]
-impl crate::github_app::comments::IssueCommentReader for RecordingApi {
-    async fn list_recent_issue_comments(
-        &self,
-        _token: &SecretString,
-        _owner: &str,
-        _repo: &str,
-        number: u64,
-        _max_pages: u32,
-    ) -> Result<Vec<crate::github_app::comments::IssueComment>, GithubAppError> {
-        Ok(self
-            .comments
-            .lock()
-            .unwrap()
-            .iter()
-            .filter(|call| call.2 == number as i64)
-            .map(|call| crate::github_app::comments::IssueComment {
-                body: call.3.clone(),
-                user_login: "fkst-test[bot]".to_string(),
-                created_at: k8s_openapi::chrono::DateTime::UNIX_EPOCH,
-            })
-            .collect())
     }
 }
 
