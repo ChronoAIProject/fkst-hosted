@@ -44,6 +44,27 @@ pub async fn auto_merge_bot_pull_requests(
     };
 
     for pr in pulls.iter().filter(|p| p.author_login == bot_login) {
+        // Evolution's sync pull requests are EXCLUDED from this hook. Their merge
+        // is safety-gated — path-scoped to `.fkst/evolution/`, pinned to the
+        // current source head, and gated on an Evolution-owned required check —
+        // and this hook is none of those: it merges any mergeable bot PR once ANY
+        // session on the repository opted in. Enrolling Evolution on a repository
+        // that already had an auto-merge session would otherwise hand the artifact
+        // PRs to this path, bypassing every gate that makes autonomous artifact
+        // merging safe.
+        if crate::evolution::lane::is_sync_branch(
+            &pr.head_ref,
+            pr.head_repo_full_name.as_deref(),
+            owner_repo,
+        ) {
+            tracing::debug!(
+                owner_repo = %owner_repo,
+                pr = pr.number,
+                head_ref = %pr.head_ref,
+                "auto-merge: skipping Evolution sync PR (merged by its own safety-gated path)"
+            );
+            continue;
+        }
         match github.pull_request_mergeable(owner_repo, pr.number).await {
             Ok(Some(true)) => {
                 let title = format!("Merge pull request #{} (fkst auto-merge)", pr.number);

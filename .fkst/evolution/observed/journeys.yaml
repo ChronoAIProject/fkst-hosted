@@ -1,0 +1,50 @@
+# Observed product journeys (spec section 14.3).
+#
+# EVOLUTION-MAINTAINED. Journey metadata links product meaning to executable
+# verification; the executable itself lives under `.fkst/evolution/journeys/`.
+#
+# A journey is both product EVIDENCE and CAPTURE SOURCE (section 23.5): the same
+# passing run that verifies the capability produces the screenshots and the video
+# frames, which is what stops a demo from drifting away from the behaviour it
+# claims to show.
+
+schemaVersion: 1
+
+journeys:
+  - id: "jny_2f7c"
+    title: "Queue a work item onto a running session"
+    audience: "session-owner"
+    capabilities:
+      - "cap_9d41"
+    executable:
+      framework: "playwright"
+      ref: ".fkst/evolution/journeys/queue-work-item.spec.ts"
+      # Section 23.5: capture must not depend on timing, locale, or viewport
+      # accidents. These are pinned rather than defaulted.
+      viewport: { width: 1440, height: 900 }
+      deviceScaleFactor: 1
+      locale: "en"
+      theme: "dark"
+    prerequisites:
+      # Section 25.7: production data is prohibited even when the owner has
+      # access to it. Every response in this journey is served by the E2E route
+      # fixtures, which mirror the real wire shapes while naming fictional
+      # accounts.
+      - "Synthetic API fixtures from frontend/e2e/fixtures.ts (no live backend)"
+      - "A signed-in viewer seeded into localStorage by the same fixtures"
+    captures:
+      - id: "sessions-level"
+        kind: "screenshot"
+        description: "A repository's sessions, before any work is queued"
+      - id: "work-composer"
+        kind: "screenshot"
+        description: "The work composer with the session's effective label set"
+      - id: "session-detail"
+        kind: "screenshot"
+        description: "The session detail drawer on its Status tab"
+      - id: "queue-work-item"
+        kind: "video"
+        description: "The full queue-work journey, end to end"
+    evidence:
+      lastVerifiedSource: "98cccb5af755d4cdf71d7253dd5e9c2c934fb3f0"
+      result: "passed"

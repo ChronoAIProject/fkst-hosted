@@ -1,0 +1,72 @@
+# Protected facts, terminology, and artifact rules (spec section 14.5).
+#
+# OWNER-CONTROLLED. Evolution reads this file and never writes it.
+#
+# A protected fact is one that cannot be reliably inferred from source. An
+# observed contradiction with any statement here MUST block publication of the
+# affected artifact and produce a clear review request — it is never silently
+# resolved in favour of the inference.
+
+schemaVersion: 1
+
+protectedFacts:
+  - id: "github-is-the-only-durable-store"
+    statement: >-
+      GitHub is the only durable system of record. The control plane keeps no
+      database; a complete loss of its process-local state does not lose work.
+    evidence: "CLAUDE.md"
+    owner: "product"
+
+  - id: "work-item-authority"
+    statement: >-
+      Only a session's effective creator, a login frozen under that session's
+      Session Collaborators, and deployment global administrators may author work
+      for it. Repository admin or maintain permission alone is not work
+      authority.
+    evidence: "backend/src/routes/canvas/work_item.rs"
+    owner: "security"
+
+  - id: "issues-are-the-only-control-surface"
+    statement: >-
+      Sessions are started, driven, and stopped through GitHub issues. The
+      dashboard's write actions are conveniences over that protocol, not a second
+      control plane.
+    evidence: "skills/fkst-control-plane-manual/SKILL.md"
+    owner: "product"
+
+  - id: "no-outcome-guarantee"
+    statement: >-
+      A session produces candidate pull requests for human review. The product
+      does not guarantee correct, complete, or mergeable output.
+    evidence: ".fkst/evolution/intent/product.md"
+    owner: "product"
+
+  - id: "engine-is-out-of-scope"
+    statement: >-
+      fkst-hosted contains no kernel-engine code and never changes engine
+      internals; that work lives upstream in fkst-substrate.
+    evidence: "CLAUDE.md"
+    owner: "product"
+
+terminology:
+  forbidden:
+    - "job"
+    - "agent instance"
+    - "ticket"
+  preferred:
+    "job": "session"
+    "run": "session"
+    "agent instance": "session"
+    "ticket": "work item"
+    "task": "work item"
+
+artifactRules:
+  # Section 27.3: claims marked regulated, legal, financial, or
+  # security-sensitive always require human review.
+  - match: ".fkst/evolution/slides/investor/**"
+    requiresHumanReview: true
+  - match: ".fkst/evolution/slides/internal/**"
+    requiresHumanReview: true
+  # Security-facing documentation makes claims a reader may rely on operationally.
+  - match: ".fkst/evolution/docs/security/**"
+    requiresHumanReview: true

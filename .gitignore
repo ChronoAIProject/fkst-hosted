@@ -27,3 +27,8 @@ frontend/k8s_prod/
 # /auto engine working state
 .auto/
 .gstack/
+
+# FKST Evolution build output: journey recordings, caption tracks, and the
+# rendered PDF/MP4 that section 24.1 stores as GitHub Release assets rather than
+# in Git history. Regenerate with `npm run evolution:journeys` + render-media.
+tools/evolution/out/

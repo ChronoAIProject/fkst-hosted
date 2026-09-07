@@ -35,6 +35,8 @@ pub mod env_config;
 pub mod environment_profile;
 pub(crate) mod environment_validation;
 pub mod error;
+/// FKST Evolution: continuous product-artifact synchronisation.
+pub mod evolution;
 pub mod github_app;
 // GitHub-token identity verification + the `GithubUser` axum extractor (PR4a):
 // trades `Authorization: Bearer <github token>` for the verified `{login, id}`
