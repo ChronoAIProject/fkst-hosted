@@ -279,18 +279,7 @@ impl crate::github_app::comments::IssueCommentReader for NoComments {
     }
 }
 
-#[derive(Default)]
-pub(super) struct FakeListing {
-    fail_issue_list: bool,
-}
-
-impl FakeListing {
-    pub(super) fn failing_issue_list() -> Self {
-        Self {
-            fail_issue_list: true,
-        }
-    }
-}
+pub(super) struct FakeListing;
 
 #[async_trait]
 impl GithubListing for FakeListing {
@@ -301,11 +290,7 @@ impl GithubListing for FakeListing {
         _repo: &str,
         _label: &str,
     ) -> Result<Vec<IssueSummary>, GithubAppError> {
-        if self.fail_issue_list {
-            Err(GithubAppError::RateLimited(30))
-        } else {
-            Ok(Vec::new())
-        }
+        Ok(Vec::new())
     }
 
     async fn count_open_issues_with_label(
@@ -358,7 +343,7 @@ pub(crate) fn test_ctx_with_github(
         backend,
         env_store: Arc::new(EnvStore::fake()),
         github,
-        listing: Arc::new(FakeListing::default()),
+        listing: Arc::new(FakeListing),
         comments: Arc::new(NoComments),
         http: reqwest::Client::new(),
         config: Config::default(),

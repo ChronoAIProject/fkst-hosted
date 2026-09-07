@@ -14,7 +14,6 @@ use crate::models::RepoRef;
 use crate::reconcile::desired::SessionRegistration;
 use crate::reconcile::routing::{route_work_issue, WorkRouting};
 use crate::reconcile::work_authz::is_work_author_allowed_with_bot;
-use crate::reconcile::SUBSTRATE_RETIRED_LABEL;
 
 #[async_trait]
 pub trait PendingWork: Send + Sync {
@@ -95,11 +94,7 @@ impl PendingWork for LabelCountPending<'_> {
                 )
                 .await?;
             if issues.iter().map(|issue| issue.metadata()).any(|meta| {
-                !meta
-                    .labels
-                    .iter()
-                    .any(|label| label == SUBSTRATE_RETIRED_LABEL)
-                    && route_work_issue(&meta, &reg.creator_login) == WorkRouting::Routed
+                route_work_issue(&meta, &reg.creator_login) == WorkRouting::Routed
                     && is_work_author_allowed_with_bot(
                         reg,
                         global_admins,

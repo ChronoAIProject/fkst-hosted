@@ -1,7 +1,6 @@
 //! Durable fakes for the composed recovery-chaos tests.
 
 use std::collections::{BTreeMap, HashMap, HashSet};
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime};
 
@@ -17,7 +16,7 @@ use crate::github_app::api::{
 use crate::github_app::listing::{GithubListing, InstallationSummary, IssueSummary};
 use crate::github_app::{GithubAppError, GithubAppTokens};
 use crate::models::{GithubActor, RepoRef};
-use crate::reconcile::desired::{KillReason, PodLiveness};
+use crate::reconcile::desired::KillReason;
 use crate::reconcile::{
     new_active_repos, new_ensured_templates, reconcile_channel, reconcile_repo,
 };
@@ -196,9 +195,9 @@ impl GithubLedger {
     }
 }
 
-/// Durable comments survive controller reconstruction. The work-readmission path
-/// consumes their trusted session marker; schedule records remain absent in these
-/// lifecycle-only scenarios.
+/// The chaos fixtures drive session lifecycle, not schedules, so the ledger has no
+/// comment history to serve. Answering empty keeps the schedule pass a no-op there
+/// instead of adding a second fake for a surface these scenarios never touch.
 #[async_trait]
 impl crate::github_app::comments::IssueCommentReader for GithubLedger {
     async fn list_recent_issue_comments(
@@ -206,18 +205,10 @@ impl crate::github_app::comments::IssueCommentReader for GithubLedger {
         _token: &SecretString,
         _owner: &str,
         _repo: &str,
-        number: u64,
+        _number: u64,
         _max_pages: u32,
     ) -> Result<Vec<crate::github_app::comments::IssueComment>, GithubAppError> {
-        Ok(self
-            .comments(number as i64)
-            .into_iter()
-            .map(|body| crate::github_app::comments::IssueComment {
-                body,
-                user_login: "fkst-test[bot]".to_string(),
-                created_at: k8s_openapi::chrono::DateTime::UNIX_EPOCH,
-            })
-            .collect())
+        Ok(Vec::new())
     }
 }
 
@@ -447,7 +438,6 @@ pub(super) struct ChaosHarness {
     profile: BackendProfile,
     runtimes: Arc<Mutex<HashMap<String, RuntimeRecord>>>,
     events: Arc<Mutex<BackendEvents>>,
-    fail_stops_remaining: Arc<AtomicUsize>,
     config: Config,
     ctx: crate::reconcile::ReconcileCtx,
 }
@@ -475,16 +465,13 @@ impl ChaosHarness {
         )
         .expect("fixture config");
         config.github_api_base_url = github_api_base.to_string();
-        config.reconcile.github_bot_login = Some("fkst-test[bot]".to_string());
         let ledger = Arc::new(GithubLedger::new());
         let runtimes = Arc::new(Mutex::new(HashMap::new()));
         let events = Arc::new(Mutex::new(BackendEvents::default()));
-        let fail_stops_remaining = Arc::new(AtomicUsize::new(0));
         let ctx = Self::controller_ctx(
             profile,
             runtimes.clone(),
             events.clone(),
-            fail_stops_remaining.clone(),
             ledger.clone(),
             config.clone(),
         );
@@ -493,7 +480,6 @@ impl ChaosHarness {
             profile,
             runtimes,
             events,
-            fail_stops_remaining,
             config,
             ctx,
         }
@@ -503,7 +489,6 @@ impl ChaosHarness {
         profile: BackendProfile,
         runtimes: Arc<Mutex<HashMap<String, RuntimeRecord>>>,
         events: Arc<Mutex<BackendEvents>>,
-        fail_stops_remaining: Arc<AtomicUsize>,
         ledger: Arc<GithubLedger>,
         config: Config,
     ) -> crate::reconcile::ReconcileCtx {
@@ -511,7 +496,6 @@ impl ChaosHarness {
             profile,
             runtimes,
             events,
-            fail_stops_remaining,
             credential_cache: Mutex::new(HashMap::new()),
         });
         let github = GithubAppTokens::with_api(&test_app_config(), ledger.clone()).expect("tokens");
@@ -537,7 +521,6 @@ impl ChaosHarness {
             self.profile,
             self.runtimes.clone(),
             self.events.clone(),
-            self.fail_stops_remaining.clone(),
             self.ledger.clone(),
             self.config.clone(),
         );
@@ -545,29 +528,6 @@ impl ChaosHarness {
 
     pub fn delete_runtime(&self, session_id: &str) {
         self.runtimes.lock().unwrap().remove(session_id);
-    }
-
-    pub fn fail_next_stop(&self) {
-        self.fail_stops_remaining.store(1, Ordering::SeqCst);
-    }
-
-    pub fn clear_runtime_work_labels(&self, session_id: &str) {
-        self.runtimes
-            .lock()
-            .unwrap()
-            .get_mut(session_id)
-            .unwrap()
-            .work_labels
-            .clear();
-    }
-
-    pub fn set_runtime_liveness(&self, session_id: &str, liveness: PodLiveness) {
-        self.runtimes
-            .lock()
-            .unwrap()
-            .get_mut(session_id)
-            .unwrap()
-            .liveness = liveness;
     }
 
     pub fn runtime_ids(&self) -> Vec<String> {

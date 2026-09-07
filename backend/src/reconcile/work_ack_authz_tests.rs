@@ -5,7 +5,6 @@ use super::{
     ack_open_work_issues, ack_open_work_issues_with_bot, work_unauthorized_comment,
     WORK_PICKED_UP_LABEL, WORK_UNAUTHORIZED_LABEL,
 };
-use crate::reconcile::SUBSTRATE_RETIRED_LABEL;
 
 #[test]
 fn unauthorized_renderer_names_creator_collaborator_and_admin_tiers() {
@@ -25,7 +24,6 @@ async fn routed_unauthorized_author_is_rejected_label_first() {
     ack_open_work_issues(
         &tokens(api.clone()),
         &listing,
-        api.as_ref(),
         &token(),
         &repo(),
         &[registration("demo", "fkst-run")],
@@ -46,46 +44,6 @@ async fn routed_unauthorized_author_is_rejected_label_first() {
 }
 
 #[tokio::test]
-async fn retired_issue_is_not_readmitted_before_authorization_succeeds() {
-    let api = Arc::new(RecordingApi::default());
-    let listing = FakeListing::ok(vec![issue_by(
-        5,
-        &["fkst-run", SUBSTRATE_RETIRED_LABEL],
-        99,
-        "mallory",
-        &["alice"],
-    )]);
-    ack_open_work_issues(
-        &tokens(api.clone()),
-        &listing,
-        api.as_ref(),
-        &token(),
-        &repo(),
-        &[registration("demo", "fkst-run")],
-        &one_label_map(&["fkst-run"]),
-        &access(""),
-    )
-    .await;
-
-    assert_eq!(
-        api.labels_added.lock().unwrap()[0].3,
-        vec![WORK_UNAUTHORIZED_LABEL.to_string()]
-    );
-    assert!(api
-        .labels_removed
-        .lock()
-        .unwrap()
-        .iter()
-        .all(|call| call.3 != SUBSTRATE_RETIRED_LABEL));
-    assert!(api
-        .labels_added
-        .lock()
-        .unwrap()
-        .iter()
-        .all(|call| !call.3.contains(&WORK_PICKED_UP_LABEL.to_string())));
-}
-
-#[tokio::test]
 async fn unauthorized_latch_prevents_duplicate_feedback() {
     let api = Arc::new(RecordingApi::default());
     let listing = FakeListing::ok(vec![issue_by(
@@ -98,7 +56,6 @@ async fn unauthorized_latch_prevents_duplicate_feedback() {
     ack_open_work_issues(
         &tokens(api.clone()),
         &listing,
-        api.as_ref(),
         &token(),
         &repo(),
         &[registration("demo", "fkst-run")],
@@ -116,7 +73,6 @@ async fn failed_unauthorized_latch_never_posts_an_undeduped_comment() {
     ack_open_work_issues(
         &tokens(api.clone()),
         &listing,
-        api.as_ref(),
         &token(),
         &repo(),
         &[registration("demo", "fkst-run")],
@@ -149,7 +105,6 @@ async fn collaborator_and_global_admin_authors_are_acked() {
         ack_open_work_issues(
             &tokens(api.clone()),
             &listing,
-            api.as_ref(),
             &token(),
             &repo(),
             &[reg],
@@ -175,7 +130,6 @@ async fn repo_admin_and_log_viewer_are_not_authority_tiers() {
         ack_open_work_issues(
             &tokens(api.clone()),
             &listing,
-            api.as_ref(),
             &token(),
             &repo(),
             &[reg],
@@ -204,7 +158,6 @@ async fn stale_unauthorized_latch_clears_before_authorized_ack() {
     ack_open_work_issues(
         &tokens(api.clone()),
         &listing,
-        api.as_ref(),
         &token(),
         &repo(),
         &[registration("demo", "fkst-run")],
@@ -235,7 +188,6 @@ async fn configured_app_child_clears_unauthorized_latch_and_is_acked() {
     ack_open_work_issues_with_bot(
         &tokens(api.clone()),
         &listing,
-        api.as_ref(),
         &token(),
         &repo(),
         &[registration("demo", "fkst-run")],
