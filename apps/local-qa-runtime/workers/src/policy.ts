@@ -61,6 +61,10 @@ export interface ClockPort {
   monotonicMs(): number | Promise<number>;
 }
 
+export interface CancellationPort {
+  cancelled(): boolean;
+}
+
 export interface BrowserSmokeResult {
   readonly version: typeof RESULT_VERSION;
   readonly outcome: "passed";
@@ -145,6 +149,7 @@ export async function runBrowserSmoke(
     readonly session: BrowserSessionPort;
     readonly evidence: EvidenceStagingPort;
     readonly clock: ClockPort;
+    readonly cancellation?: CancellationPort;
   },
 ): Promise<BrowserSmokeBundle> {
   const request = parseBrowserSmokeRequest(source);
@@ -157,7 +162,8 @@ export async function runBrowserSmoke(
     let sessionResult: Awaited<ReturnType<BrowserSessionPort["run"]>>;
     try {
       sessionResult = await ports.session.run(request);
-    } catch {
+    } catch (error) {
+      if (ports.cancellation?.cancelled() === true) throw error;
       throw new BrowserSmokeWorkerError("session.run_failed");
     }
     try {
@@ -186,16 +192,20 @@ export async function runBrowserSmoke(
         "qa.local-evidence/v1",
       );
     } catch (error) {
+      if (ports.cancellation?.cancelled() === true) throw error;
       if (error instanceof BrowserSmokeWorkerError) {
         throw error;
       }
       throw new BrowserSmokeWorkerError("evidence.staging_failed");
     }
   } finally {
-    try {
-      await ports.session.close();
-    } catch {
-      throw new BrowserSmokeWorkerError("session.finalization_failed");
+    if (ports.cancellation?.cancelled() !== true) {
+      try {
+        await ports.session.close();
+      } catch (error) {
+        if (ports.cancellation?.cancelled() === true) throw error;
+        throw new BrowserSmokeWorkerError("session.finalization_failed");
+      }
     }
   }
 
