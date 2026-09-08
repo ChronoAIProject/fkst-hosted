@@ -523,13 +523,11 @@ fn run_session(
                 response,
             }) => {
                 if pending_abort.is_some() {
-                    let _ = response.send(Err(SessionError(
-                        "Browser Worker abort already pending",
-                    )));
+                    let _ =
+                        response.send(Err(SessionError("Browser Worker abort already pending")));
                 } else if stdin.is_none() || Instant::now() >= deadline {
-                    let _ = response.send(Err(SessionError(
-                        "Browser Worker control channel closed",
-                    )));
+                    let _ =
+                        response.send(Err(SessionError("Browser Worker control channel closed")));
                 } else {
                     let result = stdin
                         .as_mut()
@@ -561,9 +559,8 @@ fn run_session(
             }
             Ok(SessionCommand::CleanEof { deadline, response }) => {
                 if pending_eof.is_some() {
-                    let _ = response.send(Err(SessionError(
-                        "Browser Worker EOF wait already pending",
-                    )));
+                    let _ =
+                        response.send(Err(SessionError("Browser Worker EOF wait already pending")));
                 } else {
                     pending_eof = Some((deadline, response));
                 }
@@ -590,8 +587,7 @@ fn run_session(
                     let execution_count = frames
                         .iter()
                         .filter(|raw| {
-                            frame_protocol(raw).as_deref()
-                                == Some("qa.local-worker-protocol/v1")
+                            frame_protocol(raw).as_deref() == Some("qa.local-worker-protocol/v1")
                         })
                         .count();
                     if execution_count > 1 {
@@ -604,11 +600,9 @@ fn run_session(
                         return;
                     }
                     for raw in frames {
-                        if let Err(error) = route_output_frame(
-                            &raw,
-                            &mut execution_frames,
-                            &mut pending_abort,
-                        ) {
+                        if let Err(error) =
+                            route_output_frame(&raw, &mut execution_frames, &mut pending_abort)
+                        {
                             fail_session(
                                 error,
                                 &mut pending_read,
@@ -694,10 +688,9 @@ fn route_output_frame(
                     let ack = validate_local_worker_cancel_ack(raw).map_err(|_| {
                         SessionError("invalid Browser Worker cancel acknowledgement")
                     })?;
-                    let object = ack
-                        .value()
-                        .as_object()
-                        .ok_or(SessionError("invalid Browser Worker cancel acknowledgement"))?;
+                    let object = ack.value().as_object().ok_or(SessionError(
+                        "invalid Browser Worker cancel acknowledgement",
+                    ))?;
                     if object.get("invocation_id").and_then(Value::as_str)
                         != Some(pending.invocation_id.as_str())
                     {
@@ -726,9 +719,9 @@ fn route_output_frame(
                     Ok(())
                 }
                 _ => {
-                    let _ = pending.response.send(Err(SessionError(
-                        "unexpected Browser Worker control frame",
-                    )));
+                    let _ = pending
+                        .response
+                        .send(Err(SessionError("unexpected Browser Worker control frame")));
                     Ok(())
                 }
             }

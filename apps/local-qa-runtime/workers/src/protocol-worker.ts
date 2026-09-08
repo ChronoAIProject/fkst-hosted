@@ -173,6 +173,7 @@ export class ProtocolPeer {
         },
         validateLocalWorkerControlFailure,
       );
+      this.#cancelled = true;
       throw new WorkerCancelled();
     }
     try {
@@ -209,6 +210,10 @@ export class ProtocolPeer {
 
   recordedFailure(): ProtocolFailureCode | undefined {
     return this.#recordedFailure;
+  }
+
+  cancelled(): boolean {
+    return this.#cancelled;
   }
 
   releaseInput(): Promise<void> {
@@ -348,6 +353,7 @@ class CapabilityClient {
 
 export async function runProtocolWorker(): Promise<void> {
   const peer = new ProtocolPeer();
+  let control: WorkerControlState | undefined;
   try {
     const invocation = await peer.read();
     if (
@@ -361,9 +367,10 @@ export async function runProtocolWorker(): Promise<void> {
     }
     const invocationId = invocation.invocation_id;
     const request = invocation.input as BrowserSmokeRequest;
-    const control = new WorkerControlState(invocationId);
-    peer.attachControl(control);
-    const capabilities = new CapabilityClient(peer, invocationId, control);
+    const activeControl = new WorkerControlState(invocationId);
+    control = activeControl;
+    peer.attachControl(activeControl);
+    const capabilities = new CapabilityClient(peer, invocationId, activeControl);
     const bundle = await runBrowserSmoke(JSON.stringify(request), {
       clock: {
         async now() {
@@ -407,10 +414,11 @@ export async function runProtocolWorker(): Promise<void> {
           return referenceValue(output, "runnerLogEvidenceRef");
         },
       },
+      cancellation: { cancelled: () => activeControl.cancelled() || peer.cancelled() },
     });
     capabilities.assertComplete();
     await peer.expectCleanEof();
-    control.markTerminal();
+    activeControl.markTerminal();
     await peer.writeTerminal({
       protocol: PROTOCOL,
       kind: "terminal_result",
@@ -419,7 +427,7 @@ export async function runProtocolWorker(): Promise<void> {
       result: bundle.result,
     });
   } catch (error) {
-    if (error instanceof WorkerCancelled) {
+    if (control?.cancelled() === true || peer.cancelled() || error instanceof WorkerCancelled) {
       await peer.releaseInput();
       return;
     }

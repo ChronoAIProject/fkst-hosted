@@ -377,6 +377,35 @@ test("finalization failure overrides success and earlier post-run failures", asy
   assert.equal(failedPolicy.calls.now, 1);
 });
 
+test("accepted cancellation survives policy wrapping and bypasses ordinary finalization", async () => {
+  const cancellation = new Error("private cancellation signal");
+  const harness = createHarness({ runError: cancellation });
+  await assert.rejects(
+    () =>
+      runBrowserSmoke(requestJson, {
+        ...harness.ports,
+        cancellation: { cancelled: () => true },
+      }),
+    (error) => error === cancellation,
+  );
+  assert.equal(harness.calls.close, 0);
+  assert.deepEqual(harness.events, ["clock.now", "clock.monotonicMs", "session.run"]);
+});
+
+test("cancellation accepted during finalization survives policy wrapping", async () => {
+  const cancellation = new Error("private cancellation signal");
+  const harness = createHarness({ closeError: cancellation });
+  await assert.rejects(
+    () =>
+      runBrowserSmoke(requestJson, {
+        ...harness.ports,
+        cancellation: { cancelled: () => harness.calls.close === 1 },
+      }),
+    (error) => error === cancellation,
+  );
+  assert.equal(harness.calls.close, 1);
+});
+
 test("serialization is compact, ordered, escaped, and capability-free", async () => {
   const bundle = await runBrowserSmoke(requestJson, createHarness().ports);
   const bytes = serializeBrowserSmokeResult(bundle.result);

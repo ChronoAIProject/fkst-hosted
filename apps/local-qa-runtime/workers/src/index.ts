@@ -7,6 +7,7 @@ export {
   type BrowserSmokeBundle,
   type BrowserSmokeRequest,
   type BrowserSmokeResult,
+  type CancellationPort,
   type ClockPort,
   type DigestBoundRef,
   type EvidenceStagingPort,
