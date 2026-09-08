@@ -436,9 +436,10 @@ fn run_session(
 ) {
     let mut decoder = WireDecoder::default();
     let mut execution_frames = VecDeque::new();
-    let mut pending_read = None;
+    let mut pending_read: Option<(Instant, SyncSender<Result<ValidatedValue, SessionError>>)> =
+        None;
     let mut pending_abort: Option<PendingAbort> = None;
-    let mut pending_eof = None;
+    let mut pending_eof: Option<(Instant, SyncSender<Result<(), SessionError>>)> = None;
     let mut stdin = Some(stdin);
     let mut eof = false;
 
@@ -469,12 +470,10 @@ fn run_session(
         }
         if let Some((deadline, response)) = pending_eof.as_ref() {
             if eof {
-                let result = decoder.finish().and_then(|()| {
-                    if execution_frames.is_empty() {
-                        Ok(())
-                    } else {
-                        Err(SessionError("trailing Browser Worker frame"))
-                    }
+                let result = decoder.finish().and(if execution_frames.is_empty() {
+                    Ok(())
+                } else {
+                    Err(SessionError("trailing Browser Worker frame"))
                 });
                 let response = response.clone();
                 let _ = response.send(result);
@@ -529,9 +528,8 @@ fn run_session(
                     let _ =
                         response.send(Err(SessionError("Browser Worker control channel closed")));
                 } else {
+                    let stdin = stdin.as_mut().expect("open stdin checked above");
                     let result = stdin
-                        .as_mut()
-                        .expect("open stdin checked above")
                         .write_all(&bytes)
                         .and_then(|()| stdin.flush())
                         .map_err(|_| SessionError("Browser Worker abort write failed"));
