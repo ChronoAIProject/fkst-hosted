@@ -290,6 +290,7 @@ fn admits_replays_conflicts_and_recovers_one_v2_request() {
     );
     assert!(replay.starts_with(b"HTTP/1.1 200 OK\r\n"));
     assert_eq!(body(&replay), expected_body);
+    drop(restarted);
     let _ = fs::remove_file(database);
 }
 
