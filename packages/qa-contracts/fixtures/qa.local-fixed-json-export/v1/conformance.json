@@ -1,0 +1,305 @@
+{
+  "schema_version": "qa.local-fixed-json-export-fixtures/v1",
+  "canary": "PRIVATE_VALUE_6146_CANARY",
+  "source_cases": [
+    {
+      "id": "original",
+      "raw_utf8": "{\"schema_version\":\"qa.local-evidence/v1\",\"run_id\":\"run-1\",\"attempt\":1,\"fixture_url\":\"http://127.0.0.1:49152/fixed-page.html\",\"final_url\":\"http://127.0.0.1:49152/fixed-page.html\",\"selector\":\"[data-local-qa=\\\"status\\\"]\",\"expected_text\":\"READY\",\"observed_text\":\"READY\"}",
+      "accepted": true,
+      "canonical_utf8": "{\"attempt\":1,\"expected_text\":\"READY\",\"final_url\":\"http://127.0.0.1:49152/fixed-page.html\",\"fixture_url\":\"http://127.0.0.1:49152/fixed-page.html\",\"observed_text\":\"READY\",\"run_id\":\"run-1\",\"schema_version\":\"qa.local-evidence/v1\",\"selector\":\"[data-local-qa=\\\"status\\\"]\"}",
+      "source_digest": "sha256:17f6dc0d15465e3090adff2eb7f1994d1c3d234a353db9b11696fc0c6e28a457",
+      "output_digest": "sha256:8275c6826a7d4ee2a90a067e09de47939a2fd8bf95b59c16ade9ea4127e8d7ee"
+    },
+    {
+      "id": "internal-whitespace",
+      "raw_utf8": "{  \"schema_version\":\"qa.local-evidence/v1\",\"run_id\":\"run-1\",\"attempt\":1,\"fixture_url\":\"http://127.0.0.1:49152/fixed-page.html\",\"final_url\":\"http://127.0.0.1:49152/fixed-page.html\",\"selector\":\"[data-local-qa=\\\"status\\\"]\",\"expected_text\":\"READY\",\"observed_text\":\"READY\"}",
+      "accepted": true,
+      "canonical_utf8": "{\"attempt\":1,\"expected_text\":\"READY\",\"final_url\":\"http://127.0.0.1:49152/fixed-page.html\",\"fixture_url\":\"http://127.0.0.1:49152/fixed-page.html\",\"observed_text\":\"READY\",\"run_id\":\"run-1\",\"schema_version\":\"qa.local-evidence/v1\",\"selector\":\"[data-local-qa=\\\"status\\\"]\"}",
+      "source_digest": "sha256:fcee3c133393b6f9d0eb053700f227e81535bc18cea36389177042f373049f58",
+      "output_digest": "sha256:8275c6826a7d4ee2a90a067e09de47939a2fd8bf95b59c16ade9ea4127e8d7ee"
+    },
+    {
+      "id": "canonical",
+      "raw_utf8": "{\"attempt\":1,\"expected_text\":\"READY\",\"final_url\":\"http://127.0.0.1:49152/fixed-page.html\",\"fixture_url\":\"http://127.0.0.1:49152/fixed-page.html\",\"observed_text\":\"READY\",\"run_id\":\"run-1\",\"schema_version\":\"qa.local-evidence/v1\",\"selector\":\"[data-local-qa=\\\"status\\\"]\"}",
+      "accepted": true,
+      "canonical_utf8": "{\"attempt\":1,\"expected_text\":\"READY\",\"final_url\":\"http://127.0.0.1:49152/fixed-page.html\",\"fixture_url\":\"http://127.0.0.1:49152/fixed-page.html\",\"observed_text\":\"READY\",\"run_id\":\"run-1\",\"schema_version\":\"qa.local-evidence/v1\",\"selector\":\"[data-local-qa=\\\"status\\\"]\"}",
+      "source_digest": "sha256:8275c6826a7d4ee2a90a067e09de47939a2fd8bf95b59c16ade9ea4127e8d7ee",
+      "output_digest": "sha256:8275c6826a7d4ee2a90a067e09de47939a2fd8bf95b59c16ade9ea4127e8d7ee"
+    },
+    {
+      "id": "allowed-port-1",
+      "raw_utf8": "{\"schema_version\":\"qa.local-evidence/v1\",\"run_id\":\"run-1\",\"attempt\":1,\"fixture_url\":\"http://127.0.0.1:1/fixed-page.html\",\"final_url\":\"http://127.0.0.1:1/fixed-page.html\",\"selector\":\"[data-local-qa=\\\"status\\\"]\",\"expected_text\":\"READY\",\"observed_text\":\"READY\"}",
+      "accepted": true,
+      "canonical_utf8": "{\"attempt\":1,\"expected_text\":\"READY\",\"final_url\":\"http://127.0.0.1:1/fixed-page.html\",\"fixture_url\":\"http://127.0.0.1:1/fixed-page.html\",\"observed_text\":\"READY\",\"run_id\":\"run-1\",\"schema_version\":\"qa.local-evidence/v1\",\"selector\":\"[data-local-qa=\\\"status\\\"]\"}",
+      "source_digest": "sha256:4cee23c0bed49196e624cb581e74da97dd72e4215480e7ef427b313fd8b182a3",
+      "output_digest": "sha256:25a3c20afdd4cf602250c7e53090a2c04087d495b4d9400f59dd2cd8a50a3d05"
+    },
+    {
+      "id": "allowed-port-65535",
+      "raw_utf8": "{\"schema_version\":\"qa.local-evidence/v1\",\"run_id\":\"run-1\",\"attempt\":1,\"fixture_url\":\"http://127.0.0.1:65535/fixed-page.html\",\"final_url\":\"http://127.0.0.1:65535/fixed-page.html\",\"selector\":\"[data-local-qa=\\\"status\\\"]\",\"expected_text\":\"READY\",\"observed_text\":\"READY\"}",
+      "accepted": true,
+      "canonical_utf8": "{\"attempt\":1,\"expected_text\":\"READY\",\"final_url\":\"http://127.0.0.1:65535/fixed-page.html\",\"fixture_url\":\"http://127.0.0.1:65535/fixed-page.html\",\"observed_text\":\"READY\",\"run_id\":\"run-1\",\"schema_version\":\"qa.local-evidence/v1\",\"selector\":\"[data-local-qa=\\\"status\\\"]\"}",
+      "source_digest": "sha256:fbf850756c37c69a05eaa71ee57b40314e0a5d2928bf232e1c918646c8809ec8",
+      "output_digest": "sha256:0813dd119713f6364d38590477eaf9360d139cfe6614c74ac293fcd27ef4cd96"
+    },
+    {
+      "id": "allowed-port-00049152",
+      "raw_utf8": "{\"schema_version\":\"qa.local-evidence/v1\",\"run_id\":\"run-1\",\"attempt\":1,\"fixture_url\":\"http://127.0.0.1:00049152/fixed-page.html\",\"final_url\":\"http://127.0.0.1:00049152/fixed-page.html\",\"selector\":\"[data-local-qa=\\\"status\\\"]\",\"expected_text\":\"READY\",\"observed_text\":\"READY\"}",
+      "accepted": true,
+      "canonical_utf8": "{\"attempt\":1,\"expected_text\":\"READY\",\"final_url\":\"http://127.0.0.1:00049152/fixed-page.html\",\"fixture_url\":\"http://127.0.0.1:00049152/fixed-page.html\",\"observed_text\":\"READY\",\"run_id\":\"run-1\",\"schema_version\":\"qa.local-evidence/v1\",\"selector\":\"[data-local-qa=\\\"status\\\"]\"}",
+      "source_digest": "sha256:6850d9f6b1d0918d5dafd5e9c6a9ab21473b3308b716a59463974552bd325568",
+      "output_digest": "sha256:76fceb7a2f3bf133a7929617022d9f50e9cf682ce0fc4c2b46cb04869d163332"
+    },
+    {
+      "id": "unknown-field",
+      "raw_utf8": "{\"schema_version\":\"qa.local-evidence/v1\",\"run_id\":\"run-1\",\"attempt\":1,\"fixture_url\":\"http://127.0.0.1:49152/fixed-page.html\",\"final_url\":\"http://127.0.0.1:49152/fixed-page.html\",\"selector\":\"[data-local-qa=\\\"status\\\"]\",\"expected_text\":\"READY\",\"observed_text\":\"READY\",\"token\":\"PRIVATE_VALUE_6146_CANARY\"}",
+      "accepted": false
+    },
+    {
+      "id": "unknown-key-canary",
+      "raw_utf8": "{\"schema_version\":\"qa.local-evidence/v1\",\"run_id\":\"run-1\",\"attempt\":1,\"fixture_url\":\"http://127.0.0.1:49152/fixed-page.html\",\"final_url\":\"http://127.0.0.1:49152/fixed-page.html\",\"selector\":\"[data-local-qa=\\\"status\\\"]\",\"expected_text\":\"READY\",\"observed_text\":\"READY\",\"PRIVATE_VALUE_6146_CANARY\":\"redacted?\"}",
+      "accepted": false
+    },
+    {
+      "id": "selector-secret",
+      "raw_utf8": "{\"schema_version\":\"qa.local-evidence/v1\",\"run_id\":\"run-1\",\"attempt\":1,\"fixture_url\":\"http://127.0.0.1:49152/fixed-page.html\",\"final_url\":\"http://127.0.0.1:49152/fixed-page.html\",\"selector\":\"PRIVATE_VALUE_6146_CANARY\",\"expected_text\":\"READY\",\"observed_text\":\"READY\"}",
+      "accepted": false
+    },
+    {
+      "id": "observed-secret",
+      "raw_utf8": "{\"schema_version\":\"qa.local-evidence/v1\",\"run_id\":\"run-1\",\"attempt\":1,\"fixture_url\":\"http://127.0.0.1:49152/fixed-page.html\",\"final_url\":\"http://127.0.0.1:49152/fixed-page.html\",\"selector\":\"[data-local-qa=\\\"status\\\"]\",\"expected_text\":\"READY\",\"observed_text\":\"PRIVATE_VALUE_6146_CANARY\"}",
+      "accepted": false
+    },
+    {
+      "id": "expected-secret",
+      "raw_utf8": "{\"schema_version\":\"qa.local-evidence/v1\",\"run_id\":\"run-1\",\"attempt\":1,\"fixture_url\":\"http://127.0.0.1:49152/fixed-page.html\",\"final_url\":\"http://127.0.0.1:49152/fixed-page.html\",\"selector\":\"[data-local-qa=\\\"status\\\"]\",\"expected_text\":\"PRIVATE_VALUE_6146_CANARY\",\"observed_text\":\"READY\"}",
+      "accepted": false
+    },
+    {
+      "id": "caller-uploadable",
+      "raw_utf8": "{\"schema_version\":\"qa.local-evidence/v1\",\"run_id\":\"run-1\",\"attempt\":1,\"fixture_url\":\"http://127.0.0.1:49152/fixed-page.html\",\"final_url\":\"http://127.0.0.1:49152/fixed-page.html\",\"selector\":\"[data-local-qa=\\\"status\\\"]\",\"expected_text\":\"READY\",\"observed_text\":\"READY\",\"uploadable\":true}",
+      "accepted": false
+    },
+    {
+      "id": "caller-policy",
+      "raw_utf8": "{\"schema_version\":\"qa.local-evidence/v1\",\"run_id\":\"run-1\",\"attempt\":1,\"fixture_url\":\"http://127.0.0.1:49152/fixed-page.html\",\"final_url\":\"http://127.0.0.1:49152/fixed-page.html\",\"selector\":\"[data-local-qa=\\\"status\\\"]\",\"expected_text\":\"READY\",\"observed_text\":\"READY\",\"policy\":{\"allow\":true}}",
+      "accepted": false
+    },
+    {
+      "id": "url-mismatch",
+      "raw_utf8": "{\"schema_version\":\"qa.local-evidence/v1\",\"run_id\":\"run-1\",\"attempt\":1,\"fixture_url\":\"http://127.0.0.1:49152/fixed-page.html\",\"final_url\":\"http://127.0.0.1:49153/fixed-page.html\",\"selector\":\"[data-local-qa=\\\"status\\\"]\",\"expected_text\":\"READY\",\"observed_text\":\"READY\"}",
+      "accepted": false
+    },
+    {
+      "id": "path",
+      "raw_utf8": "{\"schema_version\":\"qa.local-evidence/v1\",\"run_id\":\"run-1\",\"attempt\":1,\"fixture_url\":\"/private/PRIVATE_VALUE_6146_CANARY\",\"final_url\":\"http://127.0.0.1:49152/fixed-page.html\",\"selector\":\"[data-local-qa=\\\"status\\\"]\",\"expected_text\":\"READY\",\"observed_text\":\"READY\"}",
+      "accepted": false
+    },
+    {
+      "id": "attempt-zero",
+      "raw_utf8": "{\"schema_version\":\"qa.local-evidence/v1\",\"run_id\":\"run-1\",\"attempt\":0,\"fixture_url\":\"http://127.0.0.1:49152/fixed-page.html\",\"final_url\":\"http://127.0.0.1:49152/fixed-page.html\",\"selector\":\"[data-local-qa=\\\"status\\\"]\",\"expected_text\":\"READY\",\"observed_text\":\"READY\"}",
+      "accepted": false
+    },
+    {
+      "id": "run-escape",
+      "raw_utf8": "{\"schema_version\":\"qa.local-evidence/v1\",\"run_id\":\"../run-2\",\"attempt\":1,\"fixture_url\":\"http://127.0.0.1:49152/fixed-page.html\",\"final_url\":\"http://127.0.0.1:49152/fixed-page.html\",\"selector\":\"[data-local-qa=\\\"status\\\"]\",\"expected_text\":\"READY\",\"observed_text\":\"READY\"}",
+      "accepted": false
+    },
+    {
+      "id": "prohibited-url-17",
+      "raw_utf8": "{\"schema_version\":\"qa.local-evidence/v1\",\"run_id\":\"run-1\",\"attempt\":1,\"fixture_url\":\"http://127.0.0.1:0/fixed-page.html\",\"final_url\":\"http://127.0.0.1:0/fixed-page.html\",\"selector\":\"[data-local-qa=\\\"status\\\"]\",\"expected_text\":\"READY\",\"observed_text\":\"READY\"}",
+      "accepted": false
+    },
+    {
+      "id": "prohibited-url-18",
+      "raw_utf8": "{\"schema_version\":\"qa.local-evidence/v1\",\"run_id\":\"run-1\",\"attempt\":1,\"fixture_url\":\"http://127.0.0.1:65536/fixed-page.html\",\"final_url\":\"http://127.0.0.1:65536/fixed-page.html\",\"selector\":\"[data-local-qa=\\\"status\\\"]\",\"expected_text\":\"READY\",\"observed_text\":\"READY\"}",
+      "accepted": false
+    },
+    {
+      "id": "prohibited-url-19",
+      "raw_utf8": "{\"schema_version\":\"qa.local-evidence/v1\",\"run_id\":\"run-1\",\"attempt\":1,\"fixture_url\":\"http://localhost:49152/fixed-page.html\",\"final_url\":\"http://localhost:49152/fixed-page.html\",\"selector\":\"[data-local-qa=\\\"status\\\"]\",\"expected_text\":\"READY\",\"observed_text\":\"READY\"}",
+      "accepted": false
+    },
+    {
+      "id": "prohibited-url-20",
+      "raw_utf8": "{\"schema_version\":\"qa.local-evidence/v1\",\"run_id\":\"run-1\",\"attempt\":1,\"fixture_url\":\"http://user@127.0.0.1:49152/fixed-page.html\",\"final_url\":\"http://user@127.0.0.1:49152/fixed-page.html\",\"selector\":\"[data-local-qa=\\\"status\\\"]\",\"expected_text\":\"READY\",\"observed_text\":\"READY\"}",
+      "accepted": false
+    },
+    {
+      "id": "prohibited-url-21",
+      "raw_utf8": "{\"schema_version\":\"qa.local-evidence/v1\",\"run_id\":\"run-1\",\"attempt\":1,\"fixture_url\":\"http://127.0.0.1:49152/fixed-page.html?token=PRIVATE_VALUE_6146_CANARY\",\"final_url\":\"http://127.0.0.1:49152/fixed-page.html?token=PRIVATE_VALUE_6146_CANARY\",\"selector\":\"[data-local-qa=\\\"status\\\"]\",\"expected_text\":\"READY\",\"observed_text\":\"READY\"}",
+      "accepted": false
+    },
+    {
+      "id": "prohibited-url-22",
+      "raw_utf8": "{\"schema_version\":\"qa.local-evidence/v1\",\"run_id\":\"run-1\",\"attempt\":1,\"fixture_url\":\"http://127.0.0.1:49152/fixed-page.html#PRIVATE_VALUE_6146_CANARY\",\"final_url\":\"http://127.0.0.1:49152/fixed-page.html#PRIVATE_VALUE_6146_CANARY\",\"selector\":\"[data-local-qa=\\\"status\\\"]\",\"expected_text\":\"READY\",\"observed_text\":\"READY\"}",
+      "accepted": false
+    },
+    {
+      "id": "prohibited-url-23",
+      "raw_utf8": "{\"schema_version\":\"qa.local-evidence/v1\",\"run_id\":\"run-1\",\"attempt\":1,\"fixture_url\":\"http://127.0.0.1:49152/%66ixed-page.html\",\"final_url\":\"http://127.0.0.1:49152/%66ixed-page.html\",\"selector\":\"[data-local-qa=\\\"status\\\"]\",\"expected_text\":\"READY\",\"observed_text\":\"READY\"}",
+      "accepted": false
+    },
+    {
+      "id": "prohibited-url-24",
+      "raw_utf8": "{\"schema_version\":\"qa.local-evidence/v1\",\"run_id\":\"run-1\",\"attempt\":1,\"fixture_url\":\"https://example.com/PRIVATE_VALUE_6146_CANARY\",\"final_url\":\"https://example.com/PRIVATE_VALUE_6146_CANARY\",\"selector\":\"[data-local-qa=\\\"status\\\"]\",\"expected_text\":\"READY\",\"observed_text\":\"READY\"}",
+      "accepted": false
+    },
+    {
+      "id": "duplicate-key",
+      "raw_utf8": "{\"run_id\":\"PRIVATE_VALUE_6146_CANARY\",\"schema_version\":\"qa.local-evidence/v1\",\"run_id\":\"run-1\",\"attempt\":1,\"fixture_url\":\"http://127.0.0.1:49152/fixed-page.html\",\"final_url\":\"http://127.0.0.1:49152/fixed-page.html\",\"selector\":\"[data-local-qa=\\\"status\\\"]\",\"expected_text\":\"READY\",\"observed_text\":\"READY\"}",
+      "accepted": false
+    },
+    {
+      "id": "escaped-duplicate",
+      "raw_utf8": "{\"run_\\u0069d\":\"PRIVATE_VALUE_6146_CANARY\",\"schema_version\":\"qa.local-evidence/v1\",\"run_id\":\"run-1\",\"attempt\":1,\"fixture_url\":\"http://127.0.0.1:49152/fixed-page.html\",\"final_url\":\"http://127.0.0.1:49152/fixed-page.html\",\"selector\":\"[data-local-qa=\\\"status\\\"]\",\"expected_text\":\"READY\",\"observed_text\":\"READY\"}",
+      "accepted": false
+    },
+    {
+      "id": "raw-log",
+      "raw_utf8": "PRIVATE_VALUE_6146_CANARY\nlog stdout",
+      "accepted": false
+    },
+    {
+      "id": "json-log",
+      "raw_utf8": "{\"message\":\"PRIVATE_VALUE_6146_CANARY\"}",
+      "accepted": false
+    },
+    {
+      "id": "array",
+      "raw_utf8": "[{\"schema_version\":\"qa.local-evidence/v1\",\"run_id\":\"run-1\",\"attempt\":1,\"fixture_url\":\"http://127.0.0.1:49152/fixed-page.html\",\"final_url\":\"http://127.0.0.1:49152/fixed-page.html\",\"selector\":\"[data-local-qa=\\\"status\\\"]\",\"expected_text\":\"READY\",\"observed_text\":\"READY\"}]",
+      "accepted": false
+    },
+    {
+      "id": "trailing-data",
+      "raw_utf8": "{\"schema_version\":\"qa.local-evidence/v1\",\"run_id\":\"run-1\",\"attempt\":1,\"fixture_url\":\"http://127.0.0.1:49152/fixed-page.html\",\"final_url\":\"http://127.0.0.1:49152/fixed-page.html\",\"selector\":\"[data-local-qa=\\\"status\\\"]\",\"expected_text\":\"READY\",\"observed_text\":\"READY\"}{}",
+      "accepted": false
+    }
+  ],
+  "receipt": {
+    "schema_version": "qa.local-fixed-json-export/v1",
+    "kind": "completed-local-fixed-json",
+    "run_id": "run-1",
+    "attempt": 1,
+    "object_id": "observation/0",
+    "role": "fixed-sanitized-observation",
+    "source_digest": "sha256:17f6dc0d15465e3090adff2eb7f1994d1c3d234a353db9b11696fc0c6e28a457",
+    "source_byte_length": 266,
+    "policy_profile": "local-host-built-in-fixed-observation",
+    "policy_version": 1,
+    "policy_digest": "sha256:4f50954a54c579eea9e337e68f7e6c3c27a9dfb87cd793e0951368887c597dda",
+    "output_digest": "sha256:8275c6826a7d4ee2a90a067e09de47939a2fd8bf95b59c16ade9ea4127e8d7ee",
+    "media_type": "application/json",
+    "output_byte_length": 266,
+    "created_at_unix_ms": 1788912000000,
+    "content_digest": "sha256:a5a80652aaec44fbbbd45fcefa132554064d0f6d605f4c249f4b2130411e8922"
+  },
+  "rejected_bindings": [
+    {
+      "id": "source-digest",
+      "patch": {
+        "source_digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+      }
+    },
+    {
+      "id": "output-digest",
+      "patch": {
+        "output_digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+      }
+    },
+    {
+      "id": "source-size",
+      "patch": {
+        "source_byte_length": 1
+      }
+    },
+    {
+      "id": "output-size",
+      "patch": {
+        "output_byte_length": 1
+      }
+    },
+    {
+      "id": "run-identity",
+      "patch": {
+        "run_id": "run-2"
+      }
+    },
+    {
+      "id": "attempt-identity",
+      "patch": {
+        "attempt": 2
+      }
+    },
+    {
+      "id": "policy-profile",
+      "patch": {
+        "policy_profile": "caller-approved"
+      }
+    },
+    {
+      "id": "policy-version",
+      "patch": {
+        "policy_version": 2
+      }
+    },
+    {
+      "id": "policy-digest",
+      "patch": {
+        "policy_digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+      }
+    },
+    {
+      "id": "png",
+      "patch": {
+        "media_type": "image/png"
+      }
+    },
+    {
+      "id": "raw-log-role",
+      "patch": {
+        "role": "runner-log"
+      }
+    },
+    {
+      "id": "oversize",
+      "patch": {
+        "output_byte_length": 65537
+      }
+    },
+    {
+      "id": "negative-timestamp",
+      "patch": {
+        "created_at_unix_ms": -1
+      }
+    },
+    {
+      "id": "caller-flag",
+      "patch": {
+        "uploadable": true
+      }
+    },
+    {
+      "id": "unknown-field",
+      "patch": {
+        "PRIVATE_VALUE_6146_CANARY": "PRIVATE_VALUE_6146_CANARY"
+      }
+    },
+    {
+      "id": "object-escape",
+      "patch": {
+        "object_id": "../observation/0"
+      }
+    }
+  ],
+  "duplicate_receipt_utf8": "{\"role\":\"PRIVATE_VALUE_6146_CANARY\",\"schema_version\":\"qa.local-fixed-json-export/v1\",\"kind\":\"completed-local-fixed-json\",\"run_id\":\"run-1\",\"attempt\":1,\"object_id\":\"observation/0\",\"role\":\"fixed-sanitized-observation\",\"source_digest\":\"sha256:17f6dc0d15465e3090adff2eb7f1994d1c3d234a353db9b11696fc0c6e28a457\",\"source_byte_length\":266,\"policy_profile\":\"local-host-built-in-fixed-observation\",\"policy_version\":1,\"policy_digest\":\"sha256:4f50954a54c579eea9e337e68f7e6c3c27a9dfb87cd793e0951368887c597dda\",\"output_digest\":\"sha256:8275c6826a7d4ee2a90a067e09de47939a2fd8bf95b59c16ade9ea4127e8d7ee\",\"media_type\":\"application/json\",\"output_byte_length\":266,\"created_at_unix_ms\":1788912000000,\"content_digest\":\"sha256:a5a80652aaec44fbbbd45fcefa132554064d0f6d605f4c249f4b2130411e8922\"}",
+  "max_source_bytes": 65536,
+  "max_receipt_bytes": 4096,
+  "png_hex": "89504e470d0a1a0a0000000d4948445200000001000000010804000000b51c0c020000000b4944415478da6364f80f00010501012718e3660000000049454e44ae426082",
+  "crash_files": [
+    "raw/0.json",
+    "raw/0.receipt-digest",
+    "export/0.json",
+    "export/0.receipt.json"
+  ]
+}

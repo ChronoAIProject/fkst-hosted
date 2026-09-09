@@ -122,6 +122,7 @@ fn contract_registry_and_fixture_metadata() {
             "qa.contract-foundation/v1",
             "qa.local-lifecycle/v1",
             "qa.local-evidence/v1",
+            "qa.local-fixed-json-export/v1",
             "qa.local-worker-protocol/v1",
             "qa.local-run-admission/v1",
             "qa.local-run-admission/v2",
@@ -150,6 +151,8 @@ fn contract_registry_and_fixture_metadata() {
         .map(|foundation_type| foundation_type.definition().to_owned())
         .collect();
     let mut expected_types = expected_foundation_types.clone();
+    expected_types.insert("LocalFixedJsonPolicy".to_owned());
+    expected_types.insert("LocalFixedJsonReceipt".to_owned());
     expected_types.insert("CancelDisposition".to_owned());
     expected_types.insert("CleanupOutcome".to_owned());
     expected_types.insert("CleanupReceipt".to_owned());

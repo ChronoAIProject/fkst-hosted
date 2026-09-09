@@ -18,6 +18,11 @@
       "id": "urn:chronoai:fkst:qa-contracts:qa.local-evidence:v1",
       "major": 1
     },
+    "qa.local-fixed-json-export/v1": {
+      "path": "contracts/qa.local-fixed-json-export/v1/schema.json",
+      "id": "urn:chronoai:fkst:qa-contracts:qa.local-fixed-json-export:v1",
+      "major": 1
+    },
     "qa.local-worker-protocol/v1": {
       "path": "contracts/qa.local-worker-protocol/v1/schema.json",
       "id": "urn:chronoai:fkst:qa-contracts:qa.local-worker-protocol:v1",
@@ -70,6 +75,8 @@
     "EventCursor": { "schema": "qa.local-lifecycle/v1", "pointer": "#/$defs/EventCursor" },
     "LocalSanitizedObservation": { "schema": "qa.local-evidence/v1", "pointer": "#/$defs/LocalSanitizedObservation" },
     "LocalEvidenceObject": { "schema": "qa.local-evidence/v1", "pointer": "#/$defs/LocalEvidenceObject" },
+    "LocalFixedJsonPolicy": { "schema": "qa.local-fixed-json-export/v1", "pointer": "#/$defs/LocalFixedJsonPolicy" },
+    "LocalFixedJsonReceipt": { "schema": "qa.local-fixed-json-export/v1", "pointer": "#/$defs/LocalFixedJsonReceipt" },
     "LocalSanitizedObservationRef": { "schema": "qa.local-evidence/v1", "pointer": "#/$defs/LocalSanitizedObservationRef" },
     "LocalEvidenceObjectRef": { "schema": "qa.local-evidence/v1", "pointer": "#/$defs/LocalEvidenceObjectRef" },
     "LocalWorkerFrame": { "schema": "qa.local-worker-protocol/v1", "pointer": "#/$defs/LocalWorkerFrame" },
