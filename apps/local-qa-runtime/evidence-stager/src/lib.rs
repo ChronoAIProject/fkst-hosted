@@ -1027,6 +1027,8 @@ fn temporary_path(parent: &Path, final_path: &Path) -> Result<PathBuf, StagerErr
 
 #[cfg(unix)]
 fn sync_directory(path: &Path) -> Result<(), StagerError> {
+    #[cfg(test)]
+    fixed_json::tests::before_directory_sync(path)?;
     File::open(path)
         .and_then(|directory| directory.sync_all())
         .map_err(|_| StagerError::Storage)

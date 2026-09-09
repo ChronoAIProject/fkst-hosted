@@ -158,6 +158,8 @@ impl EvidenceStager {
             {
                 return Err(StagerError::DuplicateIdentity);
             }
+            // A prior publisher may have stopped after linking the receipt but before directory sync.
+            sync_directory(paths.receipt.parent().ok_or(StagerError::Storage)?)?;
             return self.fixed_json_handle(&request, &existing.receipt);
         }
         let total_bytes: u64 = raw.values().chain(exported.values()).sum();
@@ -532,4 +534,98 @@ fn sync_ancestry(root: &Path, directory: &Path) -> Result<(), StagerError> {
         }
     }
     Ok(())
+}
+
+#[cfg(all(test, unix))]
+pub(super) mod tests {
+    use std::cell::RefCell;
+
+    use super::*;
+
+    thread_local! {
+        static SYNC_FAILURE: RefCell<Option<(PathBuf, usize)>> = const { RefCell::new(None) };
+    }
+
+    struct SyncFailure;
+
+    impl SyncFailure {
+        fn on_call(path: &Path, call: usize) -> Self {
+            SYNC_FAILURE.with(|slot| {
+                assert!(slot.borrow().is_none());
+                *slot.borrow_mut() = Some((path.to_owned(), call));
+            });
+            Self
+        }
+    }
+
+    impl Drop for SyncFailure {
+        fn drop(&mut self) {
+            SYNC_FAILURE.with(|slot| *slot.borrow_mut() = None);
+        }
+    }
+
+    pub(crate) fn before_directory_sync(path: &Path) -> Result<(), StagerError> {
+        SYNC_FAILURE.with(|slot| {
+            let mut failure = slot.borrow_mut();
+            if let Some((target, remaining)) = failure.as_mut() {
+                if target == path {
+                    *remaining -= 1;
+                    if *remaining == 0 {
+                        *failure = None;
+                        return Err(StagerError::Storage);
+                    }
+                }
+            }
+            Ok(())
+        })
+    }
+
+    #[test]
+    fn replay_requires_directory_sync_after_interrupted_receipt_publication() {
+        let temporary = tempfile::TempDir::new().unwrap();
+        let root = temporary.path().canonicalize().unwrap().join("quarantine");
+        let fixture: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../../packages/qa-contracts/fixtures/qa.local-fixed-json-export/v1/conformance.json"
+        )).unwrap();
+        let raw = fixture["source_cases"][0]["raw_utf8"]
+            .as_str()
+            .unwrap()
+            .as_bytes();
+        let request = || FixedJsonExportRequest {
+            run_id: "run-1",
+            attempt: 1,
+            observation_id: "observation/0",
+            raw_bytes: raw,
+        };
+        let export_dir = root.join("fixed-json/run-1/1/export");
+        {
+            // Output publication and ancestry sync precede the receipt's final directory sync.
+            let _failure = SyncFailure::on_call(&export_dir, 3);
+            let stager = EvidenceStager::new(&root);
+            assert_eq!(
+                stager.stage_fixed_json_export(request()).unwrap_err(),
+                StagerError::Storage
+            );
+        }
+        let receipt_path = export_dir.join("0.receipt.json");
+        let original_receipt = fs::read(&receipt_path).unwrap();
+        let original_output = fs::read(export_dir.join("0.json")).unwrap();
+        assert_eq!(fs::read_dir(&export_dir).unwrap().count(), 2);
+        assert_eq!(link_count(&fs::metadata(&receipt_path).unwrap()), Some(1));
+        validate_local_fixed_json_export(&original_receipt, raw, &original_output).unwrap();
+        {
+            let _failure = SyncFailure::on_call(&export_dir, 1);
+            let restarted = EvidenceStager::new(&root);
+            assert_eq!(
+                restarted.stage_fixed_json_export(request()).unwrap_err(),
+                StagerError::Storage
+            );
+        }
+        let restarted = EvidenceStager::new(&root);
+        let handle = restarted.stage_fixed_json_export(request()).unwrap();
+        let replay = restarted.read_fixed_json_export(&handle).unwrap();
+        assert_eq!(canonical_bytes(replay.receipt()).unwrap(), original_receipt);
+        assert_eq!(replay.bytes(), original_output);
+        assert_eq!(fs::read(receipt_path).unwrap(), original_receipt);
+    }
 }
