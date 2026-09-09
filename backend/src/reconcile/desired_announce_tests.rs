@@ -43,6 +43,7 @@ fn valid_registration_not_yet_announced_is_announced() {
             auto_merge: false,
             creator_login: "author-login".to_string(),
             full_config_hash: full_config_hash(&regs[0]),
+            package_env: crate::goals::package_env::PackageEnv::new(),
         }]
     );
 }
@@ -85,6 +86,7 @@ fn valid_registration_announces_alongside_spawn() {
                 auto_merge: false,
                 creator_login: "author-login".to_string(),
                 full_config_hash: full_config_hash(&regs[0]),
+                package_env: crate::goals::package_env::PackageEnv::new(),
             },
         ]
     );
@@ -148,8 +150,8 @@ fn announcement_carries_rendered_packages_and_auto_merge() {
     r.def.packages = vec![
         pkg(
             "ChronoAIProject",
-            "fkst-packages",
-            "dev",
+            "fkst-hosted",
+            "packages",
             "packages/github-devloop",
         ),
         pkg("acme", "pkgs", "main", "packages/proxy"),
@@ -179,7 +181,7 @@ fn announcement_carries_rendered_packages_and_auto_merge() {
             work_label: Some("wl".to_string()),
             detected_work_labels: vec![],
             packages: vec![
-                "ChronoAIProject/fkst-packages@dev:packages/github-devloop".to_string(),
+                "ChronoAIProject/fkst-hosted@packages:packages/github-devloop".to_string(),
                 "acme/pkgs@main:packages/proxy".to_string(),
             ],
             environment: Some("prod".to_string()),
@@ -188,6 +190,7 @@ fn announcement_carries_rendered_packages_and_auto_merge() {
             auto_merge: true,
             creator_login: "author-login".to_string(),
             full_config_hash: full_config_hash(&regs[0]),
+            package_env: crate::goals::package_env::PackageEnv::new(),
         }]
     );
 }
@@ -235,6 +238,7 @@ fn spawn_and_announce_carry_the_detected_work_label_set() {
                 auto_merge: false,
                 creator_login: "author-login".to_string(),
                 full_config_hash: full_config_hash(&regs[0]),
+                package_env: crate::goals::package_env::PackageEnv::new(),
             },
         ],
         "the detected work-label set is threaded onto both actions unchanged"

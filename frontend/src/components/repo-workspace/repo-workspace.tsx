@@ -13,6 +13,17 @@ export function sessionKey(session: SessionDetail): string {
   return session.session_id ?? `trigger-${session.trigger.number}`;
 }
 
+/** Whether `key` names this session, accepting EITHER key form.
+ *
+ *  A deep link can only carry `trigger-<n>` when it is minted before the session
+ *  acquires a `session_id` — which is exactly the case for a chat card offering to
+ *  open a session it just proposed. Matching both forms means such a link keeps
+ *  working after the session starts and its canonical key changes. */
+function matchesSelection(session: SessionDetail, key: string | null): boolean {
+  if (!key) return false;
+  return key === sessionKey(session) || key === `trigger-${session.trigger.number}`;
+}
+
 /** The repo-details workspace: a full-width level-2 view that replaces the
  *  cramped sidebar + the redundant session graph. A left RAIL lists the repo's
  *  sessions (each a compact, selectable card) inside its own bounded scroll
@@ -28,6 +39,8 @@ export function RepoWorkspace({
   onChanged,
   viewerLogin,
   readOnly = false,
+  initialSelectedKey = null,
+  onSelectedKeyChange,
 }: {
   owner: string;
   name: string;
@@ -40,8 +53,14 @@ export function RepoWorkspace({
   viewerLogin: string;
   /** Hide user-token mutations for an App-wide cross-account projection. */
   readOnly?: boolean;
+  /** A session to select on mount — a deep link's `?session=`. Matched by either
+   *  key form (see {@link matchesSelection}); an unknown key falls back to the
+   *  default first session. */
+  initialSelectedKey?: string | null;
+  /** Notified whenever the user selects a session, so the page can reflect it in
+   *  the URL. */
+  onSelectedKeyChange?: (key: string) => void;
 }) {
-  const c = useContent().dashboard;
   const sessions = data?.sessions ?? [];
 
   // Selection is stored as a session KEY (not an index or object) so it stays
@@ -50,16 +69,69 @@ export function RepoWorkspace({
   // session. If the chosen session vanishes from a later poll the lookup misses
   // and we fall back to the first — the detail pane is never left blank while
   // sessions still exist.
-  const [selectedKey, setSelectedKey] = useState<string | null>(null);
+  const [selectedKey, setSelectedKey] = useState<string | null>(initialSelectedKey);
   const selected =
     sessions.length === 0
       ? null
-      : (sessions.find((s) => sessionKey(s) === selectedKey) ?? sessions[0]!);
+      : (sessions.find((s) => matchesSelection(s, selectedKey)) ?? sessions[0]!);
+
+  // Selecting is the user's action, so it both moves the pane and tells the page,
+  // which keeps the URL in step.
+  const onSelect = (key: string) => {
+    setSelectedKey(key);
+    onSelectedKeyChange?.(key);
+  };
 
   return (
+    <div data-testid="repo-workspace" className="h-full flex flex-col min-h-0 gap-3">
+      <SessionsView
+        owner={owner}
+        name={name}
+        data={data}
+        loadFailed={loadFailed}
+        onChanged={onChanged}
+        viewerLogin={viewerLogin}
+        readOnly={readOnly}
+        selected={selected}
+        onSelect={onSelect}
+      />
+    </div>
+  );
+}
+
+/** The rail + detail body. A repository briefly carried a Sessions | Workflows
+ *  switch above this; it is gone because a schedule belongs to a SESSION — it is
+ *  assigned to a session creator and runs in that session's pod — so a
+ *  repository-level list mixed schedules that different sessions own and could
+ *  never run for each other. Schedules are reached through the owning session's
+ *  Workflows tab. This stays a separate function so the workspace root is one
+ *  bounded column and the stacking contract lives on the body that must stack. */
+function SessionsView({
+  owner,
+  name,
+  data,
+  loadFailed,
+  onChanged,
+  viewerLogin,
+  readOnly,
+  selected,
+  onSelect,
+}: {
+  owner: string;
+  name: string;
+  data: RepoSessionsResponse | null;
+  loadFailed: boolean;
+  onChanged: () => void;
+  viewerLogin: string;
+  readOnly: boolean;
+  selected: SessionDetail | null;
+  onSelect: (key: string) => void;
+}) {
+  const c = useContent().dashboard;
+  return (
     <div
-      data-testid="repo-workspace"
-      className="h-full flex flex-col md:flex-row min-h-0 gap-4 overflow-y-auto overflow-x-hidden md:overflow-hidden"
+      data-testid="sessions-view"
+      className="flex-1 flex flex-col md:flex-row min-h-0 gap-4 overflow-y-auto overflow-x-hidden md:overflow-hidden"
     >
       {/* Desktop: a fixed-width rail with independent scrolling. Narrow screens
           stack a bounded rail above the detail so the two panes never force a
@@ -80,7 +152,7 @@ export function RepoWorkspace({
             // Always the EFFECTIVE selection (first by default) so the matching
             // row highlights even before the user has clicked anything.
             selectedKey={selected ? sessionKey(selected) : null}
-            onSelect={setSelectedKey}
+            onSelect={onSelect}
           />
         </ScrollArea>
       </div>
@@ -95,7 +167,9 @@ export function RepoWorkspace({
             data-testid="session-detail"
             className="grad-border rounded-card shadow-2 flex flex-1 flex-col min-h-0 overflow-hidden"
           >
-            <ScrollArea>
+            {/* Bounds the height only; SessionDetailView owns its own scrolling
+                so the header and tablist stay put while a tab's body scrolls. */}
+            <div className="flex min-h-0 flex-1 flex-col">
               {/* Key by session so selecting a different one gives a FRESH
                   detail (resets to the Status tab + re-fetches observe) rather
                   than inheriting the previous session's tab/observe state. */}
@@ -107,7 +181,7 @@ export function RepoWorkspace({
                 onChanged={onChanged}
                 readOnly={readOnly}
               />
-            </ScrollArea>
+            </div>
           </div>
         ) : (
           <div className="grad-border rounded-card shadow-2 flex flex-1 items-center justify-center p-8">

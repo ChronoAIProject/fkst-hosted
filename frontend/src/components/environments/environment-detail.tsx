@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
-import { useLang } from '@/i18n';
+import { useContent, useLang } from '@/i18n';
+import { LoadingState } from '@/components/ui/loading';
 import { useAuth } from '@/lib/auth/github-auth';
 import { useToast } from '@/components/ui/toast';
 import { formatLocal } from '@/lib/format';
@@ -13,7 +14,7 @@ import {
 } from '@/lib/api/environments';
 import type { EnvironmentProfileView } from '@/lib/api/types';
 import type { EnvManagerStrings } from '@/i18n/en/environments';
-import { Note, SectionLabel, Spinner, fmt, statusTone } from './environments-drawer';
+import { Note, SectionLabel, fmt, statusTone } from './environments-drawer';
 
 type DetailState =
   | { status: 'loading' }
@@ -73,6 +74,7 @@ export function EnvironmentDetail({
   onDeleted: () => void;
 }) {
   const { lang } = useLang();
+  const c = useContent();
   const { apiFetch } = useAuth();
   const toast = useToast();
 
@@ -96,12 +98,7 @@ export function EnvironmentDetail({
   }, [apiFetch, name]);
 
   if (state.status === 'loading') {
-    return (
-      <div className="flex items-center gap-2">
-        <Spinner />
-        <Note>{t.detailLoading}</Note>
-      </div>
-    );
+    return <LoadingState label={t.detailLoading} detail={c.loading.service} />;
   }
 
   if (state.status === 'error') {

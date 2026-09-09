@@ -17,6 +17,7 @@ export const canvasSidebar: CanvasSidebarSlice = {
   sessionsFreshness: 'updated {time}',
   sessionsRetry: 'Retry',
   sessionsRefreshing: 'Refreshing…',
+  sessionsLoading: 'Loading this repository’s sessions…',
   sessionsLoadFailed: 'Could not load the sessions of this repository. Please try again.',
   sessionsStaleNotice: 'Refresh failed — showing the last loaded sessions.',
   notInstalledNote: 'The App is not installed on this repository, so sessions cannot run here.',

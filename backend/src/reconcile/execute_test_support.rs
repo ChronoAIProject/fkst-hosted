@@ -4,7 +4,8 @@
 //! session-backend fake lives in [`crate::session_backend::test_support`] and is
 //! re-exported here.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime};
 
@@ -14,16 +15,16 @@ use secrecy::SecretString;
 use super::ReconcileCtx;
 use crate::config::Config;
 use crate::github_app::api::{
-    GithubApi, InstallationId, InstallationToken, InstallationTokenRequest,
+    GithubApi, InstallationId, InstallationToken, InstallationTokenRequest, TokenPermissions,
 };
 use crate::github_app::config::GithubAppConfig;
 use crate::github_app::listing::{GithubListing, InstallationSummary, IssueSummary};
 use crate::github_app::{GithubAppError, GithubAppTokens};
 use crate::goals::trigger_parse::PackageRef;
 use crate::k8s::env_store::EnvStore;
-use crate::log_access::LogAccessRegistry;
 use crate::models::{GithubActor, RepoRef};
 use crate::reconcile::desired::{SessionDef, SessionRegistration};
+use crate::session_access::SessionAccessRegistry;
 use crate::session_backend::SessionBackend;
 
 // ---- recording fake GitHub transport ---------------------------------------
@@ -32,6 +33,10 @@ use crate::session_backend::SessionBackend;
 pub(super) type Call = (String, String, u64, String);
 /// A recorded label-add call: `(owner, repo, issue_number, labels)`.
 pub(super) type LabelCall = (String, String, u64, Vec<String>);
+
+/// The lifetime a minted installation token carries unless a test scripts a shorter
+/// one — GitHub's real one-hour installation-token TTL.
+pub(super) const FULL_TOKEN_TTL: Duration = Duration::from_secs(3600);
 
 #[derive(Default)]
 pub(super) struct RecordingApi {
@@ -44,6 +49,51 @@ pub(super) struct RecordingApi {
     pub(super) branch_heads: Mutex<Option<HashMap<String, String>>>,
     pub(super) create_refs: Mutex<Vec<(String, String)>>,
     pub(super) create_ref_error: Mutex<Option<GithubAppError>>,
+    /// Remaining lifetimes handed to successive token mints; an empty/exhausted queue
+    /// falls back to [`FULL_TOKEN_TTL`]. Lets a test reproduce the near-expiry token
+    /// that #3410 leaked into the shared cache.
+    mint_lifetimes: Mutex<VecDeque<Duration>>,
+    /// The permissions each mint requested, in call order. Only an
+    /// installation-wide mint records `None`; every repo-scoped mint records
+    /// `Some(..)`, with a `perms: None` caller recording `default_permissions()`
+    /// (the service substitutes it before building the request).
+    mint_perms: Mutex<Vec<Option<TokenPermissions>>>,
+    pub(super) mint_repositories: Mutex<Vec<Vec<String>>>,
+    mint_count: AtomicUsize,
+}
+
+impl RecordingApi {
+    /// Script the remaining lifetime of the next mints (the rest are
+    /// [`FULL_TOKEN_TTL`]).
+    pub(super) fn with_mint_lifetimes(self, lifetimes: impl IntoIterator<Item = Duration>) -> Self {
+        *self.mint_lifetimes.lock().unwrap() = lifetimes.into_iter().collect();
+        self
+    }
+
+    /// How many mints requested exactly `perms`.
+    ///
+    /// NOT a session-vs-reconciler discriminator: `session_permissions()` is
+    /// structurally equal to `default_permissions()`, so this also counts the
+    /// reconciler's own repo-scoped reads. It answers only "how many mints carried
+    /// these permissions" — which is what a caller wants when it has already primed
+    /// the cache, making every other call on the path a hit.
+    pub(super) fn mints_with_perms(&self, perms: &TokenPermissions) -> usize {
+        self.mint_perms
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|requested| requested.as_ref() == Some(perms))
+            .count()
+    }
+
+    pub(super) fn last_mint_repositories(&self) -> Vec<String> {
+        self.mint_repositories
+            .lock()
+            .unwrap()
+            .last()
+            .cloned()
+            .unwrap_or_default()
+    }
 }
 
 #[async_trait]
@@ -61,11 +111,28 @@ impl GithubApi for RecordingApi {
         &self,
         _app_jwt: &SecretString,
         _id: InstallationId,
-        _req: &InstallationTokenRequest,
+        req: &InstallationTokenRequest,
     ) -> Result<InstallationToken, GithubAppError> {
+        let nth = self.mint_count.fetch_add(1, Ordering::SeqCst) + 1;
+        self.mint_perms
+            .lock()
+            .unwrap()
+            .push(req.permissions.clone());
+        self.mint_repositories
+            .lock()
+            .unwrap()
+            .push(req.repositories.clone());
+        let lifetime = self
+            .mint_lifetimes
+            .lock()
+            .unwrap()
+            .pop_front()
+            .unwrap_or(FULL_TOKEN_TTL);
+        // The mint ordinal makes successive tokens distinguishable, so a test can prove
+        // WHICH mint's token was delivered rather than only that one happened.
         Ok(InstallationToken {
-            token: SecretString::from("ghs_fake".to_string()),
-            expires_at: SystemTime::now() + Duration::from_secs(3600),
+            token: SecretString::from(format!("ghs_fake_{nth}")),
+            expires_at: SystemTime::now() + lifetime,
         })
     }
 
@@ -193,6 +260,25 @@ pub(crate) use crate::session_backend::test_support::FakeSessionBackend;
 /// A trivial [`GithubListing`] the routing tests never actually call (only the pod
 /// effects run through the faked backend); present so a `ReconcileCtx` is buildable.
 #[derive(Default)]
+/// A repository with no comment history anywhere. The executor-routing tests do
+/// not exercise the schedule pass, so an empty history is both correct and the
+/// cheapest way to satisfy the context.
+pub(super) struct NoComments;
+
+#[async_trait]
+impl crate::github_app::comments::IssueCommentReader for NoComments {
+    async fn list_recent_issue_comments(
+        &self,
+        _token: &SecretString,
+        _owner: &str,
+        _repo: &str,
+        _number: u64,
+        _max_pages: u32,
+    ) -> Result<Vec<crate::github_app::comments::IssueComment>, GithubAppError> {
+        Ok(Vec::new())
+    }
+}
+
 pub(super) struct FakeListing;
 
 #[async_trait]
@@ -244,17 +330,32 @@ impl GithubListing for FakeListing {
 /// Build a [`ReconcileCtx`] wired to `backend`; every other field is a trivial fake
 /// the pod-effect routing tests do not exercise.
 pub(crate) fn test_ctx(backend: Arc<dyn SessionBackend>) -> ReconcileCtx {
+    test_ctx_with_github(backend, tokens(Arc::new(RecordingApi::default())))
+}
+
+/// [`test_ctx`] with the GitHub token service supplied, so a test can pre-seed its
+/// cache or observe its mints.
+pub(crate) fn test_ctx_with_github(
+    backend: Arc<dyn SessionBackend>,
+    github: GithubAppTokens,
+) -> ReconcileCtx {
     ReconcileCtx {
         backend,
         env_store: Arc::new(EnvStore::fake()),
-        github: tokens(Arc::new(RecordingApi::default())),
+        github,
         listing: Arc::new(FakeListing),
+        comments: Arc::new(NoComments),
         http: reqwest::Client::new(),
         config: Config::default(),
         active_repos: crate::reconcile::new_active_repos(),
         ensured_templates: crate::reconcile::new_ensured_templates(),
-        log_registry: LogAccessRegistry::new(),
+        session_access: SessionAccessRegistry::new(false),
         disposable_environments: Default::default(),
+        // A recording audit handle so lifecycle emission is observable without a
+        // network sink; `recording_audit` hands the recorder back where a test
+        // needs to assert on the emitted transitions.
+        audit: crate::audit::AuditHandle::recording().0,
+        identity_gate: crate::runtime_identity::IdentityGate::new(),
     }
 }
 
@@ -284,8 +385,8 @@ pub(super) fn registration() -> SessionRegistration {
             packages: vec![
                 PackageRef {
                     owner: "ChronoAIProject".to_string(),
-                    repo: "fkst-packages".to_string(),
-                    git_ref: "dev".to_string(),
+                    repo: "fkst-hosted".to_string(),
+                    git_ref: "packages".to_string(),
                     path: "packages/github-devloop".to_string(),
                 },
                 PackageRef {
@@ -302,14 +403,15 @@ pub(super) fn registration() -> SessionRegistration {
             engine_config: std::collections::BTreeMap::new(),
             source_branch: None,
             target_branch: None,
+            package_env: crate::goals::package_env::PackageEnv::new(),
         },
         // A manifest-free registration: the effective set equals the explicit packages, so
         // `package_roots` + reachability read exactly these two refs.
         effective_packages: vec![
             PackageRef {
                 owner: "ChronoAIProject".to_string(),
-                repo: "fkst-packages".to_string(),
-                git_ref: "dev".to_string(),
+                repo: "fkst-hosted".to_string(),
+                git_ref: "packages".to_string(),
                 path: "packages/github-devloop".to_string(),
             },
             PackageRef {
@@ -324,5 +426,6 @@ pub(super) fn registration() -> SessionRegistration {
         auto_merge: false,
         log_access: vec![],
         collaborators: vec![],
+        effective_package_env: crate::goals::package_env::PackageEnv::new(),
     }
 }

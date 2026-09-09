@@ -1,3 +1,4 @@
+import { Spinner } from '@/components/ui/loading';
 import { cn } from '@/lib/utils';
 import { ErrorNote } from '@/components/ui/error-note';
 import type { DashboardContent } from '@/i18n/slices';
@@ -64,6 +65,7 @@ export function DisposableEnvironmentConfirm({
             type="button"
             onClick={onConfirm}
             disabled={pending}
+            aria-busy={pending}
             className={cn(
               'font-ui font-semibold text-[12.5px] rounded-control px-4 py-2 transition-[filter,box-shadow]',
               pending
@@ -71,6 +73,7 @@ export function DisposableEnvironmentConfirm({
                 : 'bg-grad-accent text-amber-ink shadow-[var(--shadow-1),var(--glow-amber)] anim-sheen hover:brightness-110 cursor-pointer'
             )}
           >
+            {pending && <Spinner className="mr-1.5" />}
             {pending ? t.createDisposableConfirmPending : t.createDisposableConfirmSubmit}
           </button>
         </div>

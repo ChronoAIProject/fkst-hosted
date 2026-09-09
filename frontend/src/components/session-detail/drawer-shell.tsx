@@ -1,7 +1,6 @@
 import { useEffect, useRef } from 'react';
 import type { ReactNode } from 'react';
 import { OverlayPresence } from '@/components/ui/motion';
-import { ScrollArea } from '@/components/ui/scroll-area';
 
 /** What counts as reachable-by-Tab inside the drawer for the focus trap. */
 const FOCUSABLE =
@@ -119,11 +118,10 @@ export function DrawerShell({
         tabIndex={-1}
         className="flex min-h-0 flex-1 flex-col outline-none"
       >
-        {/* Body scroll region: the panel stays fixed-height and this scrolls
-            internally, so the drawer is anchored to the viewport regardless of
-            page scroll. Plain block flow (no flex) so the caller's `sticky top-0`
-            header pins to THIS scroller exactly as it did on the old panel. */}
-        <ScrollArea>{children}</ScrollArea>
+        {/* The drawer bounds the height; the VIEW owns its scrolling. Scrolling
+            here instead would move the header and the active tab's chrome out of
+            sight together, which is exactly what a tabbed detail must not do. */}
+        <div className="flex min-h-0 flex-1 flex-col">{children}</div>
       </div>
     </OverlayPresence>
   );

@@ -9,12 +9,17 @@
 //! - [`full_config_hash`] — the FULL superset (the above + session name + both
 //!   opt-ins). The basis of the config-immutability check: any edited field flips it,
 //!   even an opt-in that does not respawn the pod.
+//! - [`runtime_config_hash`] — the pod hash after deployment-owned runtime inputs
+//!   (currently the optional work-label namespace) are applied. These inputs must
+//!   replace stale runtimes without changing the trigger's immutable authored hash.
 //!
 //! Both project each `PackageRef` through a borrow-only canonical struct (so
 //! `PackageRef` need not be `Serialize`); the field set + order IS the canonical form
 //! (serde serialises in declaration order), so identical inputs always hash identically.
 
 use std::collections::BTreeMap;
+
+use crate::goals::package_env::PackageEnv;
 
 use serde::Serialize;
 use sha2::{Digest, Sha256};
@@ -85,6 +90,7 @@ pub fn config_hash(
     manifest_refs: &[PackageRef],
     source_branch: Option<&str>,
     target_branch: Option<&str>,
+    package_env: &PackageEnv,
 ) -> String {
     #[derive(Serialize)]
     struct Canonical<'a> {
@@ -110,6 +116,13 @@ pub fn config_hash(
         source_branch: Option<&'a str>,
         #[serde(skip_serializing_if = "Option::is_none")]
         target_branch: Option<&'a str>,
+        // Per-package configuration. Appended LAST and skip-if-empty for the
+        // digest-stability invariant above: a session that configures no package
+        // hashes byte-for-byte as it did before this field existed. It belongs in
+        // THIS hash (not only the full one) because the value reaches the pod --
+        // changing it must respawn, exactly like `output_lang`.
+        #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+        package_env: &'a PackageEnv,
     }
     let canonical = Canonical {
         packages: canon_packages(packages),
@@ -120,8 +133,34 @@ pub fn config_hash(
         manifest_refs: canon_packages(manifest_refs),
         source_branch,
         target_branch,
+        package_env,
     };
     hex_digest(&canonical, "config-hash")
+}
+
+/// Derive the live-runtime drift hash from the trigger-authored [`config_hash`] and
+/// the optional provider work-label namespace.
+///
+/// An unnamespaced deployment returns the historical hash byte-for-byte. Enabling or
+/// changing a namespace moves only this runtime hash, causing normal pod replacement
+/// while leaving [`full_config_hash`] unchanged so the control plane does not mistake
+/// an operator configuration change for an edit to the immutable trigger issue.
+pub fn runtime_config_hash(config_hash: &str, work_label_namespace: Option<&str>) -> String {
+    let Some(work_label_namespace) = work_label_namespace else {
+        return config_hash.to_string();
+    };
+    #[derive(Serialize)]
+    struct Canonical<'a> {
+        config_hash: &'a str,
+        work_label_namespace: &'a str,
+    }
+    hex_digest(
+        &Canonical {
+            config_hash,
+            work_label_namespace,
+        },
+        "runtime-config-hash",
+    )
 }
 
 /// A stable content hash over a registration's FULL launch config — the superset of
@@ -181,6 +220,11 @@ pub fn full_config_hash(reg: &SessionRegistration) -> String {
         source_branch: Option<&'a str>,
         #[serde(skip_serializing_if = "Option::is_none")]
         target_branch: Option<&'a str>,
+        // Appended LAST and skip-if-empty, same reason as the fields above. A
+        // non-empty map flips the full hash, FREEZING per-package configuration
+        // under config-immutability: it cannot be edited after registration.
+        #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+        package_env: &'a PackageEnv,
     }
     let canonical = Canonical {
         packages: canon_packages(&reg.def.packages),
@@ -195,6 +239,7 @@ pub fn full_config_hash(reg: &SessionRegistration) -> String {
         manifest_refs: canon_packages(&reg.def.manifest_refs),
         source_branch: reg.def.source_branch.as_deref(),
         target_branch: reg.def.target_branch.as_deref(),
+        package_env: &reg.def.package_env,
     };
     hex_digest(&canonical, "full-config-hash")
 }

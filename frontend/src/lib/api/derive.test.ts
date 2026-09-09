@@ -193,8 +193,8 @@ describe('name filters', () => {
 });
 
 describe('chart row builders', () => {
-  const pkgA = 'ChronoAIProject/fkst-packages@fkst-hosted:codex/base';
-  const pkgB = 'ChronoAIProject/fkst-packages@fkst-hosted:codex/triage';
+  const pkgA = 'ChronoAIProject/fkst-hosted@packages:codex/base';
+  const pkgB = 'ChronoAIProject/fkst-hosted@packages:codex/triage';
   const accounts = [
     account({
       login: 'shining',

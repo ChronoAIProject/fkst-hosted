@@ -1,10 +1,11 @@
-import { useLang } from '@/i18n';
+import { useContent, useLang } from '@/i18n';
+import { LoadingState } from '@/components/ui/loading';
 import { formatLocal } from '@/lib/format';
 import { Chip } from '@/components/ui/chip';
 import { StaggerItem } from '@/components/ui/motion';
 import type { EnvironmentProfileSummary } from '@/lib/api/types';
 import type { EnvManagerStrings } from '@/i18n/en/environments';
-import { Note, Spinner, fmt, statusTone, type ListState } from './environments-drawer';
+import { Note, fmt, statusTone, type ListState } from './environments-drawer';
 
 /** Resting depth + a soft status-matched glow so a profile's health reads at a
  *  glance (mirrors the session-card treatment). `.hover-lift` swaps in the raised
@@ -88,6 +89,7 @@ export function EnvironmentList({
   onOpen: (name: string) => void;
   onRetry: () => void;
 }) {
+  const c = useContent();
   return (
     <div className="flex flex-col gap-4">
       <div className="flex items-center justify-end">
@@ -103,10 +105,7 @@ export function EnvironmentList({
       </div>
 
       {state.status === 'loading' && (
-        <div className="flex items-center gap-2">
-          <Spinner />
-          <Note>{t.listLoading}</Note>
-        </div>
+        <LoadingState label={t.listLoading} detail={c.loading.service} />
       )}
 
       {state.status === 'error' && (

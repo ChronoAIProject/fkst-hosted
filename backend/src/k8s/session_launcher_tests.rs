@@ -22,7 +22,7 @@ fn creds_map<'a>(
         .collect()
 }
 
-fn spec() -> SessionPodSpec {
+pub(super) fn spec() -> SessionPodSpec {
     SessionPodSpec {
         session_id: "abc123".to_string(),
         installation_id: 42,
@@ -33,17 +33,25 @@ fn spec() -> SessionPodSpec {
         trigger_issue_number: 7,
         package_roots: vec!["web".to_string(), "api".to_string()],
         work_label: "fkst".to_string(),
+        work_label_map_json: None,
+        work_label_namespace: None,
+        package_env_json: None,
         bot_login: "fkst-bot[bot]".to_string(),
         config_hash: "cfg-deadbeef".to_string(),
         output_lang: None,
         engine_config: BTreeMap::new(),
         creator_login: "author-login".to_string(),
+        creator_id: Some(4242),
+        trigger_author_id: 4242,
+        trigger_author_login: "author-login".to_string(),
         contributors: vec!["author-login".to_string()],
+        upstream_branch: "develop".to_string(),
         target_branch: "fkst-hosted-default".to_string(),
+        delivery_grants_json: None,
     }
 }
 
-fn config() -> PodConfig {
+pub(super) fn config() -> PodConfig {
     PodConfig {
         dispatch: true,
         mode: crate::config::PodMode::K8sCustomized,
@@ -54,6 +62,7 @@ fn config() -> PodConfig {
         llm_model: "gpt-5-codex".to_string(),
         llm_wire_api: "chat".to_string(),
         llm_reasoning_effort: "max".to_string(),
+        creds_wait_timeout_secs: 300,
         dns_nameservers: vec!["1.1.1.1".to_string(), "8.8.8.8".to_string()],
         runtime_class: None,
         rate_pools: BTreeMap::new(),
@@ -173,10 +182,15 @@ fn build_session_pod_injects_the_section_5_2_env() {
         Some("web api")
     );
     assert_eq!(env_value(env, "FKST_SESSION_WORK_LABEL"), Some("fkst"));
+    assert_eq!(
+        env_value(env, "FKST_SESSION_WORK_LABEL_MAP_JSON"),
+        None,
+        "an unnamespaced session preserves the historical environment"
+    );
     assert_eq!(env_value(env, "FKST_SESSION_CREATOR"), Some("author-login"));
     assert_eq!(
         env_value(env, "FKST_DEVLOOP_UPSTREAM_BRANCH"),
-        Some("fkst-hosted-default")
+        Some("develop")
     );
     assert_eq!(
         env_value(env, "FKST_DEVLOOP_INTEGRATION_BRANCH"),
@@ -186,6 +200,50 @@ fn build_session_pod_injects_the_section_5_2_env() {
     // them fails any `setup_worktree()` call). Platform constants, not knobs.
     assert_eq!(env_value(env, "FKST_CANDIDATE_PREFIX"), Some("fkst-cand"));
     assert_eq!(env_value(env, "FKST_CANDIDATE_FROM_SEP"), Some("--from--"));
+    assert_eq!(
+        env_value(env, "FKST_SESSION_DELIVERY_GRANTS"),
+        None,
+        "an ungranted session preserves the historical environment"
+    );
+}
+
+#[test]
+fn session_env_pairs_render_the_namespaced_work_label_map_for_both_backends() {
+    let mut namespaced = spec();
+    namespaced.work_label = "fkst-dev-chronoai-fkst".to_string();
+    namespaced.work_label_map_json = Some(r#"{"fkst-dev":"fkst-dev-chronoai-fkst"}"#.to_string());
+    let pairs = session_env_pairs(&namespaced, &config());
+    assert_eq!(
+        pairs
+            .iter()
+            .find(|(key, _)| key == "FKST_SESSION_WORK_LABEL_MAP_JSON")
+            .map(|(_, value)| value.as_str()),
+        namespaced.work_label_map_json.as_deref()
+    );
+    assert!(pairs
+        .iter()
+        .any(|(key, value)| key == "FKST_SESSION_WORK_LABEL" && value == "fkst-dev-chronoai-fkst"));
+}
+
+#[test]
+fn session_env_pairs_render_only_a_present_scoped_grant_contract() {
+    let mut granted = spec();
+    granted.delivery_grants_json = Some(
+        r#"[{"lifecycle_repo":"acme/site","lifecycle_issue":41,"implementation_repo":"acme/tools","implementation_branch":"main"}]"#.to_string(),
+    );
+    let pairs = session_env_pairs(&granted, &config());
+    assert_eq!(
+        pairs
+            .iter()
+            .find(|(key, _)| key == "FKST_SESSION_DELIVERY_GRANTS")
+            .map(|(_, value)| value.as_str()),
+        granted.delivery_grants_json.as_deref()
+    );
+
+    let ungranted = session_env_pairs(&spec(), &config());
+    assert!(ungranted
+        .iter()
+        .all(|(key, _)| key != "FKST_SESSION_DELIVERY_GRANTS"));
 }
 
 #[test]
@@ -673,4 +731,120 @@ fn without_engine_config_overrides_the_operator_llm_values_render() {
     assert!(pairs
         .iter()
         .any(|(k, v)| k == "FKST_LLM_REASONING_EFFORT" && v == "max"));
+}
+
+/// An unconfigured session must render NO package-env key, so adding this feature
+/// cannot change any existing pod's environment.
+#[test]
+fn an_unconfigured_session_renders_no_package_env_key() {
+    let rendered = session_env_pairs(&spec(), &config());
+    assert!(
+        !rendered
+            .iter()
+            .any(|(key, _)| key == crate::k8s::session_launcher::SESSION_PACKAGE_ENV_JSON_ENV),
+        "an empty package env must render no key at all"
+    );
+}
+
+/// A configured session renders exactly one deterministic key.
+#[test]
+fn a_configured_session_renders_one_deterministic_package_env_key() {
+    let mut configured = spec();
+    configured.package_env_json =
+        Some(r#"{"github-devloop":{"FKST_DEVLOOP_AUTO_REFINE_MAX":"2"}}"#.to_string());
+
+    let rendered = session_env_pairs(&configured, &config());
+    let hits: Vec<_> = rendered
+        .iter()
+        .filter(|(key, _)| key == crate::k8s::session_launcher::SESSION_PACKAGE_ENV_JSON_ENV)
+        .collect();
+
+    assert_eq!(hits.len(), 1, "exactly one key, never a duplicate EnvVar");
+    assert_eq!(
+        hits[0].1,
+        r#"{"github-devloop":{"FKST_DEVLOOP_AUTO_REFINE_MAX":"2"}}"#
+    );
+}
+
+/// The denylist a trigger author is validated against must name EVERY variable the
+/// platform actually renders. A static list drifts the moment someone adds a new
+/// platform variable and forgets, which would silently let an author set it from
+/// their trigger — so this derives the truth from a fully populated spec instead of
+/// restating it.
+#[test]
+fn every_platform_rendered_env_key_is_on_the_author_denylist() {
+    use crate::goals::package_env::PLATFORM_OWNED_SESSION_ENV;
+
+    let mut full = spec();
+    full.work_label_map_json = Some("{}".to_string());
+    full.work_label_namespace = Some("chronoai-fkst".to_string());
+    full.package_env_json = Some("{}".to_string());
+    full.delivery_grants_json = Some("[]".to_string());
+    full.contributors = vec!["someone".to_string()];
+
+    let rendered = session_env_pairs(&full, &config());
+
+    let mut missing: Vec<String> = Vec::new();
+    // Only the names a session AUTHOR could plausibly collide with are policed:
+    // the session-identity and routing variables. Engine tunables have their own
+    // allowlisted section (`### Engine Config`) and are excluded there by name.
+    for (key, _) in &rendered {
+        let policed = key.starts_with("FKST_SESSION_")
+            || key.starts_with("FKST_GITHUB_")
+            || key == "FKST_TRIGGER_ISSUE"
+            || key == crate::reconcile::work_labels::WORK_LABEL_NAMESPACE_ENV;
+        if policed && !PLATFORM_OWNED_SESSION_ENV.contains(&key.as_str()) {
+            missing.push(key.clone());
+        }
+    }
+
+    assert!(
+        missing.is_empty(),
+        "rendered by the platform but missing from PLATFORM_OWNED_SESSION_ENV \
+         (a trigger author could set these): {missing:?}"
+    );
+}
+
+/// The namespace already reaches a session baked INTO its label strings; rendering it
+/// as its own variable is what lets a package read the value instead of recovering it
+/// by stripping a suffix off a label (fragile the moment a logical label has a hyphen).
+#[test]
+fn session_env_pairs_render_the_work_label_namespace_when_configured() {
+    use crate::reconcile::work_labels::WORK_LABEL_NAMESPACE_ENV;
+
+    let mut namespaced = spec();
+    namespaced.work_label_namespace = Some("chronoai-fkst".to_string());
+
+    let rendered = session_env_pairs(&namespaced, &config());
+    assert_eq!(
+        rendered
+            .iter()
+            .find(|(key, _)| key == WORK_LABEL_NAMESPACE_ENV)
+            .map(|(_, value)| value.as_str()),
+        Some("chronoai-fkst")
+    );
+    assert_eq!(
+        rendered
+            .iter()
+            .filter(|(key, _)| key == WORK_LABEL_NAMESPACE_ENV)
+            .count(),
+        1,
+        "exactly one binding: a duplicate EnvVar name is a kubelet last-wins accident"
+    );
+}
+
+/// ABSENT, not empty. An unset namespace means the deployment's labels are
+/// unnamespaced, so a consumer must see "no namespace" rather than a blank one it
+/// might stamp into an artifact name.
+#[test]
+fn session_env_pairs_omit_the_work_label_namespace_when_unset() {
+    use crate::reconcile::work_labels::WORK_LABEL_NAMESPACE_ENV;
+
+    let rendered = session_env_pairs(&spec(), &config());
+    assert!(
+        !rendered
+            .iter()
+            .any(|(key, _)| key == WORK_LABEL_NAMESPACE_ENV),
+        "an unnamespaced deployment must render no key at all"
+    );
 }

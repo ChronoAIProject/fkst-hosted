@@ -131,6 +131,38 @@ impl ChronoStorageClient {
             .map_err(|e| transport("download-body", &e))
     }
 
+    /// Does the object at `key` exist?
+    ///
+    /// A HEAD against the same authenticated download route, so presence can be
+    /// tested WITHOUT pulling the body — the caller that needs this is asking about
+    /// a log bundle, and downloading a whole tarball to answer "is it there" would
+    /// be absurd.
+    ///
+    /// `Ok(false)` is reserved for a definite 404. Every other failure propagates:
+    /// a transport error or a 5xx means "unknown", and reporting that as "absent"
+    /// would render a transient storage outage as "this session has no logs".
+    pub async fn exists(&self, key: &str) -> Result<bool, StorageError> {
+        let token = self.token.access_token().await?;
+        let url = format!(
+            "{}/api/buckets/{}/objects/download",
+            self.base(),
+            self.config.bucket
+        );
+        let response = self
+            .http
+            .head(url)
+            .query(&[("key", key)])
+            .bearer_auth(token.expose_secret())
+            .send()
+            .await
+            .map_err(|e| transport("exists", &e))?;
+        if response.status() == reqwest::StatusCode::NOT_FOUND {
+            return Ok(false);
+        }
+        ensure_success("exists", &response)?;
+        Ok(true)
+    }
+
     /// Delete the object at `key`.
     pub async fn delete(&self, key: &str) -> Result<(), StorageError> {
         let token = self.token.access_token().await?;

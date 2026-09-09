@@ -42,7 +42,7 @@ my-session
 
 ### Packages
 
-ChronoAIProject/fkst-packages@dev:packages/github-devloop
+ChronoAIProject/fkst-hosted@packages:packages/github-devloop
 acme/tools@v1.0.0:pkg/thing
 
 ### Work Label
@@ -61,8 +61,8 @@ prod-env
             packages: vec![
                 PackageRef {
                     owner: "ChronoAIProject".to_string(),
-                    repo: "fkst-packages".to_string(),
-                    git_ref: "dev".to_string(),
+                    repo: "fkst-hosted".to_string(),
+                    git_ref: "packages".to_string(),
                     path: "packages/github-devloop".to_string(),
                 },
                 PackageRef {
@@ -82,6 +82,7 @@ prod-env
             engine_config: std::collections::BTreeMap::new(),
             source_branch: None,
             target_branch: None,
+            package_env: crate::goals::package_env::PackageEnv::new(),
         }
     );
 }
@@ -639,6 +640,37 @@ fn work_label_with_comma_is_422_naming_the_section() {
 }
 
 #[test]
+fn a_reserved_platform_label_cannot_be_claimed_as_a_work_label() {
+    // `fkst-scheduled-workflow` selects an issue for the schedule pass. A session
+    // that adopted it as its wake label could make ordinary work issues impersonate
+    // schedule definitions, so the name is refused at the earliest point it is known.
+    for reserved in crate::reconcile::reserved_labels::RESERVED_LABELS {
+        let body = format!(
+            "### Session Name\nsess\n### Packages\n{VALID_PKG}\n### Work Label\n{reserved}\n"
+        );
+        let msg = err_message(&body);
+        assert!(msg.contains("Work Label"), "must name the section: {msg}");
+        assert!(msg.contains(reserved), "must name the label: {msg}");
+        assert!(msg.contains("reserved"), "must state why: {msg}");
+    }
+    // Case-shifted spellings are refused too: GitHub label identity is
+    // case-insensitive, so they would collide with the reserved label in practice.
+    let body = format!(
+        "### Session Name\nsess\n### Packages\n{VALID_PKG}\n### Work Label\nFKST-Scheduled-Workflow\n"
+    );
+    assert!(err_message(&body).contains("reserved"));
+}
+
+#[test]
+fn a_label_merely_resembling_a_reserved_name_stays_available() {
+    let body = format!(
+        "### Session Name\nsess\n### Packages\n{VALID_PKG}\n### Work Label\nfkst-scheduled\n"
+    );
+    let spec = parse_trigger_issue_body(&body).expect("a near-miss name is the author's to use");
+    assert_eq!(spec.work_label.as_deref(), Some("fkst-scheduled"));
+}
+
+#[test]
 fn duplicate_work_label_heading_is_422() {
     let body = format!(
         "### Session Name\nsess\n### Packages\n{VALID_PKG}\n### Work Label\nx\n### Work Label\ny\n"
@@ -852,7 +884,7 @@ fn the_full_pristine_bundled_template_parses_with_its_sample_values() {
         "comment-only Manifest section carries no references"
     );
     assert_eq!(spec.packages.len(), 1);
-    assert_eq!(spec.packages[0].repo, "fkst-packages");
+    assert_eq!(spec.packages[0].repo, "fkst-hosted");
     assert_eq!(spec.environment, None, "comment-only section is unset");
     assert!(!spec.auto_merge, "the template ships `false`");
     // The pristine `### Session Collaborators` section is comment-only; the parser
@@ -892,32 +924,46 @@ staging
 }
 
 #[test]
-fn the_bundled_templates_new_sections_parse_unset_verbatim() {
-    // The EXACT bundled text of the two NEW sections (explanatory comments and
-    // all) must parse to "not set" — never a 422 that punishes an author who
-    // kept the template's comments. The tail of the bundled asset (from
-    // `### Output Language` onward) is spliced verbatim onto valid required
-    // sections, so this test breaks if the asset's new-section text ever stops
-    // being comment-only or stops stripping cleanly.
+fn the_bundled_templates_optional_sections_parse_unset_verbatim() {
+    // The EXACT bundled text of every comment-only OPTIONAL section must parse to
+    // "not set" — never a 422 that punishes an author who kept the template's
+    // guidance comments. Sections are pulled BY NAME rather than by slicing the
+    // template's tail, so reordering the form (as the session/package grouping
+    // does) cannot silently stop this from testing what it claims to.
     let template = include_str!("../github_app/templates_assets/fkst-substrate-session.md");
-    let new_sections_start = template
-        .find("### Output Language")
-        .expect("the bundled template carries the Output Language section");
+
+    fn section(template: &str, heading: &str) -> String {
+        let start = template
+            .find(heading)
+            .unwrap_or_else(|| panic!("the bundled template carries {heading}"));
+        let rest = &template[start + heading.len()..];
+        let end = rest.find("\n### ").map(|at| at + 1).unwrap_or(rest.len());
+        format!("{heading}{}", &rest[..end])
+    }
+
+    let optional = [
+        "### Output Language",
+        "### Engine Config",
+        "### Package Env",
+    ]
+    .into_iter()
+    .map(|heading| section(template, heading))
+    .collect::<Vec<_>>()
+    .join("\n");
+
     let body = format!(
-        "### Session Name
-sess
-### Packages
-{VALID_PKG}
-### Work Label
-label
-{}",
-        &template[new_sections_start..]
+        "### Session Name\nsess\n### Packages\n{VALID_PKG}\n### Work Label\nlabel\n{optional}"
     );
-    let spec = parse_trigger_issue_body(&body).expect("the bundled new-section text must parse");
+    let spec =
+        parse_trigger_issue_body(&body).expect("the bundled optional-section text must parse");
     assert_eq!(spec.output_lang, None, "comment-only section is unset");
     assert!(
         spec.engine_config.is_empty(),
         "comment-only section is an empty map"
+    );
+    assert!(
+        spec.package_env.is_empty(),
+        "the Package Env example lives inside a comment, so it must configure nothing"
     );
 }
 

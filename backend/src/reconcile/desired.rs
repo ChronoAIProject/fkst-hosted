@@ -22,7 +22,10 @@ use crate::reconcile_config::ReconcileConfig;
 
 // The pure content hashes live in the sibling `hashing` module; re-exported here so
 // the planner (and its attached test modules) reach them as `desired::…` unchanged.
-pub use crate::reconcile::hashing::{config_hash, full_config_hash};
+pub use crate::reconcile::hashing::{config_hash, full_config_hash, runtime_config_hash};
+// The delete-side audit facts the planner attaches to a Kill/CleanupTerminal
+// live in their own module; re-exported so callers reach them as `desired::…`.
+pub use crate::reconcile::runtime_audit::RuntimeAudit;
 
 /// The launch inputs one substrate session needs, distilled from a parsed trigger
 /// issue. This is the non-identifying "what to run" half of a
@@ -55,12 +58,18 @@ pub struct SessionDef {
     /// launcher injects as session env). Part of BOTH hashes: it changes the
     /// pod env, so editing it after registration is a rejected config change.
     pub engine_config: std::collections::BTreeMap<String, String>,
-    /// Optional source branch from the trigger. `None` means the repository's
-    /// default branch, resolved against GitHub at reconcile/spawn time.
+    /// Optional upstream branch from the trigger. It seeds a missing target and
+    /// receives completed target work. `None` means the repository's default
+    /// branch, resolved against GitHub at reconcile/spawn time.
     pub source_branch: Option<String>,
     /// Optional target branch from the trigger. `None` resolves to
     /// `fkst-hosted-default`.
     pub target_branch: Option<String>,
+    /// Per-package configuration parsed from `### Package Env`, later merged with
+    /// any manifest-supplied defaults. Part of BOTH hashes: it changes the pod
+    /// env, so editing it after registration is a rejected config change, exactly
+    /// like `output_lang` and `engine_config`.
+    pub package_env: crate::goals::package_env::PackageEnv,
 }
 
 /// One valid trigger issue resolved to everything the reconciler needs to spawn
@@ -107,6 +116,11 @@ pub struct SessionRegistration {
     /// Defaults to the explicit packages at parse time; the driver overwrites it with the
     /// expanded union before any consumer reads it.
     pub effective_packages: Vec<PackageRef>,
+    /// The session's EFFECTIVE per-package configuration: manifest-supplied defaults
+    /// merged with the trigger's own `### Package Env`, the trigger winning per key.
+    /// Populated by the reconcile driver's expand pass; before that it mirrors the
+    /// trigger-only map, so a manifest-free session is already correct.
+    pub effective_package_env: crate::goals::package_env::PackageEnv,
     /// The deterministic session id (see [`crate::session_spec::derive_session_id`]).
     pub session_id: String,
     /// A stable hash over the launch inputs; a live pod whose recorded hash differs
@@ -176,6 +190,12 @@ pub struct LivePod {
     /// when the annotation is absent/blank (an older pod predating the annotation), in
     /// which case no retire-notify is emitted.
     pub work_labels: Vec<String>,
+    /// The durable creator/trigger attribution stamped on the runtime, read back as part of
+    /// THIS observation (issue #5673). Carried here so the backfill decision costs no extra
+    /// per-runtime API call: a runtime whose stamp is already complete is never patched, and
+    /// a legacy runtime is patched only from a registration observed in the same pass. All
+    /// fields absent for a runtime that predates the stamp.
+    pub identity: crate::runtime_identity::ObservedRuntimeIdentity,
 }
 
 /// Why a pod is being killed. Carried on [`ReconcileAction::Kill`] so the executor
@@ -228,9 +248,16 @@ pub enum ReconcileAction {
     Kill {
         session_id: String,
         reason: KillReason,
+        /// Correlation + attribution for the deletion's lifecycle record. See
+        /// [`RuntimeAudit`] — none of it is recoverable once the runtime is gone.
+        audit: RuntimeAudit,
     },
     /// GC a terminal pod (+ its owned Secret).
-    CleanupTerminal { session_id: String },
+    CleanupTerminal {
+        session_id: String,
+        /// Correlation + attribution for the deletion's lifecycle record.
+        audit: RuntimeAudit,
+    },
     /// Retire-notify the still-OPEN work issues of a session whose trigger issue was
     /// closed (session retired). Emitted from the orphan-pod branch alongside the
     /// `Kill { TriggerClosed }`, carrying the orphan pod's FULL effective `work_labels`
@@ -276,6 +303,10 @@ pub enum ReconcileAction {
         source_branch: Option<String>,
         /// Resolved target branch displayed to the trigger author.
         target_branch: String,
+        /// The session's effective per-package configuration, echoed in the
+        /// announcement so a misspelled package or key -- which is advisory and
+        /// therefore silently inert -- is visible to the author.
+        package_env: crate::goals::package_env::PackageEnv,
         /// Whether this trigger opted into reconcile-side PR auto-merge.
         auto_merge: bool,
         /// The session's effective creator login — rendered into the announce
@@ -312,8 +343,9 @@ fn idle_kill_due(pod: &LivePod, now: DateTime<Utc>, cfg: &ReconcileConfig) -> bo
 
 /// True when the live pod is running a config that no longer matches its
 /// registration. A pod with no recorded hash (`None`) yields no drift decision.
-fn config_drifted(pod: &LivePod, reg: &SessionRegistration) -> bool {
-    matches!(&pod.config_hash, Some(h) if h != &reg.config_hash)
+fn config_drifted(pod: &LivePod, reg: &SessionRegistration, cfg: &ReconcileConfig) -> bool {
+    let expected = runtime_config_hash(&reg.config_hash, cfg.work_label_namespace.as_deref());
+    matches!(&pod.config_hash, Some(h) if h != &expected)
 }
 
 /// True when a registration's CURRENT [`full_config_hash`] differs from the ORIGINAL
@@ -420,10 +452,11 @@ pub fn plan_repo(
             // pod keeps serving; it still touches-pending / idle-kills normally.
             PodLiveness::Starting | PodLiveness::Live => {
                 let pod = pod.expect("Starting/Live liveness implies a pod is present");
-                if config_drifted(pod, reg) && !rejected {
+                if config_drifted(pod, reg, cfg) && !rejected {
                     actions.push(ReconcileAction::Kill {
                         session_id: reg.session_id.clone(),
                         reason: KillReason::ConfigChanged,
+                        audit: RuntimeAudit::from_registration(reg, Some(pod)),
                     });
                 } else if is_pending {
                     actions.push(ReconcileAction::TouchPending {
@@ -439,6 +472,7 @@ pub fn plan_repo(
                     actions.push(ReconcileAction::Kill {
                         session_id: reg.session_id.clone(),
                         reason: KillReason::Idle,
+                        audit: RuntimeAudit::from_registration(reg, Some(pod)),
                     });
                 }
             }
@@ -448,6 +482,7 @@ pub fn plan_repo(
             PodLiveness::Terminal => {
                 actions.push(ReconcileAction::CleanupTerminal {
                     session_id: reg.session_id.clone(),
+                    audit: RuntimeAudit::from_registration(reg, pod),
                 });
             }
         }
@@ -472,6 +507,7 @@ pub fn plan_repo(
                     .iter()
                     .map(reachability::render_ref)
                     .collect(),
+                package_env: reg.effective_package_env.clone(),
                 environment: reg.def.environment.clone(),
                 source_branch: reg.def.source_branch.clone(),
                 target_branch: reg.def.target_branch.clone().unwrap_or_else(|| {
@@ -512,6 +548,9 @@ pub fn plan_repo(
                 actions.push(ReconcileAction::Kill {
                     session_id: pod.session_id.clone(),
                     reason: KillReason::TriggerClosed,
+                    // No registration left: the runtime's own stamp is the only
+                    // attribution evidence, and an unstamped one carries none.
+                    audit: RuntimeAudit::from_observed(pod),
                 });
                 // Same cycle as the kill: retire-notify the still-open work issues so
                 // they no longer look claimed (a retired session is no longer working
@@ -526,6 +565,7 @@ pub fn plan_repo(
             PodLiveness::Terminal => {
                 actions.push(ReconcileAction::CleanupTerminal {
                     session_id: pod.session_id.clone(),
+                    audit: RuntimeAudit::from_observed(pod),
                 });
             }
             PodLiveness::Absent | PodLiveness::Terminating => {}

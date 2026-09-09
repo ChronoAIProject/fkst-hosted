@@ -1,17 +1,27 @@
-//! Unit tests for the executor's GitHub issue effects (flag/clear/announce/reject)
-//! and the pure argument assembly (`session_pod_spec_from`, the token JSON). These
-//! run against a recording fake [`GithubApi`] so no network is touched; the action
-//! routing through the session backend lives in the sibling [`super::routing_tests`],
-//! and the shared fakes/builders live in [`super::execute_test_support`].
-
-use std::time::{Duration, SystemTime};
-
-use k8s_openapi::chrono::DateTime;
+//! Unit tests for the executor's GitHub issue effects (flag / clear / announce /
+//! reject). They run against a recording fake [`GithubApi`] so no network is
+//! touched; the action routing through the session backend lives in the sibling
+//! [`super::routing_tests`], the create-side audit trail in
+//! [`super::lifecycle_tests`], and the shared fakes/builders in
+//! [`super::execute_test_support`].
 
 use super::*;
-use crate::k8s::session_github_token_json;
 use crate::reconcile::announce::announce_session_comment_with_defaults;
+// The spawn/launch helpers these tests drive were extracted out of `execute` (it
+// was well past the file-size budget); they are imported rather than reached
+// through `super::*` so the move stays visible at the use site.
+use crate::k8s::session_github_token_json;
+use crate::reconcile::execute_launch_spec::{
+    resolve_named_environment, session_contributors, session_pod_spec_from, storage_writer_creds,
+    EnvResolution,
+};
+use crate::reconcile::execute_spawn::{ensure_branch_topology, ResolvedBranchTopology};
 use crate::reconcile::execute_test_support::*;
+use crate::reconcile::hashing::runtime_config_hash;
+use crate::session_spec::creds::credential_secret_data;
+use k8s_openapi::chrono::DateTime;
+use secrecy::SecretString;
+use std::time::{Duration, SystemTime};
 
 // ---- GitHub issue effects ---------------------------------------------------
 
@@ -173,7 +183,16 @@ async fn missing_target_is_created_at_the_current_source_head() {
     )]));
     let ctx = target_branch_ctx(api.clone());
 
-    assert!(ensure_target_branch(&registration(), &ctx).await);
+    let topology = ensure_branch_topology(&registration(), &ctx)
+        .await
+        .expect("branch topology resolves");
+    assert_eq!(
+        topology,
+        ResolvedBranchTopology {
+            upstream: "main".to_string(),
+            integration: "fkst-hosted-default".to_string(),
+        }
+    );
     assert_eq!(
         *api.create_refs.lock().unwrap(),
         [("fkst-hosted-default".to_string(), "source-head".to_string())]
@@ -190,7 +209,9 @@ async fn target_create_lost_race_is_successful() {
     *api.create_ref_error.lock().unwrap() = Some(GithubAppError::RefExists);
     let ctx = target_branch_ctx(api);
 
-    assert!(ensure_target_branch(&registration(), &ctx).await);
+    assert!(ensure_branch_topology(&registration(), &ctx)
+        .await
+        .is_some());
 }
 
 #[tokio::test]
@@ -202,7 +223,32 @@ async fn existing_target_is_never_reset_or_recreated() {
     )]));
     let ctx = target_branch_ctx(api.clone());
 
-    assert!(ensure_target_branch(&registration(), &ctx).await);
+    let topology = ensure_branch_topology(&registration(), &ctx)
+        .await
+        .expect("existing target still resolves its upstream");
+    assert_eq!(topology.upstream, "main");
+    assert_eq!(topology.integration, "fkst-hosted-default");
+    assert!(api.create_refs.lock().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn explicit_source_remains_upstream_after_target_exists() {
+    let api = Arc::new(RecordingApi::default());
+    *api.branch_heads.lock().unwrap() = Some(std::collections::HashMap::from([(
+        "integration/release".to_string(),
+        "existing-head".to_string(),
+    )]));
+    let ctx = target_branch_ctx(api.clone());
+    let mut reg = registration();
+    reg.def.source_branch = Some("release/v2".to_string());
+    reg.def.target_branch = Some("integration/release".to_string());
+
+    let topology = ensure_branch_topology(&reg, &ctx)
+        .await
+        .expect("explicit topology resolves");
+
+    assert_eq!(topology.upstream, "release/v2");
+    assert_eq!(topology.integration, "integration/release");
     assert!(api.create_refs.lock().unwrap().is_empty());
 }
 
@@ -218,12 +264,21 @@ async fn target_create_failure_skips_spawn_without_issue_feedback() {
     ));
     let ctx = target_branch_ctx(api.clone());
 
-    assert!(!ensure_target_branch(&registration(), &ctx).await);
+    assert!(ensure_branch_topology(&registration(), &ctx)
+        .await
+        .is_none());
     assert!(api.comments.lock().unwrap().is_empty());
     assert!(api.labels_added.lock().unwrap().is_empty());
 }
 
 // ---- pure argument assembly -------------------------------------------------
+
+fn branch_topology() -> ResolvedBranchTopology {
+    ResolvedBranchTopology {
+        upstream: "develop".to_string(),
+        integration: "fkst-hosted-default".to_string(),
+    }
+}
 
 #[test]
 fn session_pod_spec_is_built_from_the_registration() {
@@ -233,9 +288,13 @@ fn session_pod_spec_is_built_from_the_registration() {
     let spec = session_pod_spec_from(
         &reg,
         &["fkst-run".to_string()],
+        &branch_topology(),
         Some("fkst-bot".to_string()),
         &crate::access_policy::AccessPolicy::default(),
-    );
+        None,
+        None,
+    )
+    .expect("valid labels");
 
     assert_eq!(spec.session_id, "sess-abc");
     assert_eq!(spec.installation_id, 42);
@@ -245,12 +304,13 @@ fn session_pod_spec_is_built_from_the_registration() {
     assert_eq!(spec.bot_login, "fkst-bot");
     assert_eq!(spec.creator_login, "author-login");
     assert_eq!(spec.config_hash, "hash123");
+    assert_eq!(spec.upstream_branch, "develop");
     assert_eq!(spec.target_branch, "fkst-hosted-default");
     // package_roots are the refs rendered back to `owner/repo@ref:path`, in order.
     assert_eq!(
         spec.package_roots,
         vec![
-            "ChronoAIProject/fkst-packages@dev:packages/github-devloop".to_string(),
+            "ChronoAIProject/fkst-hosted@packages:packages/github-devloop".to_string(),
             "acme/pkgs@main:packages/proxy".to_string(),
         ]
     );
@@ -273,13 +333,17 @@ fn package_roots_come_from_the_effective_set_not_just_explicit_packages() {
     let spec = session_pod_spec_from(
         &reg,
         &["fkst-run".to_string()],
+        &branch_topology(),
         None,
         &crate::access_policy::AccessPolicy::default(),
-    );
+        None,
+        None,
+    )
+    .expect("valid labels");
     assert_eq!(
         spec.package_roots,
         vec![
-            "ChronoAIProject/fkst-packages@dev:packages/github-devloop".to_string(),
+            "ChronoAIProject/fkst-hosted@packages:packages/github-devloop".to_string(),
             "acme/pkgs@main:packages/proxy".to_string(),
             "acme/manifests-pkgs@main:packages/from-manifest".to_string(),
         ],
@@ -298,9 +362,13 @@ fn spec_work_label_is_the_comma_joined_detected_set() {
     let discovered_only = session_pod_spec_from(
         &reg,
         &["pkg-a".to_string(), "pkg-b".to_string()],
+        &branch_topology(),
         Some("fkst-bot".to_string()),
         &crate::access_policy::AccessPolicy::default(),
-    );
+        None,
+        None,
+    )
+    .expect("valid labels");
     assert_eq!(discovered_only.work_label, "pkg-a,pkg-b");
 
     // Explicit + discovered union, comma-joined in the given order, deduped.
@@ -311,10 +379,45 @@ fn spec_work_label_is_the_comma_joined_detected_set() {
             "pkg-a".to_string(),
             "fkst-run".to_string(),
         ],
+        &branch_topology(),
         Some("fkst-bot".to_string()),
         &crate::access_policy::AccessPolicy::default(),
-    );
+        None,
+        None,
+    )
+    .expect("valid labels");
     assert_eq!(union.work_label, "fkst-run,pkg-a");
+}
+
+#[test]
+fn namespaced_spec_uses_only_effective_labels_and_carries_the_mapping() {
+    let reg = registration();
+    let spec = session_pod_spec_from(
+        &reg,
+        &["fkst-dev".to_string(), "fkst-security".to_string()],
+        &branch_topology(),
+        Some("fkst-bot".to_string()),
+        &crate::access_policy::AccessPolicy::default(),
+        None,
+        Some("chronoai-fkst"),
+    )
+    .expect("valid namespaced labels");
+
+    assert_eq!(
+        spec.work_label,
+        "fkst-dev-chronoai-fkst,fkst-security-chronoai-fkst"
+    );
+    assert_eq!(
+        spec.work_label_map_json.as_deref(),
+        Some(
+            r#"{"fkst-dev":"fkst-dev-chronoai-fkst","fkst-security":"fkst-security-chronoai-fkst"}"#
+        )
+    );
+    assert_eq!(
+        spec.config_hash,
+        runtime_config_hash(&reg.config_hash, Some("chronoai-fkst"))
+    );
+    assert!(!spec.work_label.split(',').any(|label| label == "fkst-dev"));
 }
 
 #[test]
@@ -322,9 +425,13 @@ fn missing_bot_login_defaults_to_empty() {
     let spec = session_pod_spec_from(
         &registration(),
         &["fkst-run".to_string()],
+        &branch_topology(),
         None,
         &crate::access_policy::AccessPolicy::default(),
-    );
+        None,
+        None,
+    )
+    .expect("valid labels");
     assert_eq!(spec.bot_login, "", "an unset bot login renders as empty");
 }
 
@@ -418,4 +525,45 @@ fn storage_creds_carry_the_single_nyxid_sa_into_the_session_secret() {
     assert_eq!(data["storage-token-url"], "https://nyx.example/oauth/token");
     assert_eq!(data["storage-base-url"], "https://storage.example/proxy");
     assert_eq!(data["storage-bucket"], "fkst-logs");
+}
+
+/// The invariant that makes the injected namespace trustworthy for artifact naming:
+/// it is not merely *a* configured string, it is exactly the suffix the session's own
+/// effective work labels carry. Built through the real spec builder so the label and
+/// the variable come from one `apply_work_label_namespace` call, not two fixtures.
+#[test]
+fn the_rendered_namespace_equals_the_suffix_on_every_effective_work_label() {
+    use crate::config::PodConfig;
+    use crate::k8s::session_launcher::session_env_pairs;
+    use crate::reconcile::work_labels::WORK_LABEL_NAMESPACE_ENV;
+
+    let spec = session_pod_spec_from(
+        &registration(),
+        &["fkst-dev".to_string(), "fkst-security".to_string()],
+        &branch_topology(),
+        Some("fkst-bot".to_string()),
+        &crate::access_policy::AccessPolicy::default(),
+        None,
+        Some("chronoai-fkst"),
+    )
+    .expect("valid namespaced labels");
+
+    let rendered = session_env_pairs(&spec, &PodConfig::default());
+    let find = |wanted: &str| {
+        rendered
+            .iter()
+            .find(|(key, _)| key == wanted)
+            .map(|(_, value)| value.clone())
+    };
+
+    let namespace = find(WORK_LABEL_NAMESPACE_ENV).expect("namespace rendered");
+    let work_label = find("FKST_SESSION_WORK_LABEL").expect("work label rendered");
+
+    assert_eq!(namespace, "chronoai-fkst");
+    for label in work_label.split(',') {
+        assert!(
+            label.ends_with(&format!("-{namespace}")),
+            "effective label {label:?} must end with the injected namespace {namespace:?}"
+        );
+    }
 }

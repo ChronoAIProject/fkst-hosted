@@ -3,6 +3,8 @@ import { render, screen, fireEvent, within } from '@testing-library/react';
 import { MemoryRouter, Routes, Route } from 'react-router-dom';
 import { Shell, nextCondensed } from './shell';
 import { AuthProvider } from '@/lib/auth/github-auth';
+import { BroaderOAuthProvider } from '@/lib/auth/broader-oauth';
+import { ToastProvider } from '@/components/ui/toast';
 
 const ACCESS_KEY = 'fkst-gh-access';
 
@@ -17,14 +19,23 @@ function renderShell({
   }
   return render(
     <AuthProvider>
-      <MemoryRouter initialEntries={[initialEntry]}>
-        <Routes>
-          <Route element={<Shell />}>
-            <Route index element={<div>home content</div>} />
-            <Route path="get-started" element={<div>doc content</div>} />
-          </Route>
-        </Routes>
-      </MemoryRouter>
+      {/* The shell now hosts the FKST Orchestrator, which forwards the
+          broader-visibility credential and raises toasts — so it needs both
+          providers, exactly as production does (app/index.tsx mounts them above
+          the router). */}
+      <BroaderOAuthProvider>
+        <ToastProvider>
+          <MemoryRouter initialEntries={[initialEntry]}>
+            <Routes>
+              <Route element={<Shell />}>
+                <Route index element={<div>home content</div>} />
+                <Route path="get-started" element={<div>doc content</div>} />
+                <Route path="operations" element={<div>operations content</div>} />
+              </Route>
+            </Routes>
+          </MemoryRouter>
+        </ToastProvider>
+      </BroaderOAuthProvider>
     </AuthProvider>
   );
 }
@@ -114,7 +125,9 @@ describe('Shell', () => {
     const menu = screen.getByRole('menu');
     // Signed-out: the menu carries a Sign in entry and never a Sign out. The
     // v2 chrome has no Get Started CTA, so the menu carries none either.
-    expect(within(menu).getByRole('menuitem', { name: /sign in with github/i })).toBeInTheDocument();
+    expect(
+      within(menu).getByRole('menuitem', { name: /sign in with github/i })
+    ).toBeInTheDocument();
     expect(within(menu).queryByRole('menuitem', { name: /sign out/i })).not.toBeInTheDocument();
     expect(within(menu).getByRole('menuitem', { name: 'GitHub ↗' })).toBeInTheDocument();
     expect(within(menu).queryByRole('menuitem', { name: /get started/i })).not.toBeInTheDocument();
@@ -160,7 +173,10 @@ describe('Shell', () => {
   it('opens the environments drawer from the authenticated topbar entry', () => {
     // The drawer fetches profiles on open; stub the network so no real request
     // is made — the fetch failing still renders the drawer chrome.
-    vi.stubGlobal('fetch', vi.fn(() => Promise.reject(new Error('no network'))));
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(() => Promise.reject(new Error('no network')))
+    );
 
     renderShell({ authenticated: true });
     const envButton = screen.getByRole('button', { name: 'Environments' });
@@ -170,6 +186,82 @@ describe('Shell', () => {
     fireEvent.click(envButton);
     // Open: the drawer renders its heading (distinct from the topbar button).
     expect(screen.getByRole('heading', { name: 'Environments' })).toBeInTheDocument();
+  });
+
+  it('offers Operations to EVERY authenticated user, not only administrators', () => {
+    renderShell({ authenticated: true });
+    // The link is drawn from the locally-known session flag alone. Nothing here
+    // consults an overview, an admin claim, or any other API state — the route's
+    // own API is the boundary, and a regular user is entitled to the route.
+    const nav = screen.getByRole('navigation');
+    expect(within(nav).getByRole('link', { name: 'Operations' })).toHaveAttribute(
+      'href',
+      '/operations'
+    );
+  });
+
+  it('styles Operations with the same nav classes as Home and Dashboard', () => {
+    // Regression guard for the template-literal bug: `${navLinkClass}` inside a
+    // template string stringifies the FUNCTION SOURCE, so the link ends up with
+    // its source text as a className and none of the real nav styling. Asserting
+    // against the classes Home actually carries makes that failure mode fail here.
+    renderShell({ authenticated: true });
+    const nav = screen.getByRole('navigation');
+    const home = within(nav).getByRole('link', { name: 'Home' });
+    const operations = within(nav).getByRole('link', { name: 'Operations' });
+
+    // toHaveClass asserts CLASS-LIST MEMBERSHIP, which is the whole point here:
+    // a substring check would pass against the stringified function, whose source
+    // text literally contains every one of these class names.
+    const shared = ['hover-underline', 'text-nav', 'no-underline', 'rounded-control'];
+    for (const cls of shared) {
+      expect(home).toHaveClass(cls);
+      expect(operations).toHaveClass(cls);
+    }
+    // The inactive route styling must be the shared one, not a stringified fn.
+    expect(operations).toHaveClass('text-faint');
+    // These two read the raw attribute deliberately: they are the tell-tales of a
+    // stringified function, which is not a class name at all.
+    expect(operations.className).not.toContain('isActive');
+    expect(operations.className).not.toContain('=>');
+    // …while the responsive collapse rule is still composed on top.
+    expect(operations).toHaveClass('max-[720px]:hidden');
+  });
+
+  it('applies the active nav styling to Operations on /operations', () => {
+    // isActive is only evaluated when React Router can CALL the className fn.
+    renderShell({ authenticated: true, initialEntry: '/operations' });
+    const nav = screen.getByRole('navigation');
+    const operations = within(nav).getByRole('link', { name: 'Operations' });
+    expect(operations).toHaveClass('text-fg');
+    expect(operations).toHaveClass('bg-raise');
+    expect(operations).not.toHaveClass('text-faint');
+  });
+
+  it('keeps Operations reachable from the overflow menu at narrow widths', () => {
+    // The inline nav link hides below 721px; without this menu entry the route
+    // would simply vanish on a phone.
+    renderShell({ authenticated: true });
+    fireEvent.click(screen.getByRole('button', { name: 'More' }));
+    expect(
+      within(screen.getByRole('menu')).getByRole('menuitem', { name: 'Operations' })
+    ).toHaveAttribute('href', '/operations');
+  });
+
+  it('hides Operations from a signed-out visitor', () => {
+    renderShell();
+    expect(screen.queryByRole('link', { name: 'Operations' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('menuitem', { name: 'Operations' })).not.toBeInTheDocument();
+  });
+
+  it('treats /operations as a fixed-height app route with no marketing footer', () => {
+    renderShell({ authenticated: true, initialEntry: '/operations' });
+    const main = screen.getByRole('main');
+    expect(main).toContainElement(screen.getByText('operations content'));
+    // Same contract as the dashboard: the scroll region holds no footer, and the
+    // slim bar is pinned after <main> so the window itself never scrolls.
+    expect(main.querySelector('footer')).toBeNull();
+    expect(main.nextElementSibling?.tagName).toBe('FOOTER');
   });
 });
 

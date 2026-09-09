@@ -14,6 +14,7 @@ export const canvasSidebar: CanvasSidebarSlice = {
   sessionsFreshness: '更新于 {time}',
   sessionsRetry: '重试',
   sessionsRefreshing: '刷新中…',
+  sessionsLoading: '正在加载该仓库的会话…',
   sessionsLoadFailed: '无法加载此仓库的会话，请重试。',
   sessionsStaleNotice: '刷新失败 —— 显示最近一次加载的会话。',
   notInstalledNote: '此仓库尚未安装 App，会话无法在这里运行。',

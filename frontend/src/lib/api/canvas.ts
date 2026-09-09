@@ -159,6 +159,41 @@ export async function stopTrigger(
   return { ok: false, message: await readErrorMessage(res) };
 }
 
+/** POST /api/v1/repos body — a repository to create as the signed-in user. */
+export interface CreateRepoRequest {
+  /** Organization to create under; omit (or use the viewer's own login) for the
+   *  personal account. */
+  owner?: string;
+  name: string;
+  private: boolean;
+  description?: string;
+}
+
+/** The created repository, as `POST /api/v1/repos` returns it. `installed` is
+ *  always false on a fresh repo — the guided App install follows. */
+export interface CreatedRepo {
+  owner: string;
+  name: string;
+  private: boolean;
+  installed: boolean;
+}
+
+/** POST /api/v1/repos — create a repository AS the signed-in user (their own
+ *  token, personal account or an org they belong to). GitHub's own refusals
+ *  (name taken, no org permission) surface as the envelope message. */
+export async function createRepo(
+  apiFetch: ApiFetch,
+  request: CreateRepoRequest
+): Promise<MutationResult<CreatedRepo>> {
+  const res = await apiFetch('/api/v1/repos', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(request),
+  });
+  if (res.ok) return { ok: true, data: (await res.json()) as CreatedRepo };
+  return { ok: false, message: await readErrorMessage(res) };
+}
+
 /** DELETE /api/v1/installations/{owner} — uninstall the GitHub App from an
  *  account. */
 export async function uninstallApp(

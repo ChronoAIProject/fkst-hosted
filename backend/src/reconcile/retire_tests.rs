@@ -247,6 +247,7 @@ fn issue(number: i64, labels: &[&str]) -> IssueSummary {
         assignees: Vec::new(),
         user_login: "alice".to_string(),
         user_id: 7,
+        created_at: k8s_openapi::chrono::DateTime::UNIX_EPOCH,
     }
 }
 

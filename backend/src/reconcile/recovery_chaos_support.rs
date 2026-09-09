@@ -15,12 +15,12 @@ use crate::github_app::api::{
 };
 use crate::github_app::listing::{GithubListing, InstallationSummary, IssueSummary};
 use crate::github_app::{GithubAppError, GithubAppTokens};
-use crate::log_access::LogAccessRegistry;
 use crate::models::{GithubActor, RepoRef};
 use crate::reconcile::desired::KillReason;
 use crate::reconcile::{
     new_active_repos, new_ensured_templates, reconcile_channel, reconcile_repo,
 };
+use crate::session_access::SessionAccessRegistry;
 
 #[path = "recovery_chaos_runtime.rs"]
 mod runtime;
@@ -69,6 +69,7 @@ pub(super) fn issue(
         assignees: Vec::new(),
         user_login: login.to_string(),
         user_id,
+        created_at: k8s_openapi::chrono::DateTime::UNIX_EPOCH,
     }
 }
 
@@ -191,6 +192,23 @@ impl GithubLedger {
                     .any(|login| login.eq_ignore_ascii_case(assignee))
             })
             .collect()
+    }
+}
+
+/// The chaos fixtures drive session lifecycle, not schedules, so the ledger has no
+/// comment history to serve. Answering empty keeps the schedule pass a no-op there
+/// instead of adding a second fake for a surface these scenarios never touch.
+#[async_trait]
+impl crate::github_app::comments::IssueCommentReader for GithubLedger {
+    async fn list_recent_issue_comments(
+        &self,
+        _token: &SecretString,
+        _owner: &str,
+        _repo: &str,
+        _number: u64,
+        _max_pages: u32,
+    ) -> Result<Vec<crate::github_app::comments::IssueComment>, GithubAppError> {
+        Ok(Vec::new())
     }
 }
 
@@ -485,13 +503,16 @@ impl ChaosHarness {
             backend,
             env_store: Arc::new(FixtureEnvironmentStore),
             github,
-            listing: ledger,
+            listing: ledger.clone(),
+            comments: ledger,
             http: reqwest::Client::new(),
             config,
             active_repos: new_active_repos(),
             ensured_templates: new_ensured_templates(),
-            log_registry: LogAccessRegistry::new(),
+            session_access: SessionAccessRegistry::new(false),
             disposable_environments: Default::default(),
+            audit: crate::audit::AuditHandle::disabled(),
+            identity_gate: crate::runtime_identity::IdentityGate::new(),
         }
     }
 

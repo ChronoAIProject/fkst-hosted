@@ -476,7 +476,7 @@ describe('CreateTriggerModal', () => {
     expect(await screen.findByText('Advanced')).toBeInTheDocument();
     expect(screen.getByLabelText('Source branch (optional)')).toHaveAttribute(
       'placeholder',
-      'Repository default branch'
+      'Repository default · rollup destination'
     );
     expect(screen.getByLabelText('Target branch (optional)')).toHaveAttribute(
       'placeholder',

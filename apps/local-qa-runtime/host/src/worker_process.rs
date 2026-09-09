@@ -3,6 +3,7 @@ use std::io::{Read, Write};
 use std::path::Path;
 use std::process::{Child, ChildStdin, Command, ExitStatus, Stdio};
 use std::sync::mpsc::{self, Receiver, Sender, SyncSender};
+use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
@@ -115,7 +116,7 @@ impl WireDecoder {
 }
 
 pub(crate) struct WorkerProcess {
-    child: Child,
+    child: Arc<Mutex<Child>>,
     process_group: Pid,
     session: Option<Sender<SessionCommand>>,
     session_thread: Option<JoinHandle<()>>,
@@ -127,6 +128,7 @@ pub(crate) struct WorkerProcess {
 
 #[derive(Clone)]
 pub(crate) struct WorkerControlHandle {
+    child: Arc<Mutex<Child>>,
     process_group: Pid,
     session: Sender<SessionCommand>,
 }
@@ -169,7 +171,7 @@ impl WorkerControlHandle {
             })
             .is_err()
         {
-            contain_process_group_until(self.process_group, deadline)?;
+            contain_process_group_until(&self.child, self.process_group, deadline)?;
             return Ok(WorkerControlResult::Failed);
         }
         let acknowledgement_wait =
@@ -179,7 +181,7 @@ impl WorkerControlHandle {
             Ok(Ok(WorkerControlResult::Accepted)) => Ok(WorkerControlResult::Accepted),
             Ok(Ok(WorkerControlResult::TooLate)) => Ok(WorkerControlResult::TooLate),
             Ok(Ok(WorkerControlResult::Failed)) | Ok(Err(_)) | Err(_) => {
-                contain_process_group_until(self.process_group, deadline)?;
+                contain_process_group_until(&self.child, self.process_group, deadline)?;
                 Ok(WorkerControlResult::Failed)
             }
         }
@@ -253,7 +255,7 @@ impl WorkerProcess {
             }
         };
         Ok(Self {
-            child,
+            child: Arc::new(Mutex::new(child)),
             process_group,
             session: Some(session_sender),
             session_thread: Some(session_thread),
@@ -273,6 +275,7 @@ impl WorkerProcess {
 
     pub(crate) fn control_handle(&self) -> Result<WorkerControlHandle, RunError> {
         Ok(WorkerControlHandle {
+            child: Arc::clone(&self.child),
             process_group: self.process_group,
             session: self
                 .session
@@ -320,11 +323,7 @@ impl WorkerProcess {
 
     fn wait_for_root(&mut self, deadline: Instant) -> Result<ExitStatus, RunError> {
         loop {
-            if let Some(status) = self
-                .child
-                .try_wait()
-                .map_err(|_| RunError::Contract("Browser Worker status failed"))?
-            {
+            if let Some(status) = try_reap_child(&self.child)? {
                 self.reaped = true;
                 return Ok(status);
             }
@@ -401,16 +400,16 @@ impl WorkerProcess {
             let _ = signal_group(self.process_group, Signal::SIGKILL);
         }
         if !self.reaped {
-            let _ = self.child.kill();
-            let _ = self.child.wait();
-            self.reaped = true;
+            let mut child = self.child.lock().unwrap_or_else(|error| error.into_inner());
+            let _ = child.kill();
+            self.reaped = child.wait().is_ok();
         }
         let _ = wait_for_process_group_exit(self.process_group, CLEANUP_LIMIT);
         self.join_reader_fallbacks();
     }
 
     fn try_reap_root(&mut self) {
-        if !self.reaped && self.child.try_wait().ok().flatten().is_some() {
+        if !self.reaped && try_reap_child(&self.child).ok().flatten().is_some() {
             self.reaped = true;
         }
     }
@@ -745,22 +744,64 @@ fn fail_session(
     }
 }
 
-fn contain_process_group_until(process_group: Pid, deadline: Instant) -> Result<(), RunError> {
+fn try_reap_child(child: &Mutex<Child>) -> Result<Option<ExitStatus>, RunError> {
+    let mut child = match child.try_lock() {
+        Ok(child) => child,
+        Err(std::sync::TryLockError::WouldBlock) => return Ok(None),
+        Err(std::sync::TryLockError::Poisoned(_)) => {
+            return Err(RunError::Contract("Browser Worker status lock poisoned"));
+        }
+    };
+    child
+        .try_wait()
+        .map_err(|_| RunError::Contract("Browser Worker status failed"))
+}
+
+fn owned_group_exited(child: &Mutex<Child>, process_group: Pid) -> Result<bool, RunError> {
+    let reaped = try_reap_child(child)?.is_some();
+    Ok(!process_group_is_alive(process_group)? && reaped)
+}
+
+fn contain_process_group_until(
+    child: &Mutex<Child>,
+    process_group: Pid,
+    deadline: Instant,
+) -> Result<(), RunError> {
+    if owned_group_exited(child, process_group)? {
+        return Ok(());
+    }
     signal_group(process_group, Signal::SIGTERM)
         .map_err(|_| RunError::Contract("Browser Worker group termination failed"))?;
     let remaining = deadline.saturating_duration_since(Instant::now());
     let grace_deadline = deadline.min(Instant::now() + remaining / 2);
-    while Instant::now() < grace_deadline && process_group_is_alive(process_group)? {
-        thread::sleep(IO_POLL_INTERVAL);
+    while Instant::now() < grace_deadline {
+        if owned_group_exited(child, process_group)? {
+            return Ok(());
+        }
+        thread::sleep(
+            IO_POLL_INTERVAL.min(grace_deadline.saturating_duration_since(Instant::now())),
+        );
     }
-    if process_group_is_alive(process_group)? && Instant::now() < deadline {
+    if owned_group_exited(child, process_group)? {
+        return Ok(());
+    }
+    if Instant::now() < deadline {
         signal_group(process_group, Signal::SIGKILL)
             .map_err(|_| RunError::Contract("Browser Worker group kill failed"))?;
-        while Instant::now() < deadline && process_group_is_alive(process_group)? {
-            thread::sleep(IO_POLL_INTERVAL);
+        while Instant::now() < deadline {
+            if owned_group_exited(child, process_group)? {
+                return Ok(());
+            }
+            thread::sleep(IO_POLL_INTERVAL.min(deadline.saturating_duration_since(Instant::now())));
         }
     }
-    Ok(())
+    if owned_group_exited(child, process_group)? {
+        Ok(())
+    } else {
+        Err(RunError::Contract(
+            "Browser Worker containment deadline expired",
+        ))
+    }
 }
 
 impl Drop for WorkerProcess {
@@ -1051,9 +1092,49 @@ sys.stdout.buffer.flush()
             WorkerControlResult::Failed
         );
         assert!(started.elapsed() < Duration::from_secs(1));
+        assert_eq!(
+            nix::sys::wait::waitpid(process_group, Some(nix::sys::wait::WaitPidFlag::WNOHANG)),
+            Err(Errno::ECHILD),
+            "containment must reap the owned root before returning"
+        );
         assert!(!process_group_is_alive(process_group).expect("group inspection succeeds"));
         process.terminate();
         fs::remove_dir_all(directory).expect("temporary Worker directory removes");
+    }
+
+    #[test]
+    fn expired_containment_does_not_report_a_live_root_as_cleaned() {
+        use std::os::unix::process::CommandExt;
+
+        let mut child = Command::new("/bin/sh")
+            .args(["-c", "trap '' TERM; printf R; exec sleep 30"])
+            .stdout(Stdio::piped())
+            .process_group(0)
+            .spawn()
+            .expect("owned root starts");
+        let mut ready = [0];
+        child
+            .stdout
+            .take()
+            .expect("ready pipe exists")
+            .read_exact(&mut ready)
+            .expect("root installed its TERM handler");
+        let group = Pid::from_raw(child.id() as i32);
+        let child = Mutex::new(child);
+        let started = Instant::now();
+        let result = contain_process_group_until(&child, group, started);
+        let elapsed = started.elapsed();
+        let alive = process_group_is_alive(group);
+        terminate_spawned_child(&mut child.lock().expect("root lock"), group);
+
+        assert!(matches!(
+            result,
+            Err(RunError::Contract(
+                "Browser Worker containment deadline expired"
+            ))
+        ));
+        assert!(alive.expect("group inspection succeeds"));
+        assert!(elapsed < Duration::from_secs(1));
     }
 
     #[test]

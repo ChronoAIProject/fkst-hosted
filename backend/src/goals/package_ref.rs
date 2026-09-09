@@ -137,14 +137,15 @@ mod tests {
 
     #[test]
     fn parses_the_worked_example() {
-        let parsed = parse_package_ref("ChronoAIProject/fkst-packages@dev:packages/github-devloop")
-            .expect("worked example parses");
+        let parsed =
+            parse_package_ref("ChronoAIProject/fkst-hosted@packages:packages/github-devloop")
+                .expect("worked example parses");
         assert_eq!(
             parsed,
             PackageRef {
                 owner: "ChronoAIProject".to_string(),
-                repo: "fkst-packages".to_string(),
-                git_ref: "dev".to_string(),
+                repo: "fkst-hosted".to_string(),
+                git_ref: "packages".to_string(),
                 path: "packages/github-devloop".to_string(),
             }
         );

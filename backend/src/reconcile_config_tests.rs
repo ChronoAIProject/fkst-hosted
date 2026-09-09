@@ -17,6 +17,7 @@ fn defaults_apply_when_nothing_is_set() {
     let config = ReconcileConfig::from_vars(&vars(&[])).expect("defaults should deserialize");
     assert_eq!(config.substrate_trigger_label, "fkst-substrate-trigger");
     assert_eq!(config.github_bot_login, None);
+    assert_eq!(config.work_label_namespace, None);
     assert_eq!(config.reconcile_interval_secs, 30);
     assert_eq!(config.pod_full_resync_interval_secs, 600);
     assert_eq!(config.startup_resync_retry_initial_secs, 5);
@@ -27,18 +28,69 @@ fn defaults_apply_when_nothing_is_set() {
     assert_eq!(config.pod_termination_grace_secs, 60);
     assert_eq!(config.pod_token_refresh_secs, 2700);
     assert_eq!(config.pod_session_max_lifetime_secs, 0);
+    assert_eq!(config.sandbox_inventory_max_source_items, 5000);
+    assert_eq!(config.sandbox_inventory_max_warnings, 256);
     assert_eq!(config.health_scrape_secs, 150);
+    assert_eq!(config.cron_min_interval_secs, 900);
+    assert_eq!(config.cron_max_runtime_secs, 3600);
+    assert_eq!(config.cron_max_jobs_per_creator, 20);
+    assert_eq!(config.cron_history_pages, 2);
     // I9: install-time seeding is ON by default (behaviour change) and points
     // at the default-workflows manifest.
     assert!(config.seed_trigger_issue_on_install);
     assert_eq!(
         config.default_manifest.as_deref(),
-        Some("ChronoAIProject/fkst-packages@fkst-hosted:manifests/default-workflows.json")
+        Some("ChronoAIProject/fkst-hosted@packages:manifests/default-workflows.json")
     );
     assert_eq!(
         config.seed_packages,
-        vec!["ChronoAIProject/fkst-packages@dev:packages/github-devloop-workflow".to_string()]
+        vec!["ChronoAIProject/fkst-hosted@packages:packages/github-devloop-workflow".to_string()]
     );
+    // Feature off unless configured: deploying the binary alone changes no session.
+    assert!(config.mandatory_packages.is_empty());
+}
+
+#[test]
+fn mandatory_packages_parse_from_whitespace_separated_refs() {
+    let config = ReconcileConfig::from_vars(&vars(&[(
+        "FKST_MANDATORY_PACKAGES",
+        "ChronoAIProject/fkst-hosted@packages:packages/github-proxy\n  \
+         ChronoAIProject/fkst-hosted@packages:packages/workflow-dev",
+    )]))
+    .expect("valid refs");
+    let rendered: Vec<String> = config
+        .mandatory_packages
+        .iter()
+        .map(|r| format!("{}/{}@{}:{}", r.owner, r.repo, r.git_ref, r.path))
+        .collect();
+    assert_eq!(
+        rendered,
+        vec![
+            "ChronoAIProject/fkst-hosted@packages:packages/github-proxy".to_string(),
+            "ChronoAIProject/fkst-hosted@packages:packages/workflow-dev".to_string(),
+        ]
+    );
+}
+
+/// Fail closed and NAME the token: a silently-dropped mandatory package would
+/// remove the isolation guarantee this knob exists to provide.
+#[test]
+fn a_malformed_mandatory_ref_fails_closed_naming_the_token() {
+    let err = ReconcileConfig::from_vars(&vars(&[(
+        "FKST_MANDATORY_PACKAGES",
+        "ChronoAIProject/fkst-hosted@packages:packages/github-proxy not-a-ref",
+    )]))
+    .expect_err("must reject");
+    let msg = format!("{err}");
+    assert!(msg.contains("not-a-ref"), "{msg}");
+    assert!(msg.contains("FKST_MANDATORY_PACKAGES"), "{msg}");
+}
+
+#[test]
+fn a_blank_mandatory_value_is_feature_off() {
+    let config = ReconcileConfig::from_vars(&vars(&[("FKST_MANDATORY_PACKAGES", "   \n  ")]))
+        .expect("blank");
+    assert!(config.mandatory_packages.is_empty());
 }
 
 #[test]
@@ -90,6 +142,10 @@ fn default_impl_matches_env_defaults() {
     );
     assert_eq!(from_default.github_bot_login, from_env.github_bot_login);
     assert_eq!(
+        from_default.work_label_namespace,
+        from_env.work_label_namespace
+    );
+    assert_eq!(
         from_default.reconcile_interval_secs,
         from_env.reconcile_interval_secs
     );
@@ -129,6 +185,14 @@ fn default_impl_matches_env_defaults() {
         from_default.pod_session_max_lifetime_secs,
         from_env.pod_session_max_lifetime_secs
     );
+    assert_eq!(
+        from_default.sandbox_inventory_max_source_items,
+        from_env.sandbox_inventory_max_source_items
+    );
+    assert_eq!(
+        from_default.sandbox_inventory_max_warnings,
+        from_env.sandbox_inventory_max_warnings
+    );
     assert_eq!(from_default.health_scrape_secs, from_env.health_scrape_secs);
     assert_eq!(
         from_default.seed_trigger_issue_on_install,
@@ -143,6 +207,7 @@ fn every_knob_is_overridable() {
     let config = ReconcileConfig::from_vars(&vars(&[
         ("FKST_SUBSTRATE_TRIGGER_LABEL", "fkst-run"),
         ("FKST_GITHUB_BOT_LOGIN", "fkst-bot"),
+        ("FKST_WORK_LABEL_NAMESPACE", "chronoai-fkst"),
         ("FKST_RECONCILE_INTERVAL_SECS", "15"),
         ("FKST_POD_FULL_RESYNC_INTERVAL_SECS", "1200"),
         ("FKST_STARTUP_RESYNC_RETRY_INITIAL_SECS", "7"),
@@ -153,11 +218,17 @@ fn every_knob_is_overridable() {
         ("FKST_POD_TERMINATION_GRACE_SECS", "90"),
         ("FKST_POD_TOKEN_REFRESH_SECS", "1800"),
         ("FKST_POD_SESSION_MAX_LIFETIME_SECS", "86400"),
+        ("FKST_SANDBOX_INVENTORY_MAX_SOURCE_ITEMS", "250"),
+        ("FKST_SANDBOX_INVENTORY_MAX_WARNINGS", "64"),
         ("FKST_HEALTH_SCRAPE_SECS", "90"),
     ]))
     .expect("overrides should deserialize");
     assert_eq!(config.substrate_trigger_label, "fkst-run");
     assert_eq!(config.github_bot_login.as_deref(), Some("fkst-bot"));
+    assert_eq!(
+        config.work_label_namespace.as_deref(),
+        Some("chronoai-fkst")
+    );
     assert_eq!(config.reconcile_interval_secs, 15);
     assert_eq!(config.pod_full_resync_interval_secs, 1200);
     assert_eq!(config.startup_resync_retry_initial_secs, 7);
@@ -168,6 +239,8 @@ fn every_knob_is_overridable() {
     assert_eq!(config.pod_termination_grace_secs, 90);
     assert_eq!(config.pod_token_refresh_secs, 1800);
     assert_eq!(config.pod_session_max_lifetime_secs, 86400);
+    assert_eq!(config.sandbox_inventory_max_source_items, 250);
+    assert_eq!(config.sandbox_inventory_max_warnings, 64);
     assert_eq!(config.health_scrape_secs, 90);
 }
 
@@ -179,6 +252,26 @@ fn blank_bot_login_is_coerced_to_none() {
 }
 
 #[test]
+fn blank_work_label_namespace_is_disabled_and_invalid_slugs_fail_closed() {
+    let blank = ReconcileConfig::from_vars(&vars(&[("FKST_WORK_LABEL_NAMESPACE", "   ")]))
+        .expect("blank disables namespacing");
+    assert_eq!(blank.work_label_namespace, None);
+
+    for invalid in [
+        "ChronoAI",
+        "chronoai_cloud",
+        "-cloud",
+        "cloud-",
+        "cloud--one",
+    ] {
+        let error = ReconcileConfig::from_vars(&vars(&[("FKST_WORK_LABEL_NAMESPACE", invalid)]))
+            .expect_err("invalid namespace must fail startup");
+        assert!(matches!(error, AppError::Config(_)));
+        assert!(error.to_string().contains("FKST_WORK_LABEL_NAMESPACE"));
+    }
+}
+
+#[test]
 fn zero_cadence_bounds_are_config_errors_naming_the_var() {
     for var in [
         "FKST_RECONCILE_INTERVAL_SECS",
@@ -187,6 +280,12 @@ fn zero_cadence_bounds_are_config_errors_naming_the_var() {
         "FKST_SESSION_IDLE_GRACE_SECS",
         "FKST_POD_TOKEN_REFRESH_SECS",
         "FKST_HEALTH_SCRAPE_SECS",
+        // A zero ceiling would fail every live-inventory read, silently taking
+        // the operations sandbox view down.
+        "FKST_SANDBOX_INVENTORY_MAX_SOURCE_ITEMS",
+        // A zero warning ceiling leaves no room for the truncation marker, so a
+        // snapshot would claim it had nothing to report.
+        "FKST_SANDBOX_INVENTORY_MAX_WARNINGS",
     ] {
         let err = ReconcileConfig::from_vars(&vars(&[(var, "0")])).expect_err("zero must fail");
         assert!(matches!(err, AppError::Config(_)));
@@ -228,6 +327,27 @@ fn token_refresh_at_or_over_the_ttl_is_a_config_error() {
 }
 
 #[test]
+fn every_accepted_refresh_cadence_is_outlived_by_a_full_ttl_token() {
+    // #3410, the config half of the invariant. A session-bound token is minted at
+    // FULL TTL — at delivery and at every rotation — so `delivered_ttl >
+    // refresh_interval` holds for EVERY accepted cadence, not just the default. The
+    // at/over-TTL rejections live in the test above; this pins the positive side, so
+    // widening the accepted range can never silently reopen the dead window.
+    for secs in ["1", "300", "1800", "2700", "3599"] {
+        let config = ReconcileConfig::from_vars(&vars(&[("FKST_POD_TOKEN_REFRESH_SECS", secs)]))
+            .expect("cadence inside the TTL is accepted");
+        assert!(
+            config.pod_token_refresh_secs < INSTALLATION_TOKEN_TTL_SECS,
+            "a full-TTL delivered token must outlive the wait for the next sweep ({secs}s)"
+        );
+    }
+    assert!(
+        ReconcileConfig::default().pod_token_refresh_secs < INSTALLATION_TOKEN_TTL_SECS,
+        "the default cadence satisfies the invariant"
+    );
+}
+
+#[test]
 fn zero_valued_shield_and_lifetime_knobs_are_allowed() {
     // A zero min-lifetime / termination-grace / max-lifetime are all valid
     // (no shield / no drain / unbounded) — they must NOT fail closed.
@@ -247,4 +367,73 @@ fn non_numeric_interval_is_a_config_error() {
     let err = ReconcileConfig::from_vars(&vars(&[("FKST_RECONCILE_INTERVAL_SECS", "soon")]))
         .expect_err("non-numeric must fail");
     assert!(matches!(err, AppError::Config(_)));
+}
+
+/// The refs actually shipped in deploy/kubernetes/base/configmap.yaml must satisfy
+/// the startup validator -- otherwise the control plane fails closed on boot after
+/// a deploy, which is the worst place to discover a typo.
+#[test]
+fn the_deployed_mandatory_list_is_accepted() {
+    let deployed = "ChronoAIProject/fkst-hosted@packages:packages/github-proxy \
+                    ChronoAIProject/fkst-hosted@packages:packages/workflow-dev \
+                    ChronoAIProject/fkst-hosted@packages:packages/workflow-writer \
+                    ChronoAIProject/fkst-hosted@packages:packages/idle-detector \
+                    ChronoAIProject/fkst-hosted@packages:packages/fkst-health";
+    let config = ReconcileConfig::from_vars(&vars(&[("FKST_MANDATORY_PACKAGES", deployed)]))
+        .expect("the deployed list must be valid");
+    assert_eq!(config.mandatory_packages.len(), 5);
+    assert!(config
+        .mandatory_packages
+        .iter()
+        .all(|r| r.owner == "ChronoAIProject"
+            && r.repo == "fkst-hosted"
+            && r.git_ref == "packages"));
+}
+
+// ---- the clock's knobs -----------------------------------------------------
+
+#[test]
+fn the_cron_knobs_accept_deliberate_overrides() {
+    let config = ReconcileConfig::from_vars(&vars(&[
+        ("FKST_CRON_MIN_INTERVAL_SECS", "60"),
+        ("FKST_CRON_MAX_RUNTIME_SECS", "259200"),
+        ("FKST_CRON_MAX_JOBS_PER_CREATOR", "5"),
+        ("FKST_CRON_HISTORY_PAGES", "10"),
+    ]))
+    .expect("explicit overrides are accepted");
+    assert_eq!(config.cron_min_interval_secs, 60);
+    assert_eq!(config.cron_max_runtime_secs, 259_200);
+    assert_eq!(config.cron_max_jobs_per_creator, 5);
+    assert_eq!(config.cron_history_pages, 10);
+}
+
+#[test]
+fn the_cron_knobs_fail_closed_on_values_that_would_break_the_clock() {
+    // Each of these is a value that LOOKS like tuning and would silently break
+    // scheduling, so each names its own variable at startup rather than producing
+    // a confusing runtime symptom later.
+    let cases = [
+        // Below the sweep cadence the clock could never keep up with its own
+        // definition, and each firing still costs a run issue plus a pod boot.
+        ("FKST_CRON_MIN_INTERVAL_SECS", "30"),
+        // A tiny budget expires every real run mid-flight, which reads to an
+        // operator as "scheduled workflows randomly time out".
+        ("FKST_CRON_MAX_RUNTIME_SECS", "10"),
+        // Zero would reject every schedule in the deployment.
+        ("FKST_CRON_MAX_JOBS_PER_CREATOR", "0"),
+        // Zero pages means no definition ever recovers its history, so every one
+        // re-fires its anchor slot on every sweep.
+        ("FKST_CRON_HISTORY_PAGES", "0"),
+    ];
+    for (key, value) in cases {
+        let error = ReconcileConfig::from_vars(&vars(&[(key, value)]))
+            .expect_err("{key}={value} must be refused");
+        let AppError::Config(message) = error else {
+            panic!("expected a config error for {key}");
+        };
+        assert!(
+            message.contains(key),
+            "the error must name {key}: {message}"
+        );
+    }
 }

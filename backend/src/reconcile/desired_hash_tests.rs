@@ -5,6 +5,7 @@ use std::collections::BTreeMap;
 
 use super::config_hash as config_hash_with_branches;
 use super::desired_test_fixtures::pkg;
+use super::runtime_config_hash;
 use crate::goals::trigger_parse::PackageRef;
 
 fn config_hash(
@@ -24,6 +25,7 @@ fn config_hash(
         manifest_refs,
         None,
         None,
+        &crate::goals::package_env::PackageEnv::new(),
     )
 }
 
@@ -61,6 +63,35 @@ fn config_hash_is_stable_for_identical_inputs() {
     // A SHA-256 hex digest is 64 chars.
     assert_eq!(a.len(), 64);
     assert!(a.chars().all(|c| c.is_ascii_hexdigit()));
+}
+
+#[test]
+fn runtime_hash_moves_with_provider_namespace_without_changing_legacy_hash() {
+    let authored = "a".repeat(64);
+    assert_eq!(runtime_config_hash(&authored, None), authored);
+
+    let cloud = runtime_config_hash(&authored, Some("chronoai-fkst"));
+    assert_ne!(cloud, authored);
+    assert_eq!(cloud.len(), 64);
+    assert_eq!(cloud, runtime_config_hash(&authored, Some("chronoai-fkst")));
+    assert_ne!(
+        cloud,
+        runtime_config_hash(&authored, Some("other-provider"))
+    );
+}
+
+/// A PINNED digest, deliberately brittle: adding `FKST_WORK_LABEL_NAMESPACE` to the
+/// session env must not change what the runtime hash is computed over. If it ever did,
+/// every live session's recomputed hash would move at once and the fleet would respawn
+/// on the next pass — a literal expectation is the only thing that catches that.
+#[test]
+fn runtime_hash_inputs_are_pinned_to_the_authored_hash_and_the_namespace() {
+    let authored = "a".repeat(64);
+    assert_eq!(
+        runtime_config_hash(&authored, Some("chronoai-fkst")),
+        "a0d113e1b9e83efec7be09cd7745adc2c5262b1028a8262b295fd5efcb474279",
+        "the runtime hash must depend on nothing but (authored hash, namespace)"
+    );
 }
 
 #[test]
@@ -338,6 +369,7 @@ fn source_and_target_branches_each_move_the_config_hash() {
             &no_manifest(),
             None,
             None,
+            &crate::goals::package_env::PackageEnv::new(),
         ),
         "unset trailing branch fields preserve the historical digest"
     );
@@ -352,6 +384,7 @@ fn source_and_target_branches_each_move_the_config_hash() {
             &no_manifest(),
             Some("main"),
             None,
+            &crate::goals::package_env::PackageEnv::new(),
         )
     );
     assert_ne!(
@@ -365,6 +398,69 @@ fn source_and_target_branches_each_move_the_config_hash() {
             &no_manifest(),
             None,
             Some("feature-x"),
+            &crate::goals::package_env::PackageEnv::new(),
         )
+    );
+}
+
+/// Per-package configuration must not disturb any existing session's digest, and
+/// must flip it once used. Both halves matter: the first keeps the fleet alive
+/// across the deploy that adds the field, the second is what FREEZES the config.
+#[test]
+fn package_env_is_skipped_when_empty_and_flips_the_digest_when_set() {
+    let pkgs = vec![pkg("acme", "tools", "main", "pkg/a")];
+    let empty = crate::goals::package_env::PackageEnv::new();
+
+    // (a) An empty map serializes to nothing, so the digest is byte-identical to
+    // the one pinned before this field existed.
+    assert_eq!(
+        config_hash_with_branches(
+            &pkgs,
+            Some("wl"),
+            Some("env"),
+            None,
+            &no_engine_config(),
+            &no_manifest(),
+            None,
+            None,
+            &empty,
+        ),
+        "7a039ccf53042416ee9ae7127e168806f353fa7472e49eb24d39e7994ef9dfea",
+        "an unconfigured session must hash exactly as it did before the field existed"
+    );
+
+    // (b) A configured session hashes differently, so editing package config
+    // after registration is a rejected config change and respawns the pod.
+    let mut configured = crate::goals::package_env::PackageEnv::new();
+    configured.insert(
+        "github-devloop".to_string(),
+        [("FKST_DEVLOOP_AUTO_REFINE_MAX".to_string(), "2".to_string())]
+            .into_iter()
+            .collect(),
+    );
+    assert_ne!(
+        config_hash_with_branches(
+            &pkgs,
+            Some("wl"),
+            Some("env"),
+            None,
+            &no_engine_config(),
+            &no_manifest(),
+            None,
+            None,
+            &empty,
+        ),
+        config_hash_with_branches(
+            &pkgs,
+            Some("wl"),
+            Some("env"),
+            None,
+            &no_engine_config(),
+            &no_manifest(),
+            None,
+            None,
+            &configured,
+        ),
+        "configuring a package must move the config hash"
     );
 }

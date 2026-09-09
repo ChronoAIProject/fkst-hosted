@@ -16,13 +16,170 @@
 //! without a `[github]` section simply contributes nothing. Everything is a plain
 //! authenticated `contents` fetch + a lenient TOML parse — no engine, no Lua.
 
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 use secrecy::{ExposeSecret, SecretString};
 use serde::Deserialize;
 
 use crate::goals::trigger_parse::PackageRef;
+use crate::reconcile::auth_fallback::should_retry_without_auth;
 use crate::reconcile::desired::SessionRegistration;
+
+/// GitHub's maximum label-name length, measured in Unicode scalar values.
+pub const GITHUB_LABEL_NAME_MAX_CHARS: usize = 50;
+
+/// The package-side contract carrying the logical-to-effective label mapping.
+pub const SESSION_WORK_LABEL_MAP_JSON_ENV: &str = "FKST_SESSION_WORK_LABEL_MAP_JSON";
+
+/// The deployment's work-label namespace, as both the operator config key
+/// ([`crate::reconcile_config::ReconcileConfig::work_label_namespace`]) and the
+/// session-side variable rendered from it.
+///
+/// One const so the config reader, the platform-owned denylist, and the env writer
+/// cannot drift on the name — the value is load-bearing for artifact naming
+/// ([`crate::session_health`] stamps it into every health report filename), so a
+/// session must not be able to observe or forge a namespace other than its own.
+pub const WORK_LABEL_NAMESPACE_ENV: &str = "FKST_WORK_LABEL_NAMESPACE";
+
+/// Render the GitHub trigger-issue title used by a namespaced hosted provider.
+/// The namespace is already validated as a lowercase hyphenated slug at config
+/// load; its human-facing form is uppercase with each hyphen rendered as a space.
+pub(crate) fn provider_session_issue_title(namespace: &str, session_name: &str) -> String {
+    let provider_name = namespace.replace('-', " ").to_ascii_uppercase();
+    format!("🔔[{provider_name} SESSION] {session_name}")
+}
+
+/// A session's provider-neutral labels and their deployment-effective identities.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct EffectiveWorkLabels {
+    pub logical: Vec<String>,
+    pub effective: Vec<String>,
+    pub logical_to_effective: BTreeMap<String, String>,
+    namespaced: bool,
+}
+
+impl EffectiveWorkLabels {
+    /// Deterministic JSON for the package runtime. An unnamespaced deployment omits
+    /// the variable entirely so its historical environment surface stays unchanged.
+    pub fn map_json(&self) -> Option<String> {
+        self.namespaced.then(|| {
+            serde_json::to_string(&self.logical_to_effective)
+                .expect("a string-to-string work-label map always serializes")
+        })
+    }
+}
+
+/// A configuration or package label that cannot be represented safely on GitHub.
+#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
+#[error("{0}")]
+pub struct WorkLabelError(String);
+
+impl WorkLabelError {
+    fn new(message: impl Into<String>) -> Self {
+        Self(message.into())
+    }
+}
+
+/// Validate the provider namespace configured by `FKST_WORK_LABEL_NAMESPACE`.
+///
+/// The 48-character bound is derived from GitHub's 50-character label limit: it
+/// leaves room for the shortest valid logical label plus the joining hyphen.
+pub fn validate_work_label_namespace(namespace: &str) -> Result<(), WorkLabelError> {
+    let len = namespace.chars().count();
+    let valid_shape = !namespace.is_empty()
+        && namespace.is_ascii()
+        && namespace
+            .bytes()
+            .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-')
+        && !namespace.starts_with('-')
+        && !namespace.ends_with('-')
+        && !namespace.contains("--");
+    if !valid_shape {
+        return Err(WorkLabelError::new(
+            "must be a lowercase ASCII slug (letters, digits, and single interior hyphens)",
+        ));
+    }
+    if len > GITHUB_LABEL_NAME_MAX_CHARS - 2 {
+        return Err(WorkLabelError::new(format!(
+            "must be at most {} characters",
+            GITHUB_LABEL_NAME_MAX_CHARS - 2
+        )));
+    }
+    Ok(())
+}
+
+fn validate_effective_label(label: &str) -> Result<(), WorkLabelError> {
+    if label.is_empty() || label.trim() != label {
+        return Err(WorkLabelError::new(format!(
+            "effective work label `{label}` must be non-empty with no surrounding whitespace"
+        )));
+    }
+    if label.contains(',') {
+        return Err(WorkLabelError::new(format!(
+            "effective work label `{label}` cannot contain a comma"
+        )));
+    }
+    if label.chars().any(char::is_control) {
+        return Err(WorkLabelError::new(format!(
+            "effective work label `{label}` cannot contain control characters"
+        )));
+    }
+    let len = label.chars().count();
+    if len > GITHUB_LABEL_NAME_MAX_CHARS {
+        return Err(WorkLabelError::new(format!(
+            "effective work label `{label}` is {len} characters; GitHub allows at most {GITHUB_LABEL_NAME_MAX_CHARS}"
+        )));
+    }
+    Ok(())
+}
+
+/// Apply an optional provider namespace to a complete logical work-label set.
+///
+/// Exact labels become `<logical>-<namespace>`. The result is sorted and
+/// deduplicated, and case-insensitive output collisions fail closed because GitHub
+/// label identity is case-insensitive.
+pub fn apply_work_label_namespace(
+    labels: &[String],
+    namespace: Option<&str>,
+) -> Result<EffectiveWorkLabels, WorkLabelError> {
+    if let Some(namespace) = namespace {
+        validate_work_label_namespace(namespace)?;
+    }
+
+    let logical: BTreeSet<String> = labels.iter().cloned().collect();
+    let mut effective = Vec::with_capacity(logical.len());
+    let mut logical_to_effective = BTreeMap::new();
+    let mut owners_by_folded_effective: HashMap<String, String> = HashMap::new();
+
+    for logical_label in &logical {
+        if logical_label.is_empty() {
+            return Err(WorkLabelError::new("logical work labels must be non-empty"));
+        }
+        let effective_label = match namespace {
+            Some(namespace) => format!("{logical_label}-{namespace}"),
+            None => logical_label.clone(),
+        };
+        validate_effective_label(&effective_label)?;
+
+        let folded = effective_label.to_lowercase();
+        if let Some(owner) = owners_by_folded_effective.insert(folded, logical_label.clone()) {
+            if owner != *logical_label {
+                return Err(WorkLabelError::new(format!(
+                    "logical work labels `{owner}` and `{logical_label}` collide as effective label `{effective_label}`"
+                )));
+            }
+        }
+        logical_to_effective.insert(logical_label.clone(), effective_label.clone());
+        effective.push(effective_label);
+    }
+
+    Ok(EffectiveWorkLabels {
+        logical: logical.into_iter().collect(),
+        effective,
+        logical_to_effective,
+        namespaced: namespace.is_some(),
+    })
+}
 
 /// The slice of a package `fkst.toml` this module reads. `#[serde(default)]` +
 /// no `deny_unknown_fields`: every other manifest section (`[code]`, `[lib_deps]`,
@@ -154,21 +311,38 @@ async fn fetch_manifest(
     path: &str,
 ) -> Option<Manifest> {
     let url = format!("{base}/repos/{owner}/{repo}/contents/{path}/fkst.toml");
-    let response = http
-        .get(&url)
-        .query(&[("ref", git_ref)])
-        // `raw` returns the file bytes directly rather than the base64 envelope.
-        .header(reqwest::header::ACCEPT, "application/vnd.github.raw")
-        .header(reqwest::header::USER_AGENT, "fkst-hosted-api")
-        .bearer_auth(token.expose_secret())
-        .send()
+    let mut response = package_manifest_request(http, &url, git_ref, Some(token))
         .await
         .ok()?;
+    if should_retry_without_auth(response.status()) {
+        response = package_manifest_request(http, &url, git_ref, None)
+            .await
+            .ok()?;
+    }
     if !response.status().is_success() {
         return None;
     }
     let body = response.text().await.ok()?;
     toml::from_str::<Manifest>(&body).ok()
+}
+
+async fn package_manifest_request(
+    http: &reqwest::Client,
+    url: &str,
+    git_ref: &str,
+    token: Option<&SecretString>,
+) -> Result<reqwest::Response, reqwest::Error> {
+    let request = http
+        .get(url)
+        .query(&[("ref", git_ref)])
+        // `raw` returns the file bytes directly rather than the base64 envelope.
+        .header(reqwest::header::ACCEPT, "application/vnd.github.raw")
+        .header(reqwest::header::USER_AGENT, "fkst-hosted-api");
+    let request = match token {
+        Some(token) => request.bearer_auth(token.expose_secret()),
+        None => request,
+    };
+    request.send().await
 }
 
 #[cfg(test)]

@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useId, useState } from 'react';
 import type { ReactNode } from 'react';
-import { cn } from '@/lib/utils';
 import { useLang } from '@/i18n';
 import { useAuth } from '@/lib/auth/github-auth';
 import { FadeSwap } from '@/components/ui/motion';
@@ -15,23 +14,12 @@ import { EnvironmentEditor } from './environment-editor';
 import { EnvironmentDetail } from './environment-detail';
 
 // ---- shared, self-contained UI helpers -------------------------------------
-// Kept local to the environments cluster (rather than importing session-detail's
-// parts.tsx) so the two clusters stay decoupled; these are trivial presentational
-// atoms styled from the same tokens.
-
-/** Indeterminate spinner. `anim-spin` is disabled under prefers-reduced-motion
- *  (see index.css), so it collapses to a static ring for reduced-motion users. */
-export function Spinner({ className }: { className?: string }) {
-  return (
-    <span
-      aria-hidden="true"
-      className={cn(
-        'anim-spin inline-block w-3 h-3 border border-line-2 border-t-amber rounded-full flex-none',
-        className
-      )}
-    />
-  );
-}
+// Note/SectionLabel/fmt/statusTone stay local so this cluster keeps its own
+// presentational atoms rather than reaching into session-detail's parts.tsx.
+// The SPINNER is different: one in-flight indicator for the whole app is the
+// point, so it comes from ui/loading and is re-exported here for this cluster's
+// existing importers.
+export { Spinner } from '@/components/ui/loading';
 
 /** Muted mono note line (loading / empty / hint states). */
 export function Note({ children }: { children: ReactNode }) {
@@ -157,7 +145,13 @@ export function EnvironmentsDrawer({ open, onClose }: { open: boolean; onClose: 
         </button>
       </div>
 
-      <div className="px-5 py-4">
+      {/* The scroll region. `DrawerShell`'s panel is `overflow-hidden` and lays
+          its children out as a flex column, so a child has to own the
+          scrolling — without `min-h-0` this body would size to its content
+          inside a flex parent and everything past the panel height would be
+          silently CLIPPED, taking the editor's Save button with it on a short
+          viewport. */}
+      <div className="flex-1 min-h-0 overflow-y-auto px-5 py-4">
         <FadeSwap k={viewKey}>
           {view.kind === 'list' && (
             <EnvironmentList

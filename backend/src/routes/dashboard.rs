@@ -652,6 +652,14 @@ impl DashboardGithub {
                                 .collect(),
                             user_login: r.user.login,
                             user_id: r.user.id,
+                            // This surface keeps GitHub's raw RFC 3339 string for
+                            // display; the summary wants a typed instant, and an
+                            // unparseable one degrades to the epoch rather than
+                            // failing the page (see `IssueSummary::created_at`).
+                            created_at: r
+                                .created_at
+                                .parse()
+                                .unwrap_or(k8s_openapi::chrono::DateTime::UNIX_EPOCH),
                         },
                         html_url: r.html_url,
                         created_at: r.created_at,

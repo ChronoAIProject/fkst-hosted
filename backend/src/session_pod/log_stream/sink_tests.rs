@@ -18,12 +18,20 @@ const SA_SECRET: &str = "writer-client-secret";
 #[tokio::test]
 async fn fake_sink_records_every_put() {
     let fake = FakeSink::default();
-    fake.put("logs/s1/latest.tar.gz", Bytes::from_static(b"gz-a"))
-        .await
-        .expect("ok");
-    fake.put("logs/s1/latest.tar.gz", Bytes::from_static(b"gz-b"))
-        .await
-        .expect("ok");
+    fake.put(
+        "logs/s1/latest.tar.gz",
+        Bytes::from_static(b"gz-a"),
+        BUNDLE_CONTENT_TYPE,
+    )
+    .await
+    .expect("ok");
+    fake.put(
+        "logs/s1/latest.tar.gz",
+        Bytes::from_static(b"gz-b"),
+        BUNDLE_CONTENT_TYPE,
+    )
+    .await
+    .expect("ok");
     let calls = fake.calls();
     assert_eq!(calls.len(), 2);
     assert_eq!(calls[0].0, "logs/s1/latest.tar.gz");
@@ -37,7 +45,7 @@ async fn fake_sink_can_be_programmed_to_fail() {
         ..Default::default()
     };
     let err = fake
-        .put("k", Bytes::from_static(b"x"))
+        .put("k", Bytes::from_static(b"x"), BUNDLE_CONTENT_TYPE)
         .await
         .expect_err("programmed failure");
     assert!(matches!(err, SinkError::Upload(_)));
@@ -56,16 +64,24 @@ async fn fake_sink_fail_key_contains_scopes_failure_to_matching_keys() {
         ..Default::default()
     };
     // A non-matching key succeeds and records normally.
-    fake.put("logs/s1/latest.tar.gz", Bytes::from_static(b"gz"))
-        .await
-        .expect("non-matching put ok");
+    fake.put(
+        "logs/s1/latest.tar.gz",
+        Bytes::from_static(b"gz"),
+        BUNDLE_CONTENT_TYPE,
+    )
+    .await
+    .expect("non-matching put ok");
     assert_eq!(
         fake.get("logs/s1/latest.tar.gz").await.expect("ok"),
         Some(Bytes::from_static(b"gz"))
     );
     // The matching index key fails on both put and get, every time.
     assert!(fake
-        .put("logs/s1/runs.json", Bytes::from_static(b"[]"))
+        .put(
+            "logs/s1/runs.json",
+            Bytes::from_static(b"[]"),
+            BUNDLE_CONTENT_TYPE
+        )
         .await
         .is_err());
     assert!(fake.get("logs/s1/runs.json").await.is_err());
@@ -86,9 +102,13 @@ async fn fake_sink_fail_key_remaining_is_transient() {
         "first matching op fails"
     );
     // Budget exhausted → matching ops now succeed.
-    fake.put("logs/s1/runs.json", Bytes::from_static(b"[]"))
-        .await
-        .expect("second matching op succeeds");
+    fake.put(
+        "logs/s1/runs.json",
+        Bytes::from_static(b"[]"),
+        BUNDLE_CONTENT_TYPE,
+    )
+    .await
+    .expect("second matching op succeeds");
     assert_eq!(
         fake.get("logs/s1/runs.json").await.expect("ok"),
         Some(Bytes::from_static(b"[]"))
@@ -101,12 +121,20 @@ async fn fake_sink_get_returns_the_last_put_value_and_none_for_absent() {
     // Absent key → None.
     assert!(fake.get("logs/s1/runs.json").await.expect("ok").is_none());
     // After a put, get returns the last-put value for that key.
-    fake.put("logs/s1/runs.json", Bytes::from_static(b"v1"))
-        .await
-        .expect("ok");
-    fake.put("logs/s1/runs.json", Bytes::from_static(b"v2"))
-        .await
-        .expect("ok");
+    fake.put(
+        "logs/s1/runs.json",
+        Bytes::from_static(b"v1"),
+        BUNDLE_CONTENT_TYPE,
+    )
+    .await
+    .expect("ok");
+    fake.put(
+        "logs/s1/runs.json",
+        Bytes::from_static(b"v2"),
+        BUNDLE_CONTENT_TYPE,
+    )
+    .await
+    .expect("ok");
     assert_eq!(
         fake.get("logs/s1/runs.json").await.expect("ok"),
         Some(Bytes::from_static(b"v2"))
@@ -188,7 +216,11 @@ async fn sink_over_status(status: u16) -> (ChronoStorageSink, MockServer) {
 async fn put_maps_a_non_2xx_upload_to_a_sink_error_without_leaking_secrets() {
     let (sink, _server) = sink_over_status(403).await;
     let err = sink
-        .put("logs/s1/latest.tar.gz", Bytes::from_static(b"gz"))
+        .put(
+            "logs/s1/latest.tar.gz",
+            Bytes::from_static(b"gz"),
+            BUNDLE_CONTENT_TYPE,
+        )
         .await
         .expect_err("403 must error");
     assert!(matches!(err, SinkError::Upload(_)));
@@ -226,9 +258,13 @@ async fn put_succeeds_on_a_2xx_upload() {
         nyxid_client_secret: SecretString::from(SA_SECRET.to_string()),
     };
     let sink = ChronoStorageSink::new(ChronoStorageClient::new(reqwest::Client::new(), config));
-    sink.put("logs/s1/latest.tar.gz", Bytes::from_static(b"gz"))
-        .await
-        .expect("upload succeeds");
+    sink.put(
+        "logs/s1/latest.tar.gz",
+        Bytes::from_static(b"gz"),
+        BUNDLE_CONTENT_TYPE,
+    )
+    .await
+    .expect("upload succeeds");
 }
 
 /// Build a chrono-storage sink whose token endpoint mints `SA_TOKEN` and whose

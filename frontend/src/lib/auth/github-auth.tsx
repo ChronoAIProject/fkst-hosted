@@ -72,6 +72,18 @@ export interface AuthContextValue {
   configured: boolean;
   /** A token set is present (may need a refresh before use). */
   isAuthenticated: boolean;
+  /**
+   * Bumped every time the stored token set is REPLACED or cleared — a sign-in,
+   * a sign-out, an expiry, or an OAuth return that swapped one account for
+   * another without an intervening sign-out.
+   *
+   * It exists because `isAuthenticated` cannot express the last case: switching
+   * accounts leaves it `true` throughout, so anything caching per-viewer data
+   * keyed only on that flag would keep showing the previous person's rows. A
+   * transparent refresh does NOT bump it — the same identity with a newer access
+   * token is still the same viewer.
+   */
+  identityGeneration: number;
   /** OAuth error slug from the callback (e.g. `access_denied`), else null. */
   error: string | null;
   /**
@@ -97,12 +109,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(() => !!ls.get(ACCESS_KEY));
   const [error, setError] = useState<string | null>(null);
   const [sessionExpired, setSessionExpired] = useState<boolean>(false);
+  // Every identity change bumps this; per-viewer caches key on it (see the
+  // AuthContextValue doc). Starts at 0 for whatever token set was on disk at
+  // mount — a reload has no in-memory cache to invalidate.
+  const [identityGeneration, setIdentityGeneration] = useState(0);
   // Coalesce concurrent refreshes into a single in-flight request.
   const inflight = useRef<Promise<string | null> | null>(null);
 
   const signOut = useCallback(() => {
     clearTokens();
     setIsAuthenticated(false);
+    setIdentityGeneration((generation) => generation + 1);
     // An explicit sign-out is a deliberate clean exit, not an expiry — leave
     // sessionExpired alone so a real expiry flag can't be masked by it.
   }, []);
@@ -114,6 +131,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     clearTokens();
     setIsAuthenticated(false);
     setSessionExpired(true);
+    setIdentityGeneration((generation) => generation + 1);
   }, []);
 
   // Capture the token set (or error) the login callback delivered in the fragment.
@@ -126,6 +144,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (token) {
       storeTokens(token, params.get('gh_refresh'), Number(params.get('gh_expires_in')) || null);
       setIsAuthenticated(true);
+      // A callback token set may belong to a DIFFERENT account than the one
+      // already stored, and nothing else in this state would say so.
+      setIdentityGeneration((generation) => generation + 1);
       // A fresh sign-in clears any prior expiry/error so the dashboard drops the
       // re-authenticate prompt and returns to the normal signed-in view.
       setError(null);
@@ -219,6 +240,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const value: AuthContextValue = {
     configured: API_CONFIGURED,
     isAuthenticated,
+    identityGeneration,
     error,
     sessionExpired,
     signIn,

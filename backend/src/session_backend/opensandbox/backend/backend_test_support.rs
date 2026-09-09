@@ -44,13 +44,21 @@ pub(crate) fn spec() -> SessionPodSpec {
         trigger_issue_number: 7,
         package_roots: vec!["web".to_string()],
         work_label: "fkst-work".to_string(),
+        work_label_map_json: None,
+        work_label_namespace: None,
+        package_env_json: None,
         bot_login: "fkst-bot[bot]".to_string(),
         config_hash: config_hash(),
         output_lang: None,
         engine_config: BTreeMap::new(),
         creator_login: "author-login".to_string(),
+        creator_id: Some(4242),
+        trigger_author_id: 4242,
+        trigger_author_login: "author-login".to_string(),
         contributors: vec!["author-login".to_string()],
+        upstream_branch: "develop".to_string(),
         target_branch: "fkst-hosted-default".to_string(),
+        delivery_grants_json: None,
     }
 }
 

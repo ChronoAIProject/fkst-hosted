@@ -13,10 +13,10 @@ export const TRIGGER_EXAMPLE = `### Session Name
 sitebuilder
 
 ### Packages
-ChronoAIProject/fkst-packages@dev:packages/github-devloop
-ChronoAIProject/fkst-packages@dev:packages/github-devloop-pr
-ChronoAIProject/fkst-packages@dev:packages/github-devloop-ops
-ChronoAIProject/fkst-packages@dev:packages/consensus
+ChronoAIProject/fkst-hosted@packages:packages/github-devloop
+ChronoAIProject/fkst-hosted@packages:packages/github-devloop-pr
+ChronoAIProject/fkst-hosted@packages:packages/github-devloop-ops
+ChronoAIProject/fkst-hosted@packages:packages/consensus
 
 ### Work Label
 site-build
@@ -35,7 +35,7 @@ export const CURL_LOGS = `curl -L \\
   https://<host>/api/v1/logs/<session_id> \\
   -o logs.tar.gz`;
 
-export const PKG_REF_EXAMPLE = 'ChronoAIProject/fkst-packages@dev:packages/github-devloop';
+export const PKG_REF_EXAMPLE = 'ChronoAIProject/fkst-hosted@packages:packages/github-devloop';
 
 export type FieldKey =
   | 'sessionName'

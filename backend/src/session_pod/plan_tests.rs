@@ -60,6 +60,61 @@ fn read_substrate_env_maps_a_full_env() {
     assert_eq!(env.creds_dir, "/var/run/fkst/creds");
     assert_eq!(env.codex_home, "/var/run/fkst/codex");
     assert_eq!(env.target_branch.as_deref(), Some("feature-x"));
+    assert!(env.delivery_grants.is_empty());
+}
+
+#[test]
+fn source_branch_is_read_so_the_clone_can_fetch_the_upstream_ref() {
+    // The shallow --single-branch clone leaves refs/remotes/origin/<source>
+    // absent; the driver needs this value to fetch it, or the devloop's
+    // rollup/sync scans fatal on every branch tick.
+    let mut map = full_env();
+    map.insert(
+        "FKST_DEVLOOP_UPSTREAM_BRANCH".to_string(),
+        "develop".to_string(),
+    );
+    let env = read_substrate_env_from(lookup(&map)).expect("env parses");
+    assert_eq!(env.source_branch.as_deref(), Some("develop"));
+    assert_eq!(env.target_branch.as_deref(), Some("feature-x"));
+}
+
+#[test]
+fn source_branch_is_optional_and_blank_is_unset() {
+    // A caller outside the hosted launcher sets no upstream; that must stay a
+    // clean no-op rather than a parse failure.
+    let mut map = full_env();
+    assert_eq!(
+        read_substrate_env_from(lookup(&map))
+            .expect("unset source remains compatible")
+            .source_branch,
+        None
+    );
+    map.insert("FKST_DEVLOOP_UPSTREAM_BRANCH".to_string(), "  ".to_string());
+    assert_eq!(
+        read_substrate_env_from(lookup(&map))
+            .expect("blank source is unset")
+            .source_branch,
+        None
+    );
+}
+
+#[test]
+fn read_substrate_env_parses_only_scoped_delivery_grants() {
+    let mut map = full_env();
+    map.insert(
+        "FKST_SESSION_DELIVERY_GRANTS".to_string(),
+        r#"[{"lifecycle_repo":"acme/site","lifecycle_issue":41,"implementation_repo":"acme/tools","implementation_branch":"release"}]"#.to_string(),
+    );
+    let env = read_substrate_env_from(lookup(&map)).expect("scoped grant parses");
+    assert_eq!(env.delivery_grants.len(), 1);
+    assert_eq!(env.delivery_grants[0].lifecycle_issue, 41);
+
+    map.insert(
+        "FKST_SESSION_DELIVERY_GRANTS".to_string(),
+        r#"[{"lifecycle_repo":"acme/other","lifecycle_issue":41,"implementation_repo":"acme/tools","implementation_branch":"release"}]"#.to_string(),
+    );
+    let error = read_substrate_env_from(lookup(&map)).expect_err("wrong lifecycle scope fails");
+    assert!(error.contains("expected only acme/site"), "{error}");
 }
 
 #[test]
@@ -136,45 +191,167 @@ fn plan_clones_groups_one_workspace_and_keeps_paths() {
         "org/pkgs@dev:packages/github-devloop",
         "org/pkgs@dev:packages/github-proxy",
     ]);
-    let plan = plan_clones(&refs).expect("single workspace plans");
+    let plan = plan_clones(&refs, Path::new("/runtime")).expect("single workspace plans");
+    assert_eq!(plan.workspaces.len(), 1);
     assert_eq!(
-        plan.platform_repo,
+        plan.workspaces[0].repo,
         WorkspaceRepo {
             owner: "org".to_string(),
             repo: "pkgs".to_string(),
             git_ref: "dev".to_string(),
         }
     );
+    assert_eq!(plan.workspaces[0].root, PathBuf::from("/runtime/platform"));
     assert_eq!(
-        plan.package_paths,
+        plan.package_roots,
         vec![
-            "packages/github-devloop".to_string(),
-            "packages/github-proxy".to_string()
+            PathBuf::from("/runtime/platform/packages/github-devloop"),
+            PathBuf::from("/runtime/platform/packages/github-proxy")
         ]
     );
 }
 
 #[test]
-fn plan_clones_rejects_refs_from_two_repos() {
+fn plan_clones_groups_refs_from_two_repos() {
     let refs = refs(&["org/pkgs@dev:packages/a", "org/other@dev:packages/b"]);
-    let err = plan_clones(&refs).expect_err("multi-workspace must fail");
-    assert!(err.contains("one workspace repo"), "{err}");
+    let plan = plan_clones(&refs, Path::new("/runtime")).expect("multi-workspace plans");
+    assert_eq!(plan.workspaces.len(), 2);
+    assert_eq!(plan.workspaces[0].root, PathBuf::from("/runtime/platform"));
+    assert!(plan.workspaces[1].root.starts_with("/runtime/platforms"));
+    assert_eq!(
+        plan.package_roots,
+        vec![
+            PathBuf::from("/runtime/platform/packages/a"),
+            plan.workspaces[1].root.join("packages/b")
+        ]
+    );
 }
 
 #[test]
-fn plan_clones_rejects_refs_at_two_git_refs() {
+fn plan_clones_groups_refs_at_two_git_refs() {
     let refs = refs(&["org/pkgs@dev:packages/a", "org/pkgs@main:packages/b"]);
-    assert!(plan_clones(&refs).is_err(), "differing git_ref must fail");
+    let plan = plan_clones(&refs, Path::new("/runtime")).expect("multi-ref workspace plans");
+    assert_eq!(plan.workspaces.len(), 2);
+    assert_eq!(plan.workspaces[0].repo.git_ref, "dev");
+    assert_eq!(plan.workspaces[1].repo.git_ref, "main");
+}
+
+#[test]
+fn plan_clones_preserves_original_package_root_order_across_workspaces() {
+    let refs = refs(&[
+        "org/pkgs@dev:packages/a",
+        "org/market@feat:packages/b",
+        "org/pkgs@dev:packages/c",
+    ]);
+    let plan = plan_clones(&refs, Path::new("/runtime")).expect("multi-workspace plans");
+    let secondary_root = plan.workspaces[1].root.clone();
+    assert_eq!(
+        plan.package_roots,
+        vec![
+            PathBuf::from("/runtime/platform/packages/a"),
+            secondary_root.join("packages/b"),
+            PathBuf::from("/runtime/platform/packages/c"),
+        ]
+    );
+}
+
+fn grant(issue: u64, implementation_repo: &str, implementation_branch: &str) -> DeliveryGrant {
+    DeliveryGrant {
+        lifecycle_repo: "acme/site".to_string(),
+        lifecycle_issue: issue,
+        implementation_repo: implementation_repo.to_string(),
+        implementation_branch: implementation_branch.to_string(),
+    }
+}
+
+#[test]
+fn delivery_plan_reuses_the_exact_platform_checkout() {
+    let plan = plan_delivery_checkouts(
+        &[
+            grant(41, "Acme/Packages", "fkst-hosted"),
+            grant(43, "acme/packages", "fkst-hosted"),
+        ],
+        "acme/site",
+        Some("main"),
+        Path::new("/runtime/project"),
+        "acme/packages",
+        "fkst-hosted",
+        Path::new("/runtime/platform"),
+        Path::new("/runtime"),
+    );
+
+    assert!(plan.clones.is_empty());
+    assert_eq!(plan.resolved_grants.len(), 2);
+    assert!(plan
+        .resolved_grants
+        .iter()
+        .all(|grant| grant.implementation_root == "/runtime/platform"));
+}
+
+#[test]
+fn delivery_plan_deduplicates_deterministic_additional_checkouts() {
+    let grants = [
+        grant(41, "acme/tools", "release/v1"),
+        grant(43, "ACME/TOOLS", "release/v1"),
+    ];
+    let first = plan_delivery_checkouts(
+        &grants,
+        "acme/site",
+        Some("main"),
+        Path::new("/runtime/project"),
+        "acme/packages",
+        "fkst-hosted",
+        Path::new("/runtime/platform"),
+        Path::new("/runtime"),
+    );
+    let second = plan_delivery_checkouts(
+        &grants,
+        "acme/site",
+        Some("main"),
+        Path::new("/runtime/project"),
+        "acme/packages",
+        "fkst-hosted",
+        Path::new("/runtime/platform"),
+        Path::new("/runtime"),
+    );
+
+    assert_eq!(first, second, "restart planning must be deterministic");
+    assert_eq!(first.clones.len(), 1);
+    assert_eq!(first.clones[0].repository, "acme/tools");
+    assert_eq!(first.clones[0].branch, "release/v1");
+    assert!(first.clones[0].root.starts_with("/runtime/delivery"));
+    assert_eq!(
+        first.resolved_grants[0].implementation_root,
+        first.resolved_grants[1].implementation_root
+    );
+}
+
+#[test]
+fn delivery_plan_does_not_reuse_a_checkout_on_the_wrong_branch() {
+    let plan = plan_delivery_checkouts(
+        &[grant(41, "acme/packages", "other")],
+        "acme/site",
+        Some("main"),
+        Path::new("/runtime/project"),
+        "acme/packages",
+        "fkst-hosted",
+        Path::new("/runtime/platform"),
+        Path::new("/runtime"),
+    );
+    assert_eq!(plan.clones.len(), 1);
+    assert_ne!(
+        plan.resolved_grants[0].implementation_root,
+        "/runtime/platform"
+    );
 }
 
 #[test]
 fn build_supervise_args_is_the_exact_vector() {
     let args = build_supervise_args(
         "/rt/project",
-        "/rt/platform",
         &[
-            "packages/github-devloop".to_string(),
-            "packages/github-proxy".to_string(),
+            PathBuf::from("/rt/platform/packages/github-devloop"),
+            PathBuf::from("/rt/platforms/abc/packages/x-publisher"),
         ],
         "/usr/local/bin/fkst-framework",
     );
@@ -187,7 +364,7 @@ fn build_supervise_args_is_the_exact_vector() {
             "--package-root",
             "/rt/platform/packages/github-devloop",
             "--package-root",
-            "/rt/platform/packages/github-proxy",
+            "/rt/platforms/abc/packages/x-publisher",
             "--framework-bin",
             "/usr/local/bin/fkst-framework",
         ]

@@ -358,3 +358,48 @@ async fn manifest_routes_run_to_the_per_run_bundle() {
     // Size 6 ("RUN-9\n") proves the RUN bundle was read, not latest (7 bytes).
     assert_eq!(driver["size"], 6);
 }
+
+#[tokio::test]
+async fn api_mode_session_collaborator_alone_is_still_403() {
+    // The REGRESSION GUARD for milestone #22: the session-access policy added a
+    // `### Session Collaborators` tier for OPERATIONS visibility. Log download
+    // must not inherit it — a collaborator who is neither the creator, nor on the
+    // per-issue allow-list, nor a log admin still cannot pull the bundle.
+    let gh = github_user_ok("Bob", 2002).await;
+    let (storage, _s) = storage_server(true).await;
+    let st = state(
+        gh.uri(),
+        Some(storage),
+        log_config(&[], false),
+        registry_with_collaborators(&[], &["bob"]),
+    );
+
+    let response = get(st, &format!("/api/v1/logs/{SESSION_ID}"), Some("gho_bob")).await;
+    assert_eq!(
+        response.status(),
+        StatusCode::FORBIDDEN,
+        "a session collaborator must not gain the redacted log bundle"
+    );
+}
+
+#[tokio::test]
+async fn api_mode_creator_id_still_wins_over_a_stale_login() {
+    // Another shipped-behaviour guard: the creator tier is id-authoritative, so a
+    // different account now holding the creator's old login gets nothing.
+    let gh = github_user_ok("author", 9999).await;
+    let (storage, _s) = storage_server(true).await;
+    let st = state(
+        gh.uri(),
+        Some(storage),
+        log_config(&[], false),
+        registry(&[]),
+    );
+
+    let response = get(
+        st,
+        &format!("/api/v1/logs/{SESSION_ID}"),
+        Some("gho_impostor"),
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+}

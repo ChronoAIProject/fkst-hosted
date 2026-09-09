@@ -1,0 +1,348 @@
+# Synthetic metric fixtures that make every alert FIRE and CLEAR.
+#
+# `validate-alert-rules.rb` reads this file together with the two PrometheusRule
+# documents and evaluates each alert's real expression against each case. A rule
+# whose expression is edited without a fixture that still fires it — or a rule
+# that fires on a healthy fixture — fails the deployment validator.
+#
+# ## Why fixtures and not just a linter
+#
+# A structural check proves an alert has a threshold. It cannot prove the
+# threshold is on the right side of the comparison, that the label selector still
+# matches the series the exporter publishes, or that a ladder's warning tier
+# actually fires before its critical tier. Those are the mistakes that make an
+# alert silently never fire, which is worse than not having it.
+#
+# ## The contract
+#
+#   expect: fire   at least one rule with this alert name fires under this case
+#   expect: clear  no rule with this alert name fires under this case
+#
+# Two alerts (`FKSTAuditRelayCapacityPressure`, `FKSTAuditRelayDiskPressure`) are
+# two-rule ladders sharing one name. The validator requires EACH rule instance to
+# fire in some case and stay clear in another, which is why those alerts carry a
+# middle case that trips the warning tier only.
+#
+# ## Sample shape
+#
+#   metric     the series name
+#   labels     its label set; a selector matcher missing here reads as absent
+#   value      the instantaneous value, for a gauge selector
+#   increase   the value `increase(metric[window])` would return over the rule's
+#              own window, for a counter selector. Stating the increase directly
+#              is what a `promtool` series line encodes as a slope; here it is the
+#              number itself, so the fixture says what it means.
+#
+# `now` is the evaluation instant `time()` returns, in epoch seconds.
+
+now: 1785000000
+
+# Reusable label sets. Referenced by `labels_ref` so a namespace or service
+# rename is one edit rather than sixty.
+label_sets:
+  control_plane:
+    namespace: chronoai-fkst
+    service: fkst-control-plane-metrics
+  relay:
+    namespace: chronoai-fkst
+    service: fkst-audit-relay-metrics
+
+alerts:
+  # ------------------------------------------------------------ recovery rules
+  FKSTControlPlaneScrapeMissing:
+    - name: no control-plane series is being scraped at all
+      expect: fire
+      samples: []
+    - name: the control plane is scraped
+      expect: clear
+      samples:
+        - { metric: fkst_up, labels_ref: control_plane, value: 1 }
+
+  FKSTStartupResyncIncomplete:
+    - name: no replica has finished its startup resync
+      expect: fire
+      samples:
+        - { metric: fkst_startup_resync_complete, labels_ref: control_plane, value: 0 }
+    - name: a replica has finished its startup resync
+      expect: clear
+      samples:
+        - { metric: fkst_startup_resync_complete, labels_ref: control_plane, value: 1 }
+
+  FKSTRecoveryDegraded:
+    - name: a replica reports the degraded leader state
+      expect: fire
+      samples:
+        - { metric: fkst_leader_state, labels_ref: control_plane, labels: { state: degraded }, value: 1 }
+    - name: no replica is degraded
+      expect: clear
+      samples:
+        - { metric: fkst_leader_state, labels_ref: control_plane, labels: { state: degraded }, value: 0 }
+
+  FKSTRecoveryStale:
+    - name: the last successful resync is eleven minutes old
+      expect: fire
+      samples:
+        - metric: fkst_startup_resync_last_success_timestamp_seconds
+          labels_ref: control_plane
+          value: 1784999340
+    - name: the last successful resync is one minute old
+      expect: clear
+      samples:
+        - metric: fkst_startup_resync_last_success_timestamp_seconds
+          labels_ref: control_plane
+          value: 1784999940
+    - name: no resync has ever succeeded, which this alert deliberately ignores
+      expect: clear
+      samples:
+        - metric: fkst_startup_resync_last_success_timestamp_seconds
+          labels_ref: control_plane
+          value: 0
+
+  FKSTNoReadyLeader:
+    - name: election is enabled and no replica is ready
+      expect: fire
+      samples:
+        - { metric: fkst_leader_election_enabled, labels_ref: control_plane, value: 1 }
+        - { metric: fkst_leader_ready, labels_ref: control_plane, value: 0 }
+    - name: election is enabled and a leader is ready
+      expect: clear
+      samples:
+        - { metric: fkst_leader_election_enabled, labels_ref: control_plane, value: 1 }
+        - { metric: fkst_leader_ready, labels_ref: control_plane, value: 1 }
+    - name: election is disabled, so readiness is not this alert's business
+      expect: clear
+      samples:
+        - { metric: fkst_leader_election_enabled, labels_ref: control_plane, value: 0 }
+        - { metric: fkst_leader_ready, labels_ref: control_plane, value: 0 }
+
+  FKSTLeaderRoutingUnavailable:
+    - name: election is enabled and no replica publishes the routing label
+      expect: fire
+      samples:
+        - { metric: fkst_leader_election_enabled, labels_ref: control_plane, value: 1 }
+        - { metric: fkst_leader_routing_ready, labels_ref: control_plane, value: 0 }
+    - name: the elected replica publishes the routing label
+      expect: clear
+      samples:
+        - { metric: fkst_leader_election_enabled, labels_ref: control_plane, value: 1 }
+        - { metric: fkst_leader_routing_ready, labels_ref: control_plane, value: 1 }
+
+  FKSTLeaderLeaseFailures:
+    - name: one lease renewal failed in the window
+      expect: fire
+      samples:
+        - { metric: fkst_leader_lease_failures_total, labels_ref: control_plane, increase: 1 }
+    - name: no lease renewal failed
+      expect: clear
+      samples:
+        - { metric: fkst_leader_lease_failures_total, labels_ref: control_plane, increase: 0 }
+
+  FKSTLeaderRoutingFailures:
+    - name: one routing publication failed in the window
+      expect: fire
+      samples:
+        - { metric: fkst_leader_routing_failures_total, labels_ref: control_plane, increase: 1 }
+    - name: no routing publication failed
+      expect: clear
+      samples:
+        - { metric: fkst_leader_routing_failures_total, labels_ref: control_plane, increase: 0 }
+
+  FKSTExcessiveLeaderChurn:
+    - name: four acquisitions in thirty minutes
+      expect: fire
+      samples:
+        - metric: fkst_leader_transitions_total
+          labels_ref: control_plane
+          labels: { transition: acquired }
+          increase: 4
+    - name: three acquisitions is the documented tolerance
+      expect: clear
+      samples:
+        - metric: fkst_leader_transitions_total
+          labels_ref: control_plane
+          labels: { transition: acquired }
+          increase: 3
+
+  # --------------------------------------------------------------- audit rules
+  FKSTAuditIngressUnavailable:
+    - name: required delivery refused a request
+      expect: fire
+      samples:
+        - { metric: fkst_audit_required_rejections_total, labels_ref: control_plane, increase: 1 }
+    - name: required delivery refused nothing
+      expect: clear
+      samples:
+        - { metric: fkst_audit_required_rejections_total, labels_ref: control_plane, increase: 0 }
+
+  FKSTAuditRelayNotReady:
+    - name: the relay publishes no readiness series at all
+      expect: fire
+      samples: []
+    - name: the relay reports itself not ready
+      expect: fire
+      samples:
+        - { metric: fkst_audit_relay_ingress_ready, labels_ref: relay, value: 0 }
+    - name: the relay is ready
+      expect: clear
+      samples:
+        - { metric: fkst_audit_relay_ingress_ready, labels_ref: relay, value: 1 }
+
+  FKSTAuditBacklogGrowing:
+    - name: a large backlog whose oldest record is twenty minutes old
+      expect: fire
+      samples:
+        - { metric: fkst_audit_relay_records, labels_ref: relay, labels: { state: complete }, value: 2000 }
+        - metric: fkst_audit_relay_oldest_record_age_seconds
+          labels_ref: relay
+          labels: { state: complete }
+          value: 1200
+    - name: a large backlog that is draining, so nothing is old
+      expect: clear
+      samples:
+        - { metric: fkst_audit_relay_records, labels_ref: relay, labels: { state: complete }, value: 2000 }
+        - metric: fkst_audit_relay_oldest_record_age_seconds
+          labels_ref: relay
+          labels: { state: complete }
+          value: 30
+    - name: an old record in a small backlog is a drain hiccup, not a backlog
+      expect: clear
+      samples:
+        - { metric: fkst_audit_relay_records, labels_ref: relay, labels: { state: complete }, value: 5 }
+        - metric: fkst_audit_relay_oldest_record_age_seconds
+          labels_ref: relay
+          labels: { state: complete }
+          value: 1200
+
+  FKSTAuditPostHogUnverified:
+    - name: an accepted record has been unverified for forty minutes
+      expect: fire
+      samples:
+        - metric: fkst_audit_relay_oldest_record_age_seconds
+          labels_ref: relay
+          labels: { state: posthog_accepted }
+          value: 2400
+    - name: verification is keeping up
+      expect: clear
+      samples:
+        - metric: fkst_audit_relay_oldest_record_age_seconds
+          labels_ref: relay
+          labels: { state: posthog_accepted }
+          value: 60
+
+  FKSTAuditDeadLetters:
+    - name: one record was dead-lettered
+      expect: fire
+      samples:
+        - { metric: fkst_audit_relay_dead_letters_total, labels_ref: relay, increase: 1 }
+    - name: nothing was dead-lettered
+      expect: clear
+      samples:
+        - { metric: fkst_audit_relay_dead_letters_total, labels_ref: relay, increase: 0 }
+
+  FKSTAuditIncompleteRequests:
+    - name: six requests were closed incomplete in half an hour
+      expect: fire
+      samples:
+        - { metric: fkst_audit_relay_incomplete_total, labels_ref: relay, increase: 6 }
+    - name: a handful of incompletes is the documented tolerance
+      expect: clear
+      samples:
+        - { metric: fkst_audit_relay_incomplete_total, labels_ref: relay, increase: 5 }
+
+  FKSTAuditRelayCapacityPressure:
+    - name: the outbox is at ninety percent of its record guard
+      expect: fire
+      samples:
+        - { metric: fkst_audit_relay_records, labels_ref: relay, labels: { state: complete }, value: 900 }
+        - { metric: fkst_audit_relay_max_records, labels_ref: relay, value: 1000 }
+    - name: seventy-five percent trips the warning tier only
+      expect: fire
+      samples:
+        - { metric: fkst_audit_relay_records, labels_ref: relay, labels: { state: complete }, value: 750 }
+        - { metric: fkst_audit_relay_max_records, labels_ref: relay, value: 1000 }
+    - name: half full is healthy
+      expect: clear
+      samples:
+        - { metric: fkst_audit_relay_records, labels_ref: relay, labels: { state: complete }, value: 500 }
+        - { metric: fkst_audit_relay_max_records, labels_ref: relay, value: 1000 }
+
+  FKSTAuditRelayDiskPressure:
+    - name: the database is past the critical byte ceiling
+      expect: fire
+      samples:
+        - { metric: fkst_audit_relay_db_bytes, labels_ref: relay, value: 19000000000 }
+    - name: the database is past the warning ceiling only
+      expect: fire
+      samples:
+        - { metric: fkst_audit_relay_db_bytes, labels_ref: relay, value: 16000000000 }
+    - name: the database is comfortably inside the claim
+      expect: clear
+      samples:
+        - { metric: fkst_audit_relay_db_bytes, labels_ref: relay, value: 4000000000 }
+
+  FKSTOperationsActivityQueryFailures:
+    - name: the activity query is failing upstream
+      expect: fire
+      samples:
+        - metric: fkst_operations_activity_queries_total
+          labels_ref: control_plane
+          labels: { result: upstream_error }
+          increase: 6
+    - name: only the partial-source counter is moving
+      expect: fire
+      samples:
+        - { metric: fkst_operations_activity_source_partial_total, labels_ref: control_plane, increase: 6 }
+    - name: a couple of transient failures is the documented tolerance
+      expect: clear
+      samples:
+        - metric: fkst_operations_activity_queries_total
+          labels_ref: control_plane
+          labels: { result: unavailable }
+          increase: 2
+        - { metric: fkst_operations_activity_source_partial_total, labels_ref: control_plane, increase: 1 }
+    - name: successful queries never trip it, however many there are
+      expect: clear
+      samples:
+        - metric: fkst_operations_activity_queries_total
+          labels_ref: control_plane
+          labels: { result: ok }
+          increase: 5000
+
+  FKSTSandboxInventoryFailures:
+    - name: the inventory read is unavailable
+      expect: fire
+      samples:
+        - metric: fkst_operations_sandbox_inventory_requests_total
+          labels_ref: control_plane
+          labels: { result: unavailable }
+          increase: 6
+    - name: a few failures is the documented tolerance
+      expect: clear
+      samples:
+        - metric: fkst_operations_sandbox_inventory_requests_total
+          labels_ref: control_plane
+          labels: { result: too_large }
+          increase: 3
+    - name: successful reads never trip it
+      expect: clear
+      samples:
+        - metric: fkst_operations_sandbox_inventory_requests_total
+          labels_ref: control_plane
+          labels: { result: ok }
+          increase: 5000
+
+  FKSTSessionVisibilityNotReady:
+    - name: the session-visibility projection has published no ready generation
+      expect: fire
+      samples:
+        - metric: fkst_session_access_registry_generation_state
+          labels_ref: control_plane
+          labels: { state: ready }
+          value: 0
+    - name: the projection is ready
+      expect: clear
+      samples:
+        - metric: fkst_session_access_registry_generation_state
+          labels_ref: control_plane
+          labels: { state: ready }
+          value: 1

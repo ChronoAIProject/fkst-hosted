@@ -16,6 +16,7 @@
 //! (the Job launcher + webhook trigger) is untouched.
 
 pub mod announce;
+mod auth_fallback;
 pub mod automerge;
 pub mod branches;
 // Pure work-label collision backstop (R4a): demotes the lower-priority of two active
@@ -30,24 +31,62 @@ pub mod desired;
 pub mod effective_packages;
 pub mod execute;
 mod execute_comments;
+// Assembly of a session's branch topology, pod spec, and credential bundle —
+// shared by both create-side verbs so spawn and recovery can never drift.
+pub(crate) mod execute_launch_spec;
+// The create-side runtime effects (spawn + credential recovery).
+pub(crate) mod execute_spawn;
+// The three runtime effect verbs (refresh-pending, stop, terminal cleanup) plus
+// the lifecycle records they write. Split from the executor because these are the
+// only effects that change whether a runtime exists.
+pub(crate) mod execute_runtime;
 pub mod hashing;
-// Pure three-tier authorization for on-demand session-log downloads (author /
-// per-issue `### Log Access Allowlist` allow-list / global admins). No I/O; consumed by the
-// identity-gated `/api/v1/logs/{session_id}` endpoint.
-pub mod log_authz;
+// Emission of sandbox lifecycle audit records at the reconciler's effect
+// boundary (issue #5673). Kept beside the executor, not inside it: a change here
+// changes what the deployment's permanent history says happened.
+pub(crate) mod lifecycle_audit;
 mod loops;
 // Fetch + validate a fkst-manifest JSON (referenced as `owner/repo@ref:path`) into
 // its package list. FAIL-CLOSED (a manifest is a required, complete set): any fetch,
 // parse, schema, or per-ref failure is an error, not best-effort. NOT yet wired into
 // the sweep — a later PR expands a trigger's `### Manifest` refs through this.
+pub mod isolation_capability;
 pub mod manifest_expand;
 pub mod pending;
 pub mod reachability;
 pub mod registry;
 pub mod repo;
+// The registry of platform-owned label names: which labels a session author may
+// not adopt, and which are exempt from work-label collision detection because the
+// deployment shares them by construction.
+pub mod reserved_labels;
+// Publication of each repository's session-access contexts (an authorization
+// concern, kept out of the reconcile planner).
 pub mod retire;
 pub mod routing;
+// The narrow authorized body-read carve-out for scheduled-workflow issues: the
+// only way to reach one of those bodies, and it runs the metadata-only routing +
+// authority predicates first.
+pub mod schedule_authz;
+// Applying one planned schedule effect to GitHub, including the load-bearing
+// write ORDER of a dispatch.
+pub mod schedule_execute;
+// The per-repository schedule pass: enumerate open definitions, authorize each
+// from metadata, recover its run history, and plan.
+pub mod schedule_pass;
+// Pure per-definition planning: recover the clock's state from GitHub facts and
+// turn one decision into effects.
+pub mod schedule_plan;
+// The run issue a due slot creates — the only channel from the clock to a session.
+pub mod schedule_run_issue;
+// The delete-side audit facts the planner captures before a runtime disappears.
+pub mod runtime_audit;
+// Backfill of durable creator/trigger attribution onto legacy runtimes, from the
+// registration this pass just parsed (issue #5673). Never part of the lifecycle
+// planner: attribution can neither spawn nor kill anything.
+pub(crate) mod runtime_identity;
 pub mod seed_issue;
+pub mod session_contexts;
 pub mod templates;
 pub mod trigger_authz;
 pub mod work_ack;
@@ -184,7 +223,8 @@ pub fn new_active_repos() -> ActiveRepos {
 pub const ENSURED_TEMPLATES_TTL: std::time::Duration = std::time::Duration::from_secs(6 * 3600);
 
 /// What the issue-template ensure last recorded for a repo: the version it
-/// confirmed present and WHEN it confirmed it (monotonic [`std::time::Instant`]).
+/// handled (confirmed installed, or left as a pending merge-blocked install
+/// PR) and WHEN (monotonic [`std::time::Instant`]).
 #[derive(Debug, Clone)]
 pub struct EnsuredMark {
     pub version: u32,

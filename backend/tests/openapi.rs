@@ -12,7 +12,7 @@ use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use fkst_control_plane::config::Config;
 use fkst_control_plane::router::build_router;
-use fkst_control_plane::state::AppState;
+use fkst_control_plane::state::{empty_self_router, AppState};
 use http_body_util::BodyExt;
 use serde_json::Value;
 use tower::ServiceExt;
@@ -20,8 +20,30 @@ use tower::ServiceExt;
 /// Build the real router. `webhook_secret` toggles the conditionally-mounted
 /// GitHub App webhook so a test can assert the spec reflects live configuration.
 fn app(webhook_secret: bool) -> axum::Router {
+    app_with(webhook_secret, false)
+}
+
+/// [`app`] plus a toggle for the conditionally-mounted chat concierge, which tracks
+/// live configuration the same way the webhook does.
+fn app_with(webhook_secret: bool, chat: bool) -> axum::Router {
     let github_app_webhook_secret = webhook_secret
         .then(|| secrecy::SecretString::new("dummy-webhook-secret".to_string().into()));
+    let chat = chat.then(|| {
+        let chat_config = fkst_control_plane::chat::config::from_vars(&[
+            ("FKST_CHAT_ENABLED".to_string(), "true".to_string()),
+            (
+                "FKST_LLM_BASE_URL".to_string(),
+                "https://llm.example/v1".to_string(),
+            ),
+            ("FKST_LLM_API_KEY".to_string(), "dummy-chat-key".to_string()),
+            ("FKST_LLM_MODEL".to_string(), "dummy-model".to_string()),
+        ])
+        .expect("chat config parses")
+        .expect("chat config is enabled");
+        std::sync::Arc::new(fkst_control_plane::chat::ChatRuntime::from_config(
+            chat_config,
+        ))
+    });
     build_router(AppState {
         config: Config::default(),
         recovery: Default::default(),
@@ -30,9 +52,13 @@ fn app(webhook_secret: bool) -> axum::Router {
         reconciler: None,
         session_backend: None,
         storage: None,
-        log_registry: Default::default(),
+        session_access: Default::default(),
+        operations: Default::default(),
         log_bundle_cache: Default::default(),
         disposable_environments: Default::default(),
+        self_router: empty_self_router(),
+        chat,
+        audit: Default::default(),
     })
     .expect("router builds")
 }
@@ -92,6 +118,10 @@ async fn paths_are_the_trimmed_v1_surface() {
         "/api/v1/logs/{session_id}",
         // The identity-gated engine observe read-model (issue #473).
         "/api/v1/sessions/{session_id}/observe",
+        // The identity-gated session health reports (milestone "Session health
+        // reports"): the listing + heartbeat verdict, and one full report.
+        "/api/v1/sessions/{session_id}/health",
+        "/api/v1/sessions/{session_id}/health/{report_id}",
         "/api/v1/logs/oauth/callback",
         // The frontend GitHub-OAuth login flow (login → callback → refresh).
         "/api/v1/auth/github/login",
@@ -106,6 +136,14 @@ async fn paths_are_the_trimmed_v1_surface() {
         "/api/v1/repos/{owner}/{name}/sessions/{issue_number}",
         // Queue a work item on a session (opens a work-label-stamped issue).
         "/api/v1/repos/{owner}/{name}/sessions/{issue_number}/work-items",
+        // The scheduled-workflow surface: the projection plus the three durable
+        // state changes the dashboard performs.
+        "/api/v1/repos/{owner}/{name}/schedules",
+        "/api/v1/repos/{owner}/{name}/schedules/{schedule_issue}",
+        "/api/v1/repos/{owner}/{name}/schedules/{schedule_issue}/runs/{slot}",
+        "/api/v1/repos/{owner}/{name}/schedules/{schedule_issue}/pause",
+        "/api/v1/repos/{owner}/{name}/schedules/{schedule_issue}/resume",
+        "/api/v1/repos/{owner}/{name}/schedules/{schedule_issue}/run",
         // A session's outcome files grouped by PR + the raw blob-stream.
         "/api/v1/repos/{owner}/{name}/sessions/{issue_number}/outcomes",
         "/api/v1/repos/{owner}/{name}/blob/{sha}",
@@ -114,6 +152,8 @@ async fn paths_are_the_trimmed_v1_surface() {
         "/api/v1/logs/{session_id}/file",
         // Per-run (per-pod-incarnation) log separation: the run listing.
         "/api/v1/logs/{session_id}/runs",
+        // The scoped historical activity query (milestone #22).
+        "/api/v1/operations/activity",
         "/health",
         "/ready",
         "/metrics",
@@ -138,6 +178,27 @@ async fn paths_are_the_trimmed_v1_surface() {
         ),
         (
             "/api/v1/repos/{owner}/{name}/sessions/{issue_number}/work-items",
+            "post",
+        ),
+        ("/api/v1/repos/{owner}/{name}/schedules", "get"),
+        (
+            "/api/v1/repos/{owner}/{name}/schedules/{schedule_issue}",
+            "get",
+        ),
+        (
+            "/api/v1/repos/{owner}/{name}/schedules/{schedule_issue}/runs/{slot}",
+            "get",
+        ),
+        (
+            "/api/v1/repos/{owner}/{name}/schedules/{schedule_issue}/pause",
+            "post",
+        ),
+        (
+            "/api/v1/repos/{owner}/{name}/schedules/{schedule_issue}/resume",
+            "post",
+        ),
+        (
+            "/api/v1/repos/{owner}/{name}/schedules/{schedule_issue}/run",
             "post",
         ),
     ] {
@@ -232,6 +293,13 @@ async fn components_include_the_named_environment_schemas_and_not_the_removed_on
         "LogFileContent",
         // The per-run (per-pod-incarnation) log-separation DTO (issue #568).
         "LogRun",
+        // The scoped activity page and its tagged record union (issue #5672).
+        "ActivityPage",
+        "ActivityItem",
+        "ApiRequestActivityItem",
+        "SandboxLifecycleActivityItem",
+        "SourceStatusView",
+        "EffectiveScope",
         // Recovery readiness is distinct from the unchanged liveness body.
         "ReadinessResponse",
         "ReadinessStatus",
@@ -478,6 +546,19 @@ async fn no_operation_requires_security_the_whole_surface_is_open() {
             "environment {verb} {route} must NOT carry a security scheme"
         );
     }
+    // The session health endpoints authorize in-handler through the same
+    // `routes::logs::authorize` the log path uses, so — like `observe` — they declare
+    // no security scheme. Referencing one here would point at a scheme this document
+    // deliberately does not define.
+    for route in [
+        "/api/v1/sessions/{session_id}/health",
+        "/api/v1/sessions/{session_id}/health/{report_id}",
+    ] {
+        assert!(
+            paths[route]["get"].get("security").is_none(),
+            "{route} must NOT carry a security scheme"
+        );
+    }
     assert!(
         paths["/health"]["get"].get("security").is_none(),
         "/health must not require security"
@@ -519,6 +600,82 @@ async fn internal_worker_protocol_is_never_in_the_spec() {
 }
 
 #[tokio::test]
+async fn chat_path_tracks_configuration() {
+    // A deployment with chat off must not DOCUMENT a chat endpoint it does not serve.
+    let without = fetch_spec(app_with(true, false)).await;
+    assert!(
+        without["paths"].get("/api/v1/chat").is_none(),
+        "chat must be absent when the feature is not configured"
+    );
+
+    let with = fetch_spec(app_with(true, true)).await;
+    let operation = &with["paths"]["/api/v1/chat"]["post"];
+    assert!(
+        operation.is_object(),
+        "chat must be documented when enabled"
+    );
+    assert!(
+        operation.get("security").is_none(),
+        "chat authenticates via the per-request GitHub token, not a documented scheme"
+    );
+    assert_eq!(operation["operationId"], "chat_turn");
+    // The streaming content type is the contract the SPA's parser depends on.
+    assert!(
+        operation["responses"]["200"]["content"]
+            .get("text/event-stream")
+            .is_some(),
+        "the 200 response must be documented as an SSE stream: {:?}",
+        operation["responses"]["200"]
+    );
+    for status in ["401", "403", "413", "422", "429", "503"] {
+        assert!(
+            operation["responses"].get(status).is_some(),
+            "chat must document its {status} response"
+        );
+    }
+
+    let components = &with["components"]["schemas"];
+    for schema in [
+        "ChatRequest",
+        "ChatClientMessage",
+        "ChatClientRole",
+        "ChatStreamEvent",
+        "SessionRef",
+        // The confirm-gated action-proposal payload the SPA renders and executes.
+        "ActionProposal",
+        "ActionTarget",
+        "DraftSessionRequest",
+    ] {
+        assert!(
+            components.get(schema).is_some(),
+            "component schema {schema} must be present; got {:?}",
+            components.as_object().map(|m| m.keys().collect::<Vec<_>>())
+        );
+    }
+    // A session draft must never carry a field secrets could ride in — the whole reason
+    // it is a dedicated DTO rather than the real create-session request.
+    let draft_properties = components["DraftSessionRequest"]["properties"]
+        .as_object()
+        .expect("DraftSessionRequest properties");
+    for forbidden in ["disposable_environment", "secrets", "variables", "install"] {
+        assert!(
+            !draft_properties.contains_key(forbidden),
+            "DraftSessionRequest must not expose {forbidden}"
+        );
+    }
+
+    // Still no application-level auth anywhere, chat included.
+    assert!(
+        with["components"]["securitySchemes"].as_object().is_none()
+            || with["components"]["securitySchemes"]
+                .as_object()
+                .expect("object")
+                .is_empty(),
+        "the surface must register zero security schemes"
+    );
+}
+
+#[tokio::test]
 async fn webhook_path_tracks_configuration() {
     let without = fetch_spec(app(false)).await;
     assert!(
@@ -551,6 +708,7 @@ async fn document_tags_are_exactly_the_live_surface() {
         vec![
             "auth".to_string(),
             "logs".to_string(),
+            "operations".to_string(),
             "system".to_string(),
             "users".to_string(),
             "webhooks".to_string()

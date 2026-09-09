@@ -36,7 +36,7 @@ export const tour: TourSlice = {
     },
     sessionDetail: {
       title: '会话详情',
-      body: '打开任一会话即可看到四个分页 —— 状态（生命周期 + 实时引擎）、包（配置 + 队列）、日志（带搜索的内置查看器）、成果（pull request 与文件预览）。',
+      body: '打开任一会话即可看到各个分页 —— 状态（生命周期）、包（配置）、日志（带搜索的内置查看器）、健康、引擎（实时运行时与其队列）、成果（pull request 与文件预览）。',
     },
     workItem: {
       title: '追加任务',

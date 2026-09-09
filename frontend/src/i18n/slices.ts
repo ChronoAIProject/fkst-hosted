@@ -22,9 +22,12 @@ export type ReposContent = DashboardContent['repos'];
 
 /** Top-nav labels. */
 export type NavSlice = SiteContent['nav'];
-/** Shared chrome shared by every page: language toggle, auth, footer, and the
- *  app-shell error/404/toast strings. */
-export type CommonSlice = Pick<SiteContent, 'toggle' | 'auth' | 'footer' | 'shell'>;
+/** Shared chrome shared by every page: language toggle, auth, footer, the
+ *  app-shell error/404/toast strings, and the shared loading explanations. */
+export type CommonSlice = Pick<
+  SiteContent,
+  'toggle' | 'auth' | 'footer' | 'shell' | 'loading'
+>;
 /** Marketing / get-started long-form pages. */
 export type PagesSlice = Pick<SiteContent, 'intro' | 'gs'>;
 /** Guided product-tour strings (its own top-level domain). */
@@ -96,6 +99,7 @@ export type CanvasSidebarSlice = Pick<
   | 'sessionsFreshness'
   | 'sessionsRetry'
   | 'sessionsRefreshing'
+  | 'sessionsLoading'
   | 'sessionsLoadFailed'
   | 'sessionsStaleNotice'
   | 'notInstalledNote'
@@ -160,6 +164,7 @@ export type CanvasModalsSlice = Pick<
   | 'createSavedEnvironmentLabel'
   | 'createEnvironmentNote'
   | 'createEnvironmentLoadFailed'
+  | 'createEnvironmentLoading'
   | 'createDisposablePrivateNote'
   | 'createDisposableInstallLabel'
   | 'createDisposableInstallPlaceholder'
@@ -256,3 +261,10 @@ export type ReposModalsSlice = Pick<
   | 'uninstallPending'
   | 'uninstallFailed'
 >;
+
+/** The `/operations` workspace — its own top-level domain, so the operations
+ *  cluster never contends with the dashboard modules on one file. */
+export type OperationsSlice = SiteContent['operations'];
+
+/** The `/workflows` workspace (scheduled workflows and their run history). */
+export type WorkflowsSlice = SiteContent['workflows'];

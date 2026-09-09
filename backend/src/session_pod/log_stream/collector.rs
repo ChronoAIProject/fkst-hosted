@@ -16,7 +16,6 @@
 //! simply produces no bundle (the uploader is not spawned).
 
 use std::collections::HashMap;
-use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{sync_channel, Receiver, RecvTimeoutError, SyncSender};
 use std::thread::JoinHandle;
@@ -29,10 +28,13 @@ use crate::session_spec::creds::CredsLayout;
 
 use super::bundle::tar_gz_dir;
 use super::classify::{discover_sources, LogClass, TreeAnchors};
+use super::copied::CopiedFileTracker;
+use super::health_publish::HealthPublishQueue;
 use super::instance::{compute_instance_id, readme_markdown, InstanceMeta};
 use super::redact::Redactor;
 use super::seed::{read_github_token, seed_secrets, LABEL_GITHUB_TOKEN};
 use super::tail::TailTracker;
+use super::tree_writer::TreeWriter;
 use super::uploader::{build_uploader, Uploader};
 use super::{
     DEFAULT_FLUSH_BYTES, DEFAULT_FLUSH_SECS, ENV_CONFIG_HASH, ENV_FLUSH_BYTES, ENV_FLUSH_SECS,
@@ -236,6 +238,10 @@ fn collect(config: CollectorConfig, rx: Receiver<CollectorRecord>, uploader: Opt
     let mut tree = TreeWriter::new(config.tree_dir.clone());
     let anchors = TreeAnchors::new(&config.runtime_root, &config.codex_home);
     let mut tails: HashMap<PathBuf, (LogClass, TailTracker)> = HashMap::new();
+    // Health reports are captured WHOLE, on the same tick as the tails, and published
+    // as small objects on the (slower) flush cadence.
+    let mut reports = CopiedFileTracker::new();
+    let mut health = HealthPublishQueue::new();
 
     let flush_interval = Duration::from_secs(config.flush_secs.max(1));
     let mut uploaded_once = false;
@@ -252,6 +258,7 @@ fn collect(config: CollectorConfig, rx: Receiver<CollectorRecord>, uploader: Opt
         let now = Instant::now();
         if now.duration_since(last_tick) >= POLL_INTERVAL {
             tail_sources(&anchors, &mut tails, &redactor, &mut tree);
+            health.enqueue(reports.sweep(&anchors, &redactor, &mut tree), &redactor);
             last_tick = now;
         }
         if now.duration_since(last_token) >= Duration::from_secs(TOKEN_REREAD_SECS) {
@@ -262,14 +269,20 @@ fn collect(config: CollectorConfig, rx: Receiver<CollectorRecord>, uploader: Opt
             || tree.pending_bytes() >= config.flush_bytes
         {
             flush_and_index(&mut tree, uploader.as_ref(), &redactor, &mut uploaded_once);
+            health.publish_pending(uploader.as_ref(), &config.session_id, &redactor);
             last_flush = now;
         }
     }
 
     // Final drain: last tail read, flush the unterminated tails, then a final upload.
+    // The report sweep runs here too, so a report written after the last periodic
+    // poll — the likeliest moment for one, since the producer and the pod are ending
+    // together — still reaches the bundle.
     tail_sources(&anchors, &mut tails, &redactor, &mut tree);
+    health.enqueue(reports.sweep(&anchors, &redactor, &mut tree), &redactor);
     finish_tails(&mut tails, &redactor, &mut tree);
     flush_and_index(&mut tree, uploader.as_ref(), &redactor, &mut uploaded_once);
+    health.publish_pending(uploader.as_ref(), &config.session_id, &redactor);
     // The run produced a bundle → stamp its end time into the session's run index.
     if uploaded_once {
         if let Some(uploader) = uploader.as_ref() {
@@ -437,66 +450,10 @@ fn log_redacted(redactor: &Redactor, message: &str) {
     tracing::warn!(detail = %redactor.redact_line(message));
 }
 
-/// Buffers redacted lines per tree-class and appends them to the on-disk tree files.
-/// One class == one file under the tree root; flushing appends (never rewrites), so
-/// a growing log accretes across flushes.
-pub(crate) struct TreeWriter {
-    root: PathBuf,
-    buffers: HashMap<LogClass, String>,
-    pending_bytes: usize,
-}
-
-impl TreeWriter {
-    pub(crate) fn new(root: PathBuf) -> Self {
-        Self {
-            root,
-            buffers: HashMap::new(),
-            pending_bytes: 0,
-        }
-    }
-
-    /// The tree root the bundle is assembled from.
-    pub(crate) fn root(&self) -> &Path {
-        &self.root
-    }
-
-    /// Append one already-redacted line (a newline is added) to its class buffer.
-    pub(crate) fn append(&mut self, class: LogClass, redacted_line: &str) {
-        let buffer = self.buffers.entry(class).or_default();
-        buffer.push_str(redacted_line);
-        buffer.push('\n');
-        self.pending_bytes += redacted_line.len() + 1;
-    }
-
-    /// Bytes buffered since the last flush (drives the size-based flush trigger).
-    pub(crate) fn pending_bytes(&self) -> usize {
-        self.pending_bytes
-    }
-
-    /// Append every non-empty class buffer to its tree file (creating parent dirs),
-    /// then clear the buffers. A per-class write error propagates but leaves the
-    /// unwritten buffer intact for the next attempt.
-    pub(crate) fn flush_pending(&mut self) -> std::io::Result<()> {
-        for (class, buffer) in self.buffers.iter_mut() {
-            if buffer.is_empty() {
-                continue;
-            }
-            let path = self.root.join(class.relative_path());
-            if let Some(parent) = path.parent() {
-                std::fs::create_dir_all(parent)?;
-            }
-            let mut file = std::fs::OpenOptions::new()
-                .create(true)
-                .append(true)
-                .open(&path)?;
-            file.write_all(buffer.as_bytes())?;
-            buffer.clear();
-        }
-        self.pending_bytes = 0;
-        Ok(())
-    }
-}
-
 #[cfg(test)]
 #[path = "collector_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "collector_health_tests.rs"]
+mod health_tests;

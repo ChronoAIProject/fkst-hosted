@@ -27,13 +27,14 @@ These are **reference-only** dependencies. Do **not** modify them from within fk
 | Component | Repository |
 |-----------|------------|
 | Engine    | https://github.com/ChronoAIProject/fkst-substrate |
-| Packages  | https://github.com/ChronoAIProject/fkst-packages   |
+| Upstream package reference | https://github.com/ChronoAIProject/fkst-packages |
 
-> **fkst-hosted package home:** all fkst-hosted packages reside on the
-> [`fkst-hosted` branch of `fkst-packages`](https://github.com/ChronoAIProject/fkst-packages/tree/fkst-hosted).
+> **fkst-hosted package home:** FKST Cloud owns its package catalog on the
+> [`packages` branch of this repository](https://github.com/ChronoAIProject/fkst-hosted/tree/packages).
+> Treat the upstream `fkst-packages` repository as a read-only reference.
 > When referencing a package for this deployment — a trigger issue's
 > `### Packages` entries or `FKST_SEED_PACKAGES`, both in `owner/repo@ref:path`
-> form — use `ChronoAIProject/fkst-packages@fkst-hosted:<path>`.
+> form — use `ChronoAIProject/fkst-hosted@packages:<path>`.
 
 ## Integrations & Platform
 
@@ -1499,7 +1500,7 @@ data:
   # secret goes in the §14.7 Secret). Unset = installed repos only.
   # FKST_GITHUB_BROADER_OAUTH_CLIENT_ID: <your OAuth App's Client ID>
   # Default fkst-manifest the install-seeder references (see the auto-seed line
-  # below). Default: ChronoAIProject/fkst-packages@fkst-hosted:manifests/default-workflows.json
+  # below). Default: ChronoAIProject/fkst-hosted@packages:manifests/default-workflows.json
   # Set blank to disable the manifest-driven seed body (falls back to FKST_SEED_PACKAGES).
   # FKST_DEFAULT_MANIFEST: <owner>/<repo>@<ref>:manifests/<name>.json
   # Auto-seed a trigger on a NEW App install. DEFAULT IS NOW "true": a successful
@@ -1524,6 +1525,14 @@ data:
   # FKST_ENV_INSTALL_MAX_COMMANDS: "..."          # max install commands per profile
   # FKST_ENV_INSTALL_MAX_COMMAND_BYTES: "..."     # max bytes per install command
   # FKST_ENV_INSTALL_STDERR_TAIL_BYTES: "..."     # stderr tail kept on failure
+  # Session-credential delivery (issue #5927). A session pod REPLACED under a
+  # surviving runtime (autoscaler scale-down, node loss) starts with an empty
+  # creds dir and must be re-delivered by the control plane; these two knobs are
+  # what keep that from racing. The wait is injected into the session pod as
+  # FKST_CREDS_WAIT_TIMEOUT_SECS; the watch probes live runtimes through the
+  # backend (no GitHub call) and enqueues a reconcile only when creds are missing.
+  # FKST_POD_CREDS_WAIT_TIMEOUT_SECS: "300"       # in-pod wait before abort; >= 1
+  # FKST_CREDS_WATCH_SECS: "30"                   # credential watch cadence; >= 1
 EOF
 
 # gate check: unreplaced <placeholders> apply cleanly but fail later in
@@ -1762,6 +1771,57 @@ server proxy is the only supported execd transport — §12/§13.9);
 `FKST_POD_SERVICE_ACCOUNT`, `FKST_POD_DNS_NAMESERVERS`,
 `FKST_POD_RUNTIME_CLASS` and `FKST_POD_TERMINATION_GRACE_SECS` are ignored in
 opensandbox mode (the BatchSandbox template owns them).
+
+#### 14.10 Optional: the activity trace and its durable audit relay
+
+The `/operations` surface answers two independent questions — historical API
+activity (captured into a self-hosted PostHog project) and live sandbox
+inventory (read straight from the runtime backend). Both are **off by default**:
+`FKST_AUDIT_DELIVERY_MODE=disabled` and `FKST_POSTHOG_ENABLED=false` in the base
+ConfigMap, so a local stack that ignores this section behaves exactly as before,
+except that the sandbox view already works (it needs no PostHog at all).
+
+Adopting the trace means running one more workload, `fkst-audit-relay`: a
+single-replica SQLite-WAL outbox on its own ReadWriteOnce PVC, bound to no
+Kubernetes RBAC, reachable only from the control plane and a labelled Prometheus
+namespace, and holding the PostHog capture token that the control plane
+deliberately does not. It is what makes `FKST_AUDIT_DELIVERY_MODE=required`
+honest: a request's start is committed durably before its handler runs, so the
+deployment refuses (`503`) to serve a request it could not record.
+
+```bash
+docker build -f "$FKST_REPO/backend/Dockerfile" --target audit-relay-runtime \
+  -t fkst-audit-relay:local "$FKST_REPO"
+kind load docker-image fkst-audit-relay:local --name opensandbox-local
+
+# The relay needs its own credential record first (write/read tokens must
+# DIFFER) — see deploy/kubernetes/README.md, "Local durable source".
+kubectl --context kind-opensandbox-local apply -k "$FKST_REPO/deploy/kubernetes/audit-relay"
+"$FKST_REPO/deploy/kubernetes/verify-audit-relay.sh" --context kind-opensandbox-local
+```
+
+Before turning anything on, read
+`deploy/kubernetes/AUDIT-TRACE.md` — it carries the self-hosted PostHog
+prerequisites checklist (dedicated project, capture token, a **Query
+Read-only** identity that is never a human admin key, retention, NTP), the
+capacity worksheet the PVC size and disk alerts come from, the exact data
+boundaries, and the purge rules. Then follow
+`deploy/kubernetes/AUDIT-RUNBOOK.md` for provisioning, the cross-user
+authorization smoke test, and the staged `best_effort` → `required` rollout.
+`deploy/kubernetes/overlays/required-audit/` is the reference composition.
+
+Two traps worth knowing before you hit them:
+
+- `FKST_AUDIT_INCOMPLETE_GRACE_SECS` is **shared** by the control plane and the
+  relay and must be the same value in both ConfigMaps, and large enough to
+  outlast the longest audited request (`FKST_ENV_VALIDATE_DEADLINE_SECS + 60`,
+  plus a 30s margin — hence the checked-in `420`). Too small and the relay
+  force-closes a still-running request as `incomplete`; the control plane
+  refuses to boot rather than let that happen silently.
+- `FKST_POSTHOG_PROJECT_TOKEN` belongs in the `fkst-audit-relay` record ONLY.
+  Putting it in the control-plane record as well gives you two writers into one
+  project and hands the capture credential to the process that only needs to
+  read.
 
 ### 15. Deploy the fkst frontend
 
@@ -2062,8 +2122,11 @@ lifecycle API → BatchSandbox → controller → caged gVisor pod.
 |---|---|
 | **Rebuild the backend after code changes** | `docker build -f "$FKST_REPO/backend/Dockerfile" -t fkst-control-plane:local "$FKST_REPO" && kind load docker-image fkst-control-plane:local --name opensandbox-local && kubectl -n chronoai-fkst rollout restart deploy/fkst-control-plane` (`kind load` replaces the image on the nodes; the restart picks it up) |
 | **Rebuild the frontend** | same pattern with the §15 build command (`$FKST_REPO/frontend` + the `VITE_FKST_API_BASE` build-arg) and `deploy/fkst-frontend` |
-| **Recover a session runtime created before the exact work-label fix (#626)** | Deploy the corrected control-plane image and `fkst-packages@fkst-hosted` package revision first. Then delete only the affected runtime through its backend's supported delete operation: OpenSandbox `DELETE /v1/sandboxes/<sandbox-id>` with the tenant API key, or Kubernetes `kubectl --context kind-opensandbox-local -n chronoai-fkst delete pod fkst-sess-<session-id>`. Do **not** edit the trigger/work issue or add claim labels manually. Level-triggered reconciliation recreates the same deterministic session and redrives pending durable work. Confirm the trigger and dashboard issues remain unclaimed and the open issue carrying an exact effective work label resumes. |
+| **Recover a session runtime created before the exact work-label fix (#626)** | Deploy the corrected control-plane image and the current `fkst-hosted@packages` catalog revision first. Then delete only the affected runtime through its backend's supported delete operation: OpenSandbox `DELETE /v1/sandboxes/<sandbox-id>` with the tenant API key, or Kubernetes `kubectl --context kind-opensandbox-local -n chronoai-fkst delete pod fkst-sess-<session-id>`. Do **not** edit the trigger/work issue or add claim labels manually. Level-triggered reconciliation recreates the same deterministic session and redrives pending durable work. Confirm the trigger and dashboard issues remain unclaimed and the open issue carrying an exact effective work label resumes. |
 | **Re-attribute an App-seeded trigger** | A bot-authored trigger's effective creator is its sole assignee. Remove any existing assignees and assign **exactly the intended creator**; zero or multiple assignees are rejected with `fkst-trigger-unauthorized`. Ensure that creator is a deployment global admin or has repository admin/maintain permission. Keep the same creator in `### FKST Contributors` when they need seeded-session log access. |
+| **Rebuild the audit relay** | `docker build -f "$FKST_REPO/backend/Dockerfile" --target audit-relay-runtime -t fkst-audit-relay:local "$FKST_REPO" && kind load docker-image fkst-audit-relay:local --name opensandbox-local && kubectl -n chronoai-fkst rollout restart deploy/fkst-audit-relay` (§14.10) |
+| **Roll the audit relay for node maintenance** | Its PDB is `minAvailable: 1` on a single replica, so an ordinary drain is blocked deliberately. Do **not** delete the PDB — follow AUDIT-RUNBOOK.md's planned-maintenance path (cordon, `rollout restart`, confirm readiness, uncordon). In `required` mode ingress is unavailable for that window and product traffic fails closed. |
+| **Roll back required audit delivery** | Patch `FKST_AUDIT_DELIVERY_MODE` to `best_effort`, apply, restart the control plane. It is an explicit, alerted, recorded operator incident action — never a silent fallback. See AUDIT-RUNBOOK.md, "staged rollout". |
 | Change backend config | edit + `kubectl apply -f "$OSB_LOCAL/manifests/fkst-control-plane-config.yaml"`, then `kubectl -n chronoai-fkst rollout restart deploy/fkst-control-plane` (env is read at startup) |
 | Restart the webhook relay | re-run the §14.2 `npx smee-client …` command (it is a long-lived process, like the §12 port-forward); deliveries missed while it was down can be replayed from the App's **Advanced → Recent Deliveries** page |
 | Renew the local TLS cert (mkcert leaf certs expire after ~2 years) | re-run the §16.2 `mkcert` cert command, then `kubectl -n chronoai-fkst create secret tls fkst-local-tls --cert=… --key=… --dry-run=client -o yaml \| kubectl apply -f -` — ingress-nginx reloads on Secret change, no restart needed |
@@ -2111,12 +2174,12 @@ opensandbox-local/
 ```
 
 (Plus two locally built images, `fkst-control-plane:local` and
-`fkst-frontend:local`, and the `fkst-control-plane-secret` created imperatively
-in §14.7. The §14.2 smee channel URL lives only in your shell/App form —
-nothing on disk. Also created imperatively: the `fkst-local-tls` TLS Secret
-(§16.2). Outside `$OSB_LOCAL` on your machine: the mkcert root CA
-(`mkcert -CAROOT`) and the §16.2 `/etc/hosts` line — one line carrying both
-hostnames.)
+`fkst-frontend:local` — three with the optional `fkst-audit-relay:local` from
+§14.10 — and the `fkst-control-plane-secret` created imperatively in §14.7. The
+§14.2 smee channel URL lives only in your shell/App form — nothing on disk. Also
+created imperatively: the `fkst-local-tls` TLS Secret (§16.2). Outside
+`$OSB_LOCAL` on your machine: the mkcert root CA (`mkcert -CAROOT`) and the
+§16.2 `/etc/hosts` line — one line carrying both hostnames.)
 
 ### Appendix B — Troubleshooting
 
@@ -2153,6 +2216,12 @@ hostnames.)
 | Session sandbox pod stuck `Pending` (untainted nodes full) | Each session requests 2 CPU / 4 Gi (`FKST_OSB_SESSION_CPU`/`MEMORY`) on the gVisor node — enlarge the Docker VM or lower those values (§16 sizing note). |
 | Named-environment API calls fail with `Forbidden` | The env-store RBAC (§14.5) is incomplete: `fkst-ksa` needs validation-Pod access in `chronoai-fkst` and Secret CRUD through `fkst-control-plane-durable-envstore` in the namespace selected by `FKST_ENV_STORE_NAMESPACE`. |
 | Backend fails startup with an environment-store key/decryption error | Supply exactly one stable standard-base64 32-byte key through the external control-plane record. Do not replace a lost key or delete the durable records; follow the provider's backup/recovery procedure. |
+| Backend crash-loops with `FKST_AUDIT_INCOMPLETE_GRACE_SECS … must be at least N` | Fail-closed by design (§14.10): the grace must outlast the longest audited request, or the relay would force-close a still-running request as `incomplete`. Raise it to at least `FKST_ENV_VALIDATE_DEADLINE_SECS + 90` in **both** the control-plane and relay ConfigMaps. |
+| Every `/api/v1` call returns `503` right after enabling required delivery | The relay is not Ready, so the deployment refuses to serve requests it cannot record. `deploy/kubernetes/verify-audit-relay.sh --context …`, then AUDIT-RUNBOOK.md's "audit ingress unavailable". Never "fix" it by disabling the audit without recording a rollback. |
+| Relay pod `CreateContainerConfigError` or `CrashLoopBackOff` at startup | The `fkst-audit-relay-secret` is missing, or its write and read tokens are the same value — the relay refuses to start when they match, because one value would promote an ingestion credential into the key to everyone's activity. |
+| Relay pod `Pending` with an unbound claim | No usable StorageClass. The checked-in claim names `standard` (kind's default); a cloud overlay must patch it to a reviewed, backed-up class — never swap the volume for an `emptyDir`. |
+| Activity view empty or "partial" while sandboxes work fine | Expected separation: history comes from PostHog, live inventory from the runtime backend, and one must never hide the other. Check `FKST_POSTHOG_PROJECT_ID` and the Query-Read-only key (capture and query use **different** credentials), then AUDIT-RUNBOOK.md's "activity query failures". |
+| A regular user gets `503 session_visibility_unavailable` on their sandboxes | The GitHub-derived access projection is cold or recovering, and failing closed is the requirement. It clears when the reconciler's full resync completes; if it persists, treat it as a discovery problem (RECOVERY-RUNBOOK.md), never as a reason to widen visibility. |
 
 ---
 
@@ -2258,16 +2327,19 @@ changeset, and a release — if ever cut — is a plain git tag on `main`.
 
 ## CI (pull requests into `develop` and authorized integration branches)
 
-PRs into `develop` and issue-authorized `feat/local-qa-runtime` work run exactly
-five checks, all under `.github/workflows/`:
+PRs into issue-authorized `feat/local-qa-runtime` work run five checks.
+PRs into `develop` and `develop-auto` also run the two acceptance gates below,
+for seven checks. All workflows live under `.github/workflows/`:
 
 | Check | Workflow | What it does |
 |-------|----------|--------------|
 | `rust lint` | `rust-ci.yml` | formats and lints the hosted backend plus the Local QA Runtime workspace |
 | `rust build` | `rust-ci.yml` | builds the backend and Local QA Runtime, cross-target checks the inert Rust shells, and compiles/type-checks workers |
 | `rust test` | `rust-ci.yml` | tests the backend and Local QA Runtime workspace |
-| `docker build` | `docker-build.yml` | builds `backend/Dockerfile` `--target server-builder` |
+| `docker build` | `docker-build.yml` | builds `backend/Dockerfile` `--target server-builder` (both binaries) and `--target audit-relay-runtime` |
 | `gitleaks` | `gitleaks.yml` | scans the working tree for committed secrets |
+| `frontend gates` | `acceptance-gates.yml` | frontend lint → typecheck → vitest → playwright |
+| `deployment gates` | `acceptance-gates.yml` | manifest render/policy validation, audit-relay verifier, runbook + disaster-drill decisions |
 
 Keep this set minimal — do not add new PR gates without good reason.
 
@@ -2275,7 +2347,7 @@ Keep this set minimal — do not add new PR gates without good reason.
 
 A session is owned by an **effective creator**: the author for a human-authored trigger, or the sole assignee for an App-authored trigger. The creator must pass the deployment access allowlist and either be listed in `FKST_GLOBAL_ADMINS` or hold repository **admin or maintain** permission. A bot-authored trigger with zero or multiple assignees is not attributable and is rejected before its body is parsed.
 
-A running session works its open work-label issues **in parallel, each as an independent PR based on the target branch**. `### Source Branch` defaults to the repository default and seeds a missing target; `### Target Branch` defaults to `fkst-hosted-default`, is auto-created from the source head when absent, and is never reset when it already exists. Work branches start from the target and pull requests merge back into that target. Shape the backlog and routes accordingly:
+A running session works its open work-label issues **in parallel, each as an independent PR based on the target branch**. `### Source Branch` defaults to the repository default, seeds a missing target, and is the upstream destination for completed target work; `### Target Branch` defaults to `fkst-hosted-default`, is auto-created from the source head when absent, and is never reset when it already exists. Work branches start from the target, pull requests merge back into that target, and split topologies roll completed target work into the source. Source and target may be equal, which disables the separate rollup step. Shape the backlog and routes accordingly:
 
 - **Wave the backlog by dependency.** Land the foundational issues first (shared config, base modules, scaffolding), **merge them**, and only then file the issues that build on them. Do **not** file a large set of interdependent issues at once: a dependent issue worked before its foundation is merged can yield an empty diff (codex returns `no-changes`) or reference files not yet on `main`. In live testing, content clarity was never the failure mode — **dependency ordering** was.
 - **One feature/page per issue**, named in the title, with exact files + real content + checkable acceptance criteria. Each issue is coded in isolation (codex sees that one issue + the repo, not the sibling backlog), so cross-referencing every other issue in each body does not help — correct per-issue scoping does.
@@ -2296,14 +2368,130 @@ The durable status labels explain what happened and prevent duplicate comments a
 | `fkst-config-rejected` | A registered trigger's frozen configuration was edited and ignored. Close it and open a new trigger to change configuration. |
 | `fkst-session-retired` | The trigger closed, its pod was cleaned up, and the still-open work issue is no longer worked. Start a replacement session and assign the issue to that session's creator. |
 
+## Scheduled workflows
+
+A **scheduled workflow** runs a workflow definition from a repository on a
+schedule — once, or on a cron cadence — with no Actions workflow, no CLI, and no
+extra deployable. Declaring one is opening a GitHub issue.
+
+### The three moving parts
+
+| Piece | Where it lives | Who writes it |
+|---|---|---|
+| The **definition** | an open issue labelled `fkst-scheduled-workflow` | you |
+| The **workflow** | `.fkst/workflows/<id>.toml` in the target repository | you |
+| The **run history** | `fkst-cron-run:v1` marker comments on the definition issue | the control plane and the session pod |
+
+There is no datastore. A schedule's cursor, its in-flight run, and its whole
+history are recovered by re-reading those comments, which is what lets any
+replica take over on leader failover and what makes the history survive a
+control-plane rebuild.
+
+### The definition body
+
+```markdown
+### Workflow
+github-candidate-sourcing
+
+### Run Mode
+cron: 0 1 * * 1-5          # or:  once
+
+### Arguments
+role: AI Tools Application Engineer
+min_score: 6
+```
+
+- **Assign exactly one person**: the creator of the fkst session that will run
+  it. That assignee is the routing key — zero or several means no session to run
+  it, and the issue is latched `fkst-schedule-invalid`.
+- **The body stays editable**, unlike a session trigger. Trigger configuration is
+  frozen by its config hash; a cadence nobody could change would not be a
+  feature. Edits take effect on the next reconcile.
+- `### Arguments` values are **data**. They reach a step escaped, never
+  interpolated into a shell command. A credential-shaped value is **rejected** —
+  secrets reach a step through a named environment profile, referenced from the
+  workflow definition by key name, never through an issue body every repository
+  collaborator can read.
+
+### The cron grammar
+
+Standard five fields in **UTC**: `minute hour day-of-month month day-of-week`.
+Each accepts `*`, a value, a range `a-b`, a comma list, and a `/n` step. This is
+NOT the engine's `Ns`/`Nm`/`Nh` interval grammar.
+
+Day-of-week is `0-6` with `0` = Sunday. **`7` is rejected** rather than treated
+as Sunday, because it is far more often a typo in the month field beside it.
+
+When both day-of-month and day-of-week are restricted, a day matches if
+**either** matches (the standard OR rule): `0 0 1 * 1` fires on the 1st of every
+month AND on every Monday.
+
+### How a run happens
+
+1. The reconcile pass evaluates every open definition — it is the clock, and it
+   runs only on the Lease holder, so no extra election and no extra deployable.
+2. On a due slot it creates a **run issue**: App-authored, carrying the session's
+   work label, assigned to exactly the creator.
+3. That run issue is an ordinary routed work issue, so it wakes the session
+   through the gate that already exists. There is no new spawn path.
+4. The pod runs the workflow's steps and writes one `fkst-cron-run:v1` record.
+5. The control plane sees the terminal record and releases the schedule.
+
+**Missed slots are not replayed.** After an outage the clock fires once for the
+most recent due slot and records how many were passed over. Replaying a backlog
+would multiply exactly the load that caused the outage.
+
+**A slot arriving mid-run is skipped, not queued**, and recorded as
+`skipped-overlap` so the gap in the history is explained.
+
+### Labels
+
+The control plane is the single writer of every label below except
+`fkst-cron-paused`, which is what makes the overlap rule and the watchdog
+trustworthy. No package and no session pod ever writes one.
+
+| Label | Meaning |
+|---|---|
+| `fkst-scheduled-workflow` | this issue IS a schedule definition (reserved; a session may not adopt it as its work label) |
+| `fkst-cron-running` | a run is in flight |
+| `fkst-cron-paused` | **you** applied this to pause without closing; remove it to resume |
+| `fkst-schedule-invalid` | the definition was refused — see the comment; clears automatically once fixed |
+| `fkst-cron-failed` | the last run failed |
+| `fkst-cron-timeout` | the last run exceeded its budget and was released by the watchdog |
+
+### Operating one
+
+- **Pause** — add `fkst-cron-paused`, or use the dashboard. No body edit, so no
+  config rejection.
+- **Run now** — from the dashboard. It goes through the same dispatch the clock
+  uses, so the run is indistinguishable downstream apart from `manual = true` in
+  its record.
+- **Change the cadence** — just edit the issue.
+- **Stop for good** — close the issue.
+
+### Deployment knobs
+
+| Variable | Default | What it guards |
+|---|---|---|
+| `FKST_CRON_MIN_INTERVAL_SECS` | `900` | the tightest cadence an author may declare; a tighter one is rejected naming the limit, never silently slowed |
+| `FKST_CRON_MAX_RUNTIME_SECS` | `3600` | the watchdog budget — the only thing that stops a hung run pinning its schedule forever |
+| `FKST_CRON_MAX_JOBS_PER_CREATOR` | `20` | blast radius; past it the lowest-numbered definitions keep running |
+| `FKST_CRON_HISTORY_PAGES` | `2` | how much run history each pass reads, newest first |
+
+The clock does not run at all unless `FKST_GITHUB_BOT_LOGIN` is configured:
+without an App identity no run record could be trusted, so every definition would
+look as if it had never run and would re-fire on every sweep.
+
 ## Quick Rules Summary
 
 - Stay within the user-facing/public-interface scope; never touch the kernel engine.
 - The control plane serves a dynamic OpenAPI 3 spec at `/openapi.json` (no static file). New/changed public endpoints MUST be annotated with `#[utoipa::path]` + `ToSchema`/`IntoParams` and registered via `OpenApiRouter`/`routes!`; pin `utoipa-axum` to `0.1` (axum 0.7). See **API Contract (OpenAPI)**.
 - The fkst deployables run exclusively on Kubernetes — the full local setup is embedded above in **FKST Local Deployment Guide** (the single source of truth; there is no standalone copy); `docker-compose` is not used in this repo.
 - Each deployment needs its own GitHub App registration — permissions, OAuth callbacks, and env-var mapping are in the deployment guide's **§14.3 Register your GitHub App** (local webhook delivery needs the **§14.2 smee relay** — GitHub cannot POST to `127.0.0.1`); never set `FKST_GITHUB_OAUTH_CLIENT_ID` without its client secret, never commit App secrets.
-- Treat the upstream engine and packages repos as read-only references; all fkst-hosted packages reside on the `fkst-hosted` branch of `fkst-packages` (reference form `ChronoAIProject/fkst-packages@fkst-hosted:<path>`).
+- Treat the upstream engine and packages repositories as read-only references; the FKST Cloud package catalog resides on this repository's `packages` branch (reference form `ChronoAIProject/fkst-hosted@packages:<path>`).
+- The user-activity trace is opt-in and documented in `deploy/kubernetes/AUDIT-TRACE.md` (reference) and `AUDIT-RUNBOOK.md` (operations), with the workload in `deploy/kubernetes/audit-relay/` — see the deployment guide's **§14.10**. The PostHog capture token lives ONLY in the relay's credential record, the query key is Query-Read-only and never reaches a browser, no Prometheus label may carry an actor/session/repository/request/event id, and `required` delivery may only ever be rolled back to `best_effort` as an explicit, alerted operator action.
 - When filing work issues for a substrate session, **wave the backlog by dependency** (merge foundation before dependent issues), use one feature per issue, keep each creator's trigger-label sets disjoint, and assign every work issue to exactly one matching session creator; different creators may reuse labels. Work authors are limited to the creator, Session Collaborators, and global admins. See **Authoring work issues for a substrate session**.
+- A **scheduled workflow** is an open issue labelled `fkst-scheduled-workflow` naming a workflow, its arguments, and a run mode (`once` or `cron: <5-field UTC expr>`), assigned to exactly the session creator. Its body stays EDITABLE (unlike a trigger's); arguments are escaped data and may never carry a credential; missed slots are never replayed and overlapping slots are skipped, not queued. See **Scheduled workflows**.
 - Keep commits small and self-contained.
 - Never add `Co-Authored-By`; always act under the user's own GitHub identity (never a bot/AI identity).
 - All work goes through a pull request — no direct commits to shared branches.
@@ -2313,5 +2501,5 @@ The durable status labels explain what happened and prevent duplicate comments a
 - Use pull requests into `develop` or `develop-auto`; `feat/local-qa-runtime` is a narrow exception only when the work issue explicitly names it. Only `develop` merges into `main`.
 - Never force push `main`, `develop`, `develop-auto`, or `feat/local-qa-runtime`.
 - For NyxID / IAM work, reference NyxID's latest `main`; for Ornn / agent-skill work, reference Ornn's latest `main`.
-- PRs into `develop` and issue-authorized `feat/local-qa-runtime` work run exactly five checks (rust lint/build/test, docker build, gitleaks); there is no changeset or release-note requirement.
+- PRs into issue-authorized `feat/local-qa-runtime` work run five checks (rust lint/build/test, docker build, gitleaks); `develop`/`develop-auto` also run frontend and deployment gates, for seven. There is no changeset or release-note requirement.
 - The product version lives in root `package.json`; there is no automated release pipeline — releases are manual git tags on `main`.

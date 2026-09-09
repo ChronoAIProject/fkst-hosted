@@ -773,6 +773,104 @@ async fn list_open_pulls_projects_number_author_head_ref_and_title() {
     // A PR missing `head.ref` / `title` projects to empty strings, not a panic.
     assert_eq!(pulls[1].head_ref, "");
     assert_eq!(pulls[1].title, "");
+    // ... and a missing `head.repo` (deleted head repository) projects to None
+    // rather than silently reading as "same repository".
+    assert_eq!(pulls[1].head_repo_full_name, None);
+}
+
+#[tokio::test]
+async fn list_open_pulls_projects_the_head_repository() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/repos/acme/site/pulls"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([
+            {
+                "number": 7,
+                "user": { "login": "mallory" },
+                "head": {
+                    "sha": "abc",
+                    "ref": "fkst/issue-templates-v10",
+                    "repo": { "full_name": "mallory/site" },
+                },
+                "title": "Install/Update fkst issue templates to v10",
+            },
+        ])))
+        .mount(&server)
+        .await;
+    let pulls = api(&server.uri())
+        .list_open_pulls(&tok(), "acme", "site")
+        .await
+        .expect("ok");
+    // A fork PR's head.ref is an unqualified branch name that can impersonate
+    // any App-owned branch; head.repo.full_name is what distinguishes it.
+    assert_eq!(pulls[0].head_ref, "fkst/issue-templates-v10");
+    assert_eq!(
+        pulls[0].head_repo_full_name.as_deref(),
+        Some("mallory/site")
+    );
+}
+
+#[tokio::test]
+async fn open_pull_for_head_queries_the_owner_qualified_head_filter() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/repos/acme/site/pulls"))
+        .and(query_param("state", "open"))
+        // Owner-qualified: this is what makes a same-name FORK branch unmatchable.
+        .and(query_param("head", "acme:fkst/issue-templates-v10"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([
+            {
+                "number": 55,
+                "user": { "login": "fkst-app[bot]" },
+                "head": {
+                    "sha": "abc",
+                    "ref": "fkst/issue-templates-v10",
+                    "repo": { "full_name": "acme/site" },
+                },
+                "title": "Install/Update fkst issue templates to v10",
+            },
+        ])))
+        .expect(1)
+        .mount(&server)
+        .await;
+    let found = api(&server.uri())
+        .open_pull_for_head(&tok(), "acme", "site", "fkst/issue-templates-v10")
+        .await
+        .expect("ok")
+        .expect("the open PR on that head");
+    assert_eq!(found.number, 55);
+    assert_eq!(found.head_repo_full_name.as_deref(), Some("acme/site"));
+}
+
+#[tokio::test]
+async fn open_pull_for_head_empty_result_is_none() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/repos/acme/site/pulls"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([])))
+        .mount(&server)
+        .await;
+    let found = api(&server.uri())
+        .open_pull_for_head(&tok(), "acme", "site", "fkst/issue-templates-v10")
+        .await
+        .expect("ok");
+    assert!(found.is_none(), "no open PR on that head");
+}
+
+#[tokio::test]
+async fn open_pull_for_head_non_success_is_an_error() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .respond_with(ResponseTemplate::new(500).set_body_string("boom"))
+        .mount(&server)
+        .await;
+    // Must NOT read as "no pending PR" — that would let the caller recreate a
+    // branch whose open PR it simply failed to see.
+    let error = api(&server.uri())
+        .open_pull_for_head(&tok(), "acme", "site", "fkst/issue-templates-v10")
+        .await
+        .expect_err("a failed lookup is an error");
+    assert!(matches!(error, GithubAppError::Http(_)));
 }
 
 #[tokio::test]

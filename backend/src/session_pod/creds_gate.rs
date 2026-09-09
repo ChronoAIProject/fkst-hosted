@@ -20,7 +20,15 @@ use std::time::{Duration, Instant};
 /// for the credentials-complete sentinel before the engine starts.
 const CREDS_WAIT_TIMEOUT_ENV: &str = "FKST_CREDS_WAIT_TIMEOUT_SECS";
 /// The bounded wait used when the env var is absent, blank, or unparseable.
-const DEFAULT_CREDS_WAIT_TIMEOUT_SECS: u64 = 120;
+///
+/// 300s, not 120s (issue #5927): when a pod is REPLACED under a surviving
+/// `BatchSandbox` (autoscaler scale-down, node loss), its credentials are gone with
+/// the old container and must be re-delivered by the control plane. That delivery
+/// rides the per-repo reconcile pass, whose observed spacing is 51s–297s — so a 120s
+/// wait loses the race outright whenever a pass does not happen to land inside the
+/// new pod's window. The wait stays BOUNDED so a pod whose credentials genuinely
+/// never arrive still dies instead of idling forever holding its resource request.
+const DEFAULT_CREDS_WAIT_TIMEOUT_SECS: u64 = 300;
 /// How often the gate re-checks for the sentinel while it waits.
 pub const CREDS_POLL_INTERVAL: Duration = Duration::from_millis(500);
 

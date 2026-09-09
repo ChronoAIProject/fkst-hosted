@@ -27,7 +27,7 @@
 //! `@chronoai-shining`, case-insensitive); numeric ids remain supported as the
 //! immutable rename-safe form. Matching is
 //! delegated to [`entry_matches`] — one source of truth shared with the
-//! log-download authz tiers ([`crate::reconcile::log_authz`]).
+//! session capability tiers ([`crate::session_access::policy`]).
 //!
 //! `FKST_GLOBAL_ADMINS` uses the same entry grammar. A verified global admin is
 //! always admitted by this deployment access gate, including when
@@ -353,8 +353,9 @@ impl AccessPolicy {
 /// unrelated user whose id happens to equal it. Numeric entries are therefore
 /// id-only.
 ///
-/// The ONE matcher shared by this policy and the log-download authz tiers
-/// ([`crate::reconcile::log_authz`]) so the two allowlist syntaxes can never drift.
+/// The ONE matcher shared by this policy and the session capability tiers
+/// ([`crate::session_access::policy`]) so the two allowlist syntaxes can never
+/// drift.
 pub(crate) fn entry_matches(entry: &str, requester_id_str: &str, requester_login: &str) -> bool {
     let normalized = entry.trim().trim_start_matches('@');
     if normalized.is_empty() {

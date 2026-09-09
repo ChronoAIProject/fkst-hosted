@@ -5,6 +5,7 @@ import {
   formatLocal,
   formatRelative,
   formatSgt,
+  formatTimeShort,
 } from './format';
 
 // A fixed reference instant so relative buckets are deterministic regardless
@@ -117,5 +118,31 @@ describe('formatIsoSgt (deprecated, retained)', () => {
   it('returns null for null or unparseable input', () => {
     expect(formatIsoSgt(null, 'en')).toBeNull();
     expect(formatIsoSgt('not-a-date', 'en')).toBeNull();
+  });
+});
+
+describe('formatTimeShort', () => {
+  const instant = '2026-07-31T08:32:46Z';
+
+  it('is materially shorter than formatLocal, which is why it exists', () => {
+    // The rail is ~11.5rem; formatLocal carries the year and overflows it.
+    expect(formatTimeShort(instant, 'en').length).toBeLessThan(
+      formatLocal(instant, 'en').length
+    );
+  });
+
+  it('keeps the day and the time — the two things that tell entries apart', () => {
+    const out = formatTimeShort(instant, 'en');
+    expect(out).toMatch(/31/);
+    expect(out).toMatch(/\d{1,2}[:.]\d{2}/);
+    expect(out).not.toMatch(/2026/);
+  });
+
+  it('localizes', () => {
+    expect(formatTimeShort(instant, 'zh')).toMatch(/7|月/);
+  });
+
+  it('is null-safe and degrades to the raw value rather than NaN', () => {
+    expect(formatTimeShort('not-a-date', 'en')).toBe('not-a-date');
   });
 });

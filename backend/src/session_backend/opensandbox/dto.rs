@@ -79,6 +79,12 @@ pub struct SandboxView {
     /// projected `LivePod.created_at` both read this — defaulting it to "now" every
     /// sweep would perma-shield a session from idle-kill.
     pub created_at: Option<String>,
+    /// When the sandbox last changed state, from the wire `status.lastTransitionAt`
+    /// (an OPTIONAL RFC3339 field the pinned `server/v0.2.1` contract supplies on
+    /// list responses). Surfaced for the live runtime inventory (issue #5674) so a
+    /// transition instant is available without a per-sandbox GET; `None` when the
+    /// server omits it.
+    pub last_transition_at: Option<String>,
 }
 
 /// The nested wire shape actually returned by create / get / list / patch. Private:
@@ -98,7 +104,7 @@ struct SandboxWire {
 }
 
 /// The `status` sub-object of the sandbox wire. `state` is required; `reason` /
-/// `message` (and the ignored `lastTransitionAt`) are optional.
+/// `message` / `lastTransitionAt` are optional.
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct SandboxStatusWire {
@@ -107,6 +113,8 @@ struct SandboxStatusWire {
     reason: Option<String>,
     #[serde(default)]
     message: Option<String>,
+    #[serde(default)]
+    last_transition_at: Option<String>,
 }
 
 impl From<SandboxWire> for SandboxView {
@@ -119,6 +127,7 @@ impl From<SandboxWire> for SandboxView {
             metadata: wire.metadata,
             extensions: wire.extensions,
             created_at: wire.created_at,
+            last_transition_at: wire.status.last_transition_at,
         }
     }
 }
@@ -140,6 +149,25 @@ pub enum SandboxState {
     Terminated,
     Failed,
     Unknown(String),
+}
+
+impl SandboxState {
+    /// The backend-native state string, verbatim — including an unrecognized
+    /// future value, which the live inventory preserves in `raw_status` rather
+    /// than flattening to the word "unknown".
+    pub fn as_str(&self) -> &str {
+        match self {
+            SandboxState::Pending => "Pending",
+            SandboxState::Running => "Running",
+            SandboxState::Pausing => "Pausing",
+            SandboxState::Paused => "Paused",
+            SandboxState::Resuming => "Resuming",
+            SandboxState::Stopping => "Stopping",
+            SandboxState::Terminated => "Terminated",
+            SandboxState::Failed => "Failed",
+            SandboxState::Unknown(raw) => raw,
+        }
+    }
 }
 
 impl From<String> for SandboxState {

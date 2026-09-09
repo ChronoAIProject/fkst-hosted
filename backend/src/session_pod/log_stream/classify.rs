@@ -56,6 +56,10 @@ pub struct TreeAnchors {
     pub framework_child_dir: PathBuf,
     /// `<codex_home>/log` — codex's own log dir.
     pub codex_log_dir: PathBuf,
+    /// `<runtime_root>/health` — where an in-session package writes v1 health
+    /// reports. NOT a log dir: its files are captured WHOLE (see
+    /// [`discover_copied_files`]), not tailed into a class file.
+    pub health_dir: PathBuf,
 }
 
 impl TreeAnchors {
@@ -65,6 +69,7 @@ impl TreeAnchors {
         Self {
             framework_child_dir: logs_dir.join("framework-child"),
             codex_log_dir: codex_home.join("log"),
+            health_dir: runtime_root.join(crate::session_health::HEALTH_DIR_NAME),
             logs_dir,
         }
     }
@@ -96,6 +101,38 @@ pub fn discover_sources(anchors: &TreeAnchors) -> Vec<(PathBuf, LogClass)> {
     collect_logs(&anchors.codex_log_dir, anchors, &mut sources);
     collect_logs(&anchors.logs_dir, anchors, &mut sources);
     sources
+}
+
+/// Discover the report files to capture WHOLE from the health dir.
+///
+/// A second source KIND, not a fifth [`LogClass`]: the tailing path appends every
+/// source's lines into that class's single file, which would concatenate every report
+/// into one blob and destroy exactly the per-report boundaries the feature depends on.
+/// These files are therefore copied under their own names instead.
+///
+/// Only `*.md` files directly under the dir (non-recursive), sorted by filename —
+/// which is chronological order, because the contract's filenames end in a sortable
+/// `YYYYMMDD-HHMMSS` stamp. Best-effort: a missing or unreadable dir contributes
+/// nothing and is not an error (a session whose packages write no reports is normal,
+/// not broken).
+pub fn discover_copied_files(anchors: &TreeAnchors) -> Vec<PathBuf> {
+    let entries = match std::fs::read_dir(&anchors.health_dir) {
+        Ok(entries) => entries,
+        Err(_) => return Vec::new(),
+    };
+    let mut files: Vec<PathBuf> = entries
+        .flatten()
+        .filter(|entry| {
+            entry
+                .file_type()
+                .map(|kind| kind.is_file())
+                .unwrap_or(false)
+        })
+        .map(|entry| entry.path())
+        .filter(|path| path.extension().and_then(|ext| ext.to_str()) == Some("md"))
+        .collect();
+    files.sort();
+    files
 }
 
 /// Append every `*.log` FILE directly under `dir` (non-recursive) to `out`,

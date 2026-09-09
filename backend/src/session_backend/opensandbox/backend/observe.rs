@@ -20,6 +20,10 @@ use k8s_openapi::chrono::Utc;
 
 use crate::models::RepoRef;
 use crate::reconcile::desired::{LivePod, PodLiveness};
+use crate::runtime_identity::{
+    plan as plan_identity, IdentityPlan, RuntimeIdentityMetadata, RuntimeIdentityOutcome,
+    OSB_IDENTITY_KEYS,
+};
 use crate::session_backend::BackendError;
 
 use super::{correlate, OsbBackend};
@@ -62,6 +66,100 @@ impl OsbBackend {
         self.lifecycle.patch_metadata(&view.id, &patch).await?;
         Ok(())
     }
+
+    /// Fill absent attribution metadata on the session's sandbox (issue #5673).
+    ///
+    /// Resolves the sandbox first so the decision is made against its CURRENT
+    /// metadata, then merge-patches ONLY the absent keys through the existing
+    /// metadata endpoint. Every patched value passes the same label-value
+    /// validator the create-time stamp uses, so a legacy value the server would
+    /// reject fails here as a bounded error instead of on the wire.
+    pub(super) async fn ensure_runtime_identity_impl(
+        &self,
+        session_id: &str,
+        identity: &RuntimeIdentityMetadata,
+    ) -> Result<RuntimeIdentityOutcome, BackendError> {
+        let view = match self.resolve_one(session_id).await {
+            Ok(view) => view,
+            Err(BackendError::NotFound) => return Ok(RuntimeIdentityOutcome::NotFound),
+            Err(error) => return Err(error),
+        };
+        let missing = match plan_identity(&OSB_IDENTITY_KEYS, &view.metadata, identity) {
+            IdentityPlan::Complete => return Ok(RuntimeIdentityOutcome::Unchanged),
+            IdentityPlan::Conflict { key, marker } => {
+                // The KEY is a bounded constant; the disagreeing VALUES are not
+                // logged.
+                tracing::warn!(
+                    session_id = %session_id,
+                    key = key,
+                    "opensandbox runtime identity: stamped attribution disagrees with the current registration; leaving it untouched"
+                );
+                if let Some(marker) = marker {
+                    self.record_identity_conflict(session_id, &view.id, marker)
+                        .await;
+                }
+                return Ok(RuntimeIdentityOutcome::Conflict);
+            }
+            IdentityPlan::Backfill(missing) => missing,
+        };
+
+        let mut patch = BTreeMap::new();
+        for (key, value) in &missing {
+            correlate::put_metadata(&mut patch, key, value.clone())?;
+        }
+        match self.lifecycle.patch_metadata(&view.id, &patch).await {
+            Ok(()) => {
+                tracing::info!(
+                    session_id = %session_id,
+                    keys = missing.len(),
+                    "opensandbox runtime identity: backfilled absent attribution metadata"
+                );
+                Ok(RuntimeIdentityOutcome::Backfilled)
+            }
+            Err(crate::session_backend::opensandbox::dto::OsbError::NotFound) => {
+                Ok(RuntimeIdentityOutcome::NotFound)
+            }
+            Err(error) => Err(error.into()),
+        }
+    }
+
+    /// Record the durable conflict marker on the sandbox.
+    ///
+    /// Best-effort for the same reason as the Kubernetes twin: the CONFLICT is
+    /// the operation's true outcome and must be reported and audited even when
+    /// this one additive metadata key cannot be written. The value still passes
+    /// the shared label-value validator, so a marker the server would reject
+    /// fails here rather than on the wire.
+    async fn record_identity_conflict(
+        &self,
+        session_id: &str,
+        sandbox_id: &str,
+        marker: (&'static str, String),
+    ) {
+        let (key, value) = marker;
+        let mut patch = BTreeMap::new();
+        if let Err(error) = correlate::put_metadata(&mut patch, key, value.clone()) {
+            tracing::warn!(
+                session_id = %session_id,
+                error = %error,
+                "opensandbox runtime identity: attribution-conflict marker rejected by the metadata validator"
+            );
+            return;
+        }
+        match self.lifecycle.patch_metadata(sandbox_id, &patch).await {
+            Ok(()) => tracing::info!(
+                session_id = %session_id,
+                field = %value,
+                "opensandbox runtime identity: recorded a durable attribution-conflict marker"
+            ),
+            Err(error) => tracing::warn!(
+                session_id = %session_id,
+                error = %error,
+                "opensandbox runtime identity: could not record the attribution-conflict marker; \
+                 the conflict is still reported for this pass"
+            ),
+        }
+    }
 }
 
 /// A synthetic `Terminating` [`LivePod`] the shield injects for a just-deleted,
@@ -76,6 +174,10 @@ fn synthetic_terminating(session_id: String, trigger: i64) -> LivePod {
         last_pending_at: None,
         config_hash: None,
         work_labels: Vec::new(),
+        // A shielded session has no runtime to read a stamp from; the empty
+        // observation keeps the attribution backfill away from it, which is
+        // exactly right for a runtime that is being deleted.
+        identity: Default::default(),
     }
 }
 
