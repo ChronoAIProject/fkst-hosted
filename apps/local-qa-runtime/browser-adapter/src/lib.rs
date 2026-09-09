@@ -899,6 +899,10 @@ mod unix {
             }
         }
 
+        if request.is_empty() {
+            return Ok(());
+        }
+
         let header_end = request.windows(4).position(|bytes| bytes == b"\r\n\r\n");
         let request_line = request
             .split(|byte| *byte == b'\n')
@@ -994,7 +998,7 @@ mod unix {
         process_group: Pid,
         profile_path: PathBuf,
         watchdog_done: Option<mpsc::Sender<()>>,
-        watchdog: Option<JoinHandle<()>>,
+        watchdog: Option<JoinHandle<Result<bool, Errno>>>,
         cleaned: bool,
     }
 
@@ -1040,7 +1044,10 @@ mod unix {
                         .expires_at
                         .saturating_duration_since(Instant::now());
                     if watchdog_rx.recv_timeout(wait).is_err() {
-                        let _ = killpg(process_group, Signal::SIGKILL);
+                        signal_process_group(process_group, Signal::SIGKILL)?;
+                        Ok(true)
+                    } else {
+                        Ok(false)
                     }
                 }) {
                 Ok(watchdog) => watchdog,
@@ -1111,12 +1118,23 @@ mod unix {
         }
 
         fn cleanup(&mut self) -> Result<(), String> {
-            self.stop_watchdog();
             let mut failures = Vec::new();
-            if let Err(error) = signal_process_group(self.process_group, Signal::SIGTERM) {
-                failures.push(format!("terminate owned Chrome process group: {error}"));
+            let killed_by_watchdog = match self.stop_watchdog() {
+                Ok(killed) => killed,
+                Err(error) => {
+                    failures.push(error);
+                    false
+                }
+            };
+            if let Err(error) = self.try_reap_root() {
+                failures.push(error);
             }
-            match wait_for_process_group_exit(self.process_group, CLEANUP_GRACE) {
+            if !killed_by_watchdog {
+                if let Err(error) = signal_process_group(self.process_group, Signal::SIGTERM) {
+                    failures.push(format!("terminate owned Chrome process group: {error}"));
+                }
+            }
+            match self.wait_for_exit(CLEANUP_GRACE) {
                 Ok(true) => {}
                 Ok(false) => {
                     if let Err(error) = signal_process_group(self.process_group, Signal::SIGKILL) {
@@ -1169,12 +1187,41 @@ mod unix {
             }
         }
 
-        fn stop_watchdog(&mut self) {
+        fn try_reap_root(&mut self) -> Result<(), String> {
+            if let Some(child) = self.child.as_mut() {
+                child
+                    .try_wait()
+                    .map_err(|error| format!("reap owned Chrome root process: {error}"))?;
+            }
+            Ok(())
+        }
+
+        fn wait_for_exit(&mut self, limit: Duration) -> Result<bool, String> {
+            let deadline = Instant::now() + limit;
+            loop {
+                self.try_reap_root()?;
+                if !process_group_is_alive(self.process_group)? {
+                    return Ok(true);
+                }
+                if Instant::now() >= deadline {
+                    return Ok(false);
+                }
+                thread::sleep(IO_POLL_INTERVAL);
+            }
+        }
+
+        fn stop_watchdog(&mut self) -> Result<bool, String> {
             if let Some(sender) = self.watchdog_done.take() {
                 let _ = sender.send(());
             }
-            if let Some(watchdog) = self.watchdog.take() {
-                let _ = watchdog.join();
+            match self.watchdog.take() {
+                Some(watchdog) => watchdog
+                    .join()
+                    .map_err(|_| "Chrome deadline watchdog panicked".to_string())?
+                    .map_err(|error| {
+                        format!("Chrome deadline watchdog group kill failed: {error}")
+                    }),
+                None => Ok(false),
             }
         }
     }
@@ -1184,7 +1231,7 @@ mod unix {
             if self.cleaned {
                 return;
             }
-            self.stop_watchdog();
+            let _ = self.stop_watchdog();
             let _ = killpg(self.process_group, Signal::SIGKILL);
             if let Some(mut child) = self.child.take() {
                 let _ = child.kill();
@@ -1509,6 +1556,44 @@ mod unix {
         }
 
         #[test]
+        fn fixture_closes_empty_preconnections_without_an_unsolicited_response() {
+            let _browser_guard = browser_test_guard();
+            let fixture = FixtureServer::start(FixtureContent::Ready).expect("fixture starts");
+            for close_write in [false, true] {
+                let mut client = TcpStream::connect(fixture.address).expect("preconnection opens");
+                client
+                    .set_read_timeout(Some(FIXTURE_REQUEST_TIMEOUT + Duration::from_secs(1)))
+                    .expect("client read is bounded");
+                if close_write {
+                    client
+                        .shutdown(Shutdown::Write)
+                        .expect("empty client sends EOF");
+                }
+                let mut response = Vec::new();
+                client
+                    .read_to_end(&mut response)
+                    .expect("empty connection closes");
+                assert!(
+                    response.is_empty(),
+                    "fixture sent an HTTP response before any request"
+                );
+            }
+
+            let rejected = send_request(fixture.address, b"G");
+            assert!(split_response(&rejected)
+                .0
+                .starts_with("HTTP/1.1 404 Not Found\r\n"));
+            let accepted = send_request(
+                fixture.address,
+                b"GET /fixed-page.html HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n",
+            );
+            let (head, body) = split_response(&accepted);
+            assert!(head.starts_with("HTTP/1.1 200 OK\r\n"));
+            assert_eq!(body, FIXTURE_HTML);
+            fixture.stop().expect("fixture stops");
+        }
+
+        #[test]
         fn fixture_close_is_bounded_for_a_slow_byte_client() {
             let _browser_guard = browser_test_guard();
             let fixture = FixtureServer::start(FixtureContent::Ready).expect("fixture starts");
@@ -1708,8 +1793,14 @@ mod unix {
             options.fixture_content = FixtureContent::MissingSelector;
 
             let error = run_with_options(options).expect_err("missing selector fails");
-            assert!(matches!(error, BrowserAdapterError::Operation(_)));
-            assert!(error.to_string().contains("locate fixed status element"));
+            assert!(
+                matches!(error, BrowserAdapterError::Operation(_)),
+                "{error}"
+            );
+            assert!(
+                error.to_string().contains("locate fixed status element"),
+                "{error}"
+            );
             assert_observed_resources_cleaned(&resources, true);
         }
 
@@ -1854,6 +1945,181 @@ mod unix {
                 }
                 other => panic!("unexpected combined outcome: {other}"),
             }
+        }
+
+        #[test]
+        fn owned_chrome_cleanup_consumes_watchdog_outcome_and_preserves_failure() {
+            let _browser_guard = browser_test_guard();
+            for denied in [false, true] {
+                let child = Command::new("/bin/sleep")
+                    .arg("30")
+                    .stdin(Stdio::null())
+                    .stdout(Stdio::null())
+                    .stderr(Stdio::null())
+                    .process_group(0)
+                    .spawn()
+                    .expect("owned root starts");
+                let process_group = Pid::from_raw(child.id() as i32);
+                let watchdog = thread::spawn(move || {
+                    if denied {
+                        Err(Errno::EPERM)
+                    } else {
+                        signal_process_group(process_group, Signal::SIGKILL).map(|()| true)
+                    }
+                });
+                let mut chrome = OwnedChrome {
+                    child: Some(child),
+                    process_group,
+                    profile_path: PathBuf::new(),
+                    watchdog_done: None,
+                    watchdog: Some(watchdog),
+                    cleaned: false,
+                };
+                let result = chrome.cleanup();
+                if denied {
+                    let error = result.expect_err("watchdog failure survives successful cleanup");
+                    assert!(
+                        error.contains("watchdog group kill failed: EPERM"),
+                        "{error}"
+                    );
+                } else {
+                    result.expect("cleanup waits for and reaps the watchdog-killed group");
+                }
+                assert!(chrome.cleaned);
+                assert!(chrome.child.is_none());
+                assert!(!process_group_is_alive(process_group).expect("owned group inspection"));
+            }
+        }
+
+        #[test]
+        fn owned_chrome_cleanup_reaps_terminated_root_before_group_escalation() {
+            let _browser_guard = browser_test_guard();
+            let unrelated = KillOnDrop::spawn("/bin/sleep", &["30"]);
+            let child = Command::new("/bin/sleep")
+                .arg("30")
+                .stdin(Stdio::null())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .process_group(0)
+                .spawn()
+                .expect("owned root starts");
+            let process_group = Pid::from_raw(child.id() as i32);
+            let mut chrome = OwnedChrome {
+                child: Some(child),
+                process_group,
+                profile_path: PathBuf::new(),
+                watchdog_done: None,
+                watchdog: None,
+                cleaned: false,
+            };
+
+            chrome
+                .cleanup()
+                .expect("terminated root is reaped without a spurious group kill failure");
+
+            assert!(chrome.cleaned);
+            assert!(chrome.child.is_none());
+            assert!(
+                !process_group_is_alive(process_group).expect("owned group inspection succeeds")
+            );
+            assert!(
+                process_is_alive(unrelated.id()),
+                "unrelated process was killed"
+            );
+        }
+
+        #[cfg(target_os = "macos")]
+        #[test]
+        fn owned_chrome_cleanup_reaps_an_already_exited_root_before_signaling() {
+            let _browser_guard = browser_test_guard();
+            let child = Command::new("/usr/bin/true")
+                .process_group(0)
+                .spawn()
+                .expect("owned root starts");
+            let process_group = Pid::from_raw(child.id() as i32);
+            let mut chrome = OwnedChrome {
+                child: Some(child),
+                process_group,
+                profile_path: PathBuf::new(),
+                watchdog_done: None,
+                watchdog: None,
+                cleaned: false,
+            };
+            let deadline = Instant::now() + CLEANUP_LIMIT;
+            loop {
+                let state = Command::new("/bin/ps")
+                    .args(["-p", &process_group.as_raw().to_string(), "-o", "stat="])
+                    .output()
+                    .expect("inspect only the owned root without reaping");
+                assert!(state.status.success(), "owned root inspection failed");
+                if state.stdout.contains(&b'Z') {
+                    break;
+                }
+                assert!(Instant::now() < deadline, "owned root did not exit");
+                thread::sleep(IO_POLL_INTERVAL);
+            }
+
+            chrome
+                .cleanup()
+                .expect("already exited root is reaped before signaling its group");
+
+            assert!(chrome.cleaned);
+            assert!(chrome.child.is_none());
+            assert!(
+                !process_group_is_alive(process_group).expect("owned group inspection succeeds")
+            );
+        }
+
+        #[test]
+        fn owned_chrome_cleanup_escalates_for_a_term_resistant_root() {
+            let _browser_guard = browser_test_guard();
+            let unrelated = KillOnDrop::spawn("/bin/sleep", &["30"]);
+            let directory = TempDir::new().expect("readiness directory creates");
+            let ready = directory.path().join("ready");
+            let child = Command::new("/bin/sh")
+                .args([
+                    "-c",
+                    "trap '' TERM; printf ready > \"$1\"; exec sleep 30",
+                    "owned-root",
+                ])
+                .arg(&ready)
+                .stdin(Stdio::null())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .process_group(0)
+                .spawn()
+                .expect("owned root starts");
+            let process_group = Pid::from_raw(child.id() as i32);
+            let mut chrome = OwnedChrome {
+                child: Some(child),
+                process_group,
+                profile_path: PathBuf::new(),
+                watchdog_done: None,
+                watchdog: None,
+                cleaned: false,
+            };
+            let deadline = Instant::now() + CLEANUP_LIMIT;
+            while !ready.exists() {
+                assert!(
+                    Instant::now() < deadline,
+                    "owned root did not install its TERM handler"
+                );
+                thread::sleep(IO_POLL_INTERVAL);
+            }
+
+            chrome
+                .cleanup()
+                .expect("TERM-resistant root is killed and reaped");
+
+            assert!(chrome.cleaned);
+            assert!(chrome.child.is_none());
+            assert!(
+                !process_group_is_alive(process_group).expect("owned group inspection succeeds")
+            );
+            assert!(
+                process_is_alive(unrelated.id()),
+                "unrelated process was killed"
+            );
         }
 
         #[cfg(target_os = "linux")]
@@ -2103,10 +2369,8 @@ mod unix {
             }
         }
 
-        #[cfg(target_os = "linux")]
         struct KillOnDrop(Child);
 
-        #[cfg(target_os = "linux")]
         impl KillOnDrop {
             fn spawn(executable: &str, arguments: &[&str]) -> Self {
                 Self(
@@ -2125,7 +2389,6 @@ mod unix {
             }
         }
 
-        #[cfg(target_os = "linux")]
         impl Drop for KillOnDrop {
             fn drop(&mut self) {
                 let _ = self.0.kill();
