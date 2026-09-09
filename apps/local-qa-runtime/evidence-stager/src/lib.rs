@@ -1,5 +1,11 @@
 #![forbid(unsafe_code)]
 
+mod fixed_json;
+pub use fixed_json::{
+    FixedJsonExport, FixedJsonExportHandle, FixedJsonExportRequest, FixedJsonNamespace,
+    FixedJsonStagingStatus,
+};
+
 use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
@@ -873,6 +879,8 @@ enum OwnedDirectory {
     Attempt,
     Evidence,
     Observation,
+    FixedJsonRaw,
+    FixedJsonExport,
 }
 
 fn cleanup_owned_tree(
@@ -914,6 +922,8 @@ fn cleanup_owned_tree(
                 OwnedDirectory::Observation => {
                     is_observation_name(&name) || is_temporary_name(&name)
                 }
+                OwnedDirectory::FixedJsonRaw => fixed_json::fixed_json_owned_name(&name, false),
+                OwnedDirectory::FixedJsonExport => fixed_json::fixed_json_owned_name(&name, true),
             };
             if !recognized {
                 residuals.push(residual_item(
@@ -921,7 +931,12 @@ fn cleanup_owned_tree(
                     attempt,
                     CleanupResidualReason::UnrelatedEntry,
                 ));
-            } else if !metadata.file_type().is_file() {
+            } else if !metadata.file_type().is_file()
+                || (matches!(
+                    directory,
+                    OwnedDirectory::FixedJsonRaw | OwnedDirectory::FixedJsonExport
+                ) && link_count(&metadata) != Some(1))
+            {
                 residuals.push(residual_item(
                     run_id,
                     attempt,
@@ -936,8 +951,12 @@ fn cleanup_owned_tree(
             }
         }
     }
-    if residuals.is_empty() {
-        let _ = fs::remove_dir(path);
+    if residuals.is_empty() && fs::remove_dir(path).is_err() {
+        residuals.push(residual_item(
+            run_id,
+            attempt,
+            CleanupResidualReason::RemovalFailed,
+        ));
     }
     Ok(())
 }
