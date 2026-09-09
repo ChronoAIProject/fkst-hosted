@@ -22,6 +22,9 @@ const LOCAL_LIFECYCLE_SCHEMA_PATH: &str = "contracts/qa.local-lifecycle/v1/schem
 const LOCAL_EVIDENCE_SCHEMA: &str =
     include_str!("../../contracts/qa.local-evidence/v1/schema.json");
 const LOCAL_EVIDENCE_SCHEMA_PATH: &str = "contracts/qa.local-evidence/v1/schema.json";
+const LOCAL_FIXED_JSON_SCHEMA: &str =
+    include_str!("../../contracts/qa.local-fixed-json-export/v1/schema.json");
+const LOCAL_FIXED_JSON_SCHEMA_PATH: &str = "contracts/qa.local-fixed-json-export/v1/schema.json";
 const LOCAL_WORKER_SCHEMA: &str =
     include_str!("../../contracts/qa.local-worker-protocol/v1/schema.json");
 const LOCAL_WORKER_SCHEMA_PATH: &str = "contracts/qa.local-worker-protocol/v1/schema.json";
@@ -48,6 +51,7 @@ const EMBEDDED_SCHEMAS: &[(&str, &str)] = &[
     (FOUNDATION_SCHEMA_PATH, FOUNDATION_SCHEMA),
     (LOCAL_LIFECYCLE_SCHEMA_PATH, LOCAL_LIFECYCLE_SCHEMA),
     (LOCAL_EVIDENCE_SCHEMA_PATH, LOCAL_EVIDENCE_SCHEMA),
+    (LOCAL_FIXED_JSON_SCHEMA_PATH, LOCAL_FIXED_JSON_SCHEMA),
     (LOCAL_WORKER_SCHEMA_PATH, LOCAL_WORKER_SCHEMA),
     (LOCAL_RUN_ADMISSION_SCHEMA_PATH, LOCAL_RUN_ADMISSION_SCHEMA),
     (
@@ -81,7 +85,9 @@ const LOCAL_SANITIZED_OBSERVATION_TYPE_NAME: &str = "LocalSanitizedObservation";
 const LOCAL_EVIDENCE_OBJECT_TYPE_NAME: &str = "LocalEvidenceObject";
 const LOCAL_SANITIZED_OBSERVATION_REF_TYPE_NAME: &str = "LocalSanitizedObservationRef";
 const LOCAL_EVIDENCE_OBJECT_REF_TYPE_NAME: &str = "LocalEvidenceObjectRef";
-const LOCAL_EVIDENCE_TYPE_NAMES: [&str; 4] = [
+const LOCAL_EVIDENCE_TYPE_NAMES: [&str; 6] = [
+    "LocalFixedJsonPolicy",
+    "LocalFixedJsonReceipt",
     LOCAL_SANITIZED_OBSERVATION_TYPE_NAME,
     LOCAL_EVIDENCE_OBJECT_TYPE_NAME,
     LOCAL_SANITIZED_OBSERVATION_REF_TYPE_NAME,
@@ -399,6 +405,87 @@ pub fn validate_local_sanitized_observation(raw: &[u8]) -> Result<ValidatedValue
         validate_registered_value(admit_json(raw)?, LOCAL_SANITIZED_OBSERVATION_TYPE_NAME)?;
     validate_local_sanitized_observation_rules(validated.value())?;
     Ok(validated)
+}
+
+pub const LOCAL_FIXED_JSON_MAX_BYTES: usize = 65_536;
+pub const LOCAL_FIXED_JSON_RECEIPT_MAX_BYTES: usize = 4096;
+pub const LOCAL_FIXED_JSON_POLICY_DIGEST: &str =
+    "sha256:4f50954a54c579eea9e337e68f7e6c3c27a9dfb87cd793e0951368887c597dda";
+
+/// This local built-in profile is not a signed or Hosted-frozen RedactionPolicy.
+pub fn local_fixed_json_policy() -> Result<ValidatedValue, ContractError> {
+    let schema: Value =
+        serde_json::from_str(LOCAL_FIXED_JSON_SCHEMA).map_err(|_| fixed_json_rejection())?;
+    let policy = schema
+        .pointer("/$defs/LocalFixedJsonPolicy/const")
+        .ok_or_else(fixed_json_rejection)?
+        .clone();
+    let validated = validate_registered_value(AdmittedJson(policy), "LocalFixedJsonPolicy")?;
+    if contract_content_digest(&validated)? != LOCAL_FIXED_JSON_POLICY_DIGEST
+        || validated.value()["observation_schema_digest"]
+            != sha256_digest(LOCAL_EVIDENCE_SCHEMA.as_bytes())
+    {
+        return Err(fixed_json_rejection());
+    }
+    Ok(validated)
+}
+
+/// Bounded, closed input validation. No rejected field name or value leaves this boundary.
+pub fn validate_local_fixed_json_source(raw: &[u8]) -> Result<ValidatedValue, ContractError> {
+    if raw.len() > LOCAL_FIXED_JSON_MAX_BYTES {
+        return Err(fixed_json_rejection());
+    }
+    local_fixed_json_policy().map_err(|_| fixed_json_rejection())?;
+    validate_local_sanitized_observation(raw).map_err(|_| fixed_json_rejection())
+}
+
+/// Validating a receipt does not confer eligibility; the stager owns durable publication.
+pub fn validate_local_fixed_json_receipt(raw: &[u8]) -> Result<ValidatedValue, ContractError> {
+    if raw.len() > LOCAL_FIXED_JSON_RECEIPT_MAX_BYTES {
+        return Err(fixed_json_rejection());
+    }
+    let admitted = admit_json(raw).map_err(|_| fixed_json_rejection())?;
+    let receipt = validate_registered_value(admitted, "LocalFixedJsonReceipt")
+        .map_err(|_| fixed_json_rejection())?;
+    verify_contract_content_digest(&receipt).map_err(|_| fixed_json_rejection())?;
+    local_fixed_json_policy().map_err(|_| fixed_json_rejection())?;
+    Ok(receipt)
+}
+
+/// Checks the complete byte binding without granting access to filesystem objects.
+pub fn validate_local_fixed_json_export(
+    receipt_bytes: &[u8],
+    source_bytes: &[u8],
+    output_bytes: &[u8],
+) -> Result<ValidatedValue, ContractError> {
+    if source_bytes.len() > LOCAL_FIXED_JSON_MAX_BYTES
+        || output_bytes.len() > LOCAL_FIXED_JSON_MAX_BYTES
+    {
+        return Err(fixed_json_rejection());
+    }
+    let receipt = validate_local_fixed_json_receipt(receipt_bytes)?;
+    let source = validate_local_fixed_json_source(source_bytes)?;
+    let output = validate_local_fixed_json_source(output_bytes)?;
+    let binding = receipt.value();
+    if canonical_bytes(&source).map_err(|_| fixed_json_rejection())? != output_bytes
+        || canonical_bytes(&output).map_err(|_| fixed_json_rejection())? != output_bytes
+        || binding["run_id"] != source.value()["run_id"]
+        || binding["attempt"] != source.value()["attempt"]
+        || binding["source_digest"] != sha256_digest(source_bytes)
+        || binding["output_digest"] != sha256_digest(output_bytes)
+        || binding["source_byte_length"].as_u64() != Some(source_bytes.len() as u64)
+        || binding["output_byte_length"].as_u64() != Some(output_bytes.len() as u64)
+    {
+        return Err(fixed_json_rejection());
+    }
+    Ok(receipt)
+}
+
+fn fixed_json_rejection() -> ContractError {
+    ContractError(Rejection::validation(
+        "invalid_local_fixed_json_export",
+        "/",
+    ))
 }
 
 pub fn validate_local_evidence_object(raw: &[u8]) -> Result<ValidatedValue, ContractError> {

@@ -34,6 +34,8 @@ const LOCAL_EVIDENCE_OBJECT_TYPE_NAME = "LocalEvidenceObject";
 const LOCAL_SANITIZED_OBSERVATION_REF_TYPE_NAME = "LocalSanitizedObservationRef";
 const LOCAL_EVIDENCE_OBJECT_REF_TYPE_NAME = "LocalEvidenceObjectRef";
 const LOCAL_EVIDENCE_TYPE_NAMES = Object.freeze([
+  "LocalFixedJsonPolicy",
+  "LocalFixedJsonReceipt",
   LOCAL_SANITIZED_OBSERVATION_TYPE_NAME,
   LOCAL_EVIDENCE_OBJECT_TYPE_NAME,
   LOCAL_SANITIZED_OBSERVATION_REF_TYPE_NAME,
@@ -94,6 +96,25 @@ export interface LocalSanitizedObservation {
   readonly selector: '[data-local-qa="status"]';
   readonly expected_text: "READY";
   readonly observed_text: "READY";
+}
+
+export interface LocalFixedJsonReceipt {
+  readonly schema_version: "qa.local-fixed-json-export/v1";
+  readonly content_digest: string;
+  readonly kind: "completed-local-fixed-json";
+  readonly run_id: string;
+  readonly attempt: number;
+  readonly object_id: string;
+  readonly role: "fixed-sanitized-observation";
+  readonly source_digest: string;
+  readonly source_byte_length: number;
+  readonly policy_profile: "local-host-built-in-fixed-observation";
+  readonly policy_version: 1;
+  readonly policy_digest: string;
+  readonly output_digest: string;
+  readonly media_type: "application/json";
+  readonly output_byte_length: number;
+  readonly created_at_unix_ms: number;
 }
 
 export interface LocalEvidenceObject {
@@ -399,6 +420,75 @@ export function validateLocalSanitizedObservation(raw: Uint8Array): ValidatedVal
   const validated = validateRegisteredValue(admitJson(raw), LOCAL_SANITIZED_OBSERVATION_TYPE_NAME);
   validateLocalSanitizedObservationRules(validated.value() as LocalSanitizedObservation);
   return validated;
+}
+
+export const LOCAL_FIXED_JSON_MAX_BYTES = 65_536;
+export const LOCAL_FIXED_JSON_RECEIPT_MAX_BYTES = 4096;
+export const LOCAL_FIXED_JSON_POLICY_DIGEST =
+  "sha256:4f50954a54c579eea9e337e68f7e6c3c27a9dfb87cd793e0951368887c597dda";
+
+/** Local built-in approval only; this is not a signed or Hosted-frozen policy. */
+export function localFixedJsonPolicy(): ValidatedValue {
+  const schema = JSON.parse(readFileSync(resolvePackageFile(
+    "contracts/qa.local-fixed-json-export/v1/schema.json",
+  ), "utf8")) as { $defs: { LocalFixedJsonPolicy: { const: Record<string, unknown> } } };
+  const policy = validateRegisteredValue(admitJson(Buffer.from(JSON.stringify(
+    schema.$defs.LocalFixedJsonPolicy.const,
+  ))), "LocalFixedJsonPolicy");
+  const observationSchema = readFileSync(resolvePackageFile("contracts/qa.local-evidence/v1/schema.json"));
+  if (contractContentDigest(policy) !== LOCAL_FIXED_JSON_POLICY_DIGEST ||
+      (policy.value() as Record<string, unknown>).observation_schema_digest !== sha256Digest(observationSchema)) {
+    throw fixedJsonRejection();
+  }
+  return policy;
+}
+
+export function validateLocalFixedJsonSource(raw: Uint8Array): ValidatedValue {
+  if (raw.byteLength > LOCAL_FIXED_JSON_MAX_BYTES) throw fixedJsonRejection();
+  try {
+    localFixedJsonPolicy();
+    return validateLocalSanitizedObservation(raw);
+  } catch {
+    throw fixedJsonRejection();
+  }
+}
+
+/** Receipt validation cannot mint the Rust stager's opaque export handle. */
+export function validateLocalFixedJsonReceipt(raw: Uint8Array): ValidatedValue {
+  if (raw.byteLength > LOCAL_FIXED_JSON_RECEIPT_MAX_BYTES) throw fixedJsonRejection();
+  try {
+    const receipt = validateRegisteredValue(admitJson(raw), "LocalFixedJsonReceipt");
+    verifyContractContentDigest(receipt);
+    localFixedJsonPolicy();
+    return receipt;
+  } catch {
+    throw fixedJsonRejection();
+  }
+}
+
+export function validateLocalFixedJsonExport(
+  receiptBytes: Uint8Array, sourceBytes: Uint8Array, outputBytes: Uint8Array,
+): ValidatedValue {
+  if (sourceBytes.byteLength > LOCAL_FIXED_JSON_MAX_BYTES || outputBytes.byteLength > LOCAL_FIXED_JSON_MAX_BYTES) {
+    throw fixedJsonRejection();
+  }
+  const receipt = validateLocalFixedJsonReceipt(receiptBytes);
+  const source = validateLocalFixedJsonSource(sourceBytes);
+  const output = validateLocalFixedJsonSource(outputBytes);
+  const binding = receipt.value() as LocalFixedJsonReceipt;
+  const observation = source.value() as LocalSanitizedObservation;
+  if (!Buffer.from(canonicalBytes(source)).equals(outputBytes) ||
+      !Buffer.from(canonicalBytes(output)).equals(outputBytes) ||
+      binding.run_id !== observation.run_id || binding.attempt !== observation.attempt ||
+      binding.source_digest !== sha256Digest(sourceBytes) || binding.output_digest !== sha256Digest(outputBytes) ||
+      binding.source_byte_length !== sourceBytes.byteLength || binding.output_byte_length !== outputBytes.byteLength) {
+    throw fixedJsonRejection();
+  }
+  return receipt;
+}
+
+function fixedJsonRejection(): ContractError {
+  return validationError("invalid_local_fixed_json_export", "/");
 }
 
 export function validateLocalEvidenceObject(raw: Uint8Array): ValidatedValue {

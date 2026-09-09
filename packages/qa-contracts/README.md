@@ -57,6 +57,15 @@ The checked-in conformance sources are:
 - `fixtures/qa/local-evidence-v1.json` for Local Evidence canonical bytes, raw
   Evidence byte identity, contract-object content digests, and reference
   binding across the four public Local Evidence types;
+- `fixtures/qa.local-fixed-json-export/v1/conformance.json` for the approved
+  partial #6146 local built-in JSON profile: exact observation validation,
+  source/canonical digests, identity/policy/size binding, private errors, secret
+  canaries and PNG rejection. `LocalFixedJsonPolicy` pins the profile descriptor
+  and existing observation schema; `LocalFixedJsonReceipt` binds the original
+  timestamp and complete byte identity. The Rust/TypeScript bundle validators
+  confer no eligibility by themselves; only the evidence stager can issue an
+  opaque handle after durable publication. This is not a signed hardened policy
+  or Hosted-frozen approval and does not close #6146.
 - `fixtures/qa.local-worker-protocol/v1/happy-path.json` for the shared logical
   and length-prefixed golden transcript of the fixed browser-smoke Worker.
 - `fixtures/qa.local-run-admission/v1/happy-path.json` for the shared

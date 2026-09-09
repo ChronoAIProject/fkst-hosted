@@ -1,0 +1,54 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:chronoai:fkst:qa-contracts:qa.local-fixed-json-export:v1",
+  "$defs": {
+    "LocalFixedJsonPolicy": {
+      "const": {
+        "profile": "local-host-built-in-fixed-observation",
+        "version": 1,
+        "observation_schema_digest": "sha256:f4b97088656c519fbfcc05201563e3590dfe0a9accf2187ba271d91e59714942",
+        "input_max_bytes": 65536,
+        "output_max_bytes": 65536,
+        "media_type": "application/json",
+        "url_rule": "equal-http-127.0.0.1-port-1-65535-fixed-page.html",
+        "selector": "[data-local-qa=\"status\"]",
+        "expected_text": "READY",
+        "observed_text": "READY",
+        "transform": "strict-observation-validation-jcs-revalidation",
+        "unknown_fields": "reject",
+        "duplicate_fields": "reject",
+        "png": "deny",
+        "raw_logs": "deny"
+      }
+    },
+    "Digest": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+    "Size": { "type": "integer", "minimum": 1, "maximum": 65536 },
+    "LocalFixedJsonReceipt": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version", "content_digest", "kind", "run_id", "attempt", "object_id",
+        "role", "source_digest", "source_byte_length", "policy_profile", "policy_version",
+        "policy_digest", "output_digest", "media_type", "output_byte_length", "created_at_unix_ms"
+      ],
+      "properties": {
+        "schema_version": { "const": "qa.local-fixed-json-export/v1" },
+        "content_digest": { "$ref": "#/$defs/Digest" },
+        "kind": { "const": "completed-local-fixed-json" },
+        "run_id": { "type": "string", "maxLength": 64, "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$" },
+        "attempt": { "type": "integer", "minimum": 1, "maximum": 9007199254740991 },
+        "object_id": { "type": "string", "maxLength": 64, "pattern": "^observation/[0-9]+$" },
+        "role": { "const": "fixed-sanitized-observation" },
+        "source_digest": { "$ref": "#/$defs/Digest" },
+        "source_byte_length": { "$ref": "#/$defs/Size" },
+        "policy_profile": { "const": "local-host-built-in-fixed-observation" },
+        "policy_version": { "const": 1 },
+        "policy_digest": { "const": "sha256:4f50954a54c579eea9e337e68f7e6c3c27a9dfb87cd793e0951368887c597dda" },
+        "output_digest": { "$ref": "#/$defs/Digest" },
+        "media_type": { "const": "application/json" },
+        "output_byte_length": { "$ref": "#/$defs/Size" },
+        "created_at_unix_ms": { "type": "integer", "minimum": 1, "maximum": 9007199254740991 }
+      }
+    }
+  }
+}

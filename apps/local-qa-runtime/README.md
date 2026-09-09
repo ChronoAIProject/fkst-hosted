@@ -86,6 +86,29 @@ run/attempt root but outside `evidence/`, so the fixed screenshot and runner-log
 quota remains exactly two Evidence objects. The feature-gated MVP-0A Host path
 stages and reloads all three artifacts; default production does not.
 
+The approved partial #6146 increment adds `stage_fixed_json_export` and
+`read_fixed_json_export` to this library only. The sole immutable local built-in
+profile accepts the existing exact `LocalSanitizedObservation`, preserves its
+equal loopback fixture URLs and fixed selector/READY values, rejects unknown or
+duplicate fields before any publication, and bounds raw input and canonical
+output to 64 KiB each. `StagedEvidence` remains local-only; raw logs and PNG are
+never eligible. This profile does not implement the signed hardened policy or
+Hosted-frozen authority, and does not activate production Browser or upload.
+
+Fixed JSON uses `fixed-json/<run>/<attempt>/{raw,export}/` beneath an absolute,
+non-symlink, Host-owned root. Raw bytes and a receipt-digest anchor precede
+canonical output and the final durable receipt. Only complete revalidated
+records yield an opaque handle; replay preserves the original receipt timestamp.
+Each attempt has at most two fixed JSON objects, with the existing 2 MiB ceiling
+counting raw, output and receipt metadata together. `fixed_json_status` and
+`cleanup_fixed_json` expose exact run/attempt/namespace ownership for #6159;
+status counts physical files, including interrupted publication, without granting
+eligibility. Raw cleanup revokes existing handles; export cleanup is independent.
+These hooks do not coordinate resources or release execution slots. The local
+integrity checks assume Host-owned storage, not protection from a privileged
+writer replacing the entire store. Original #6146 remains open for its unimplemented
+provider, full redaction-policy and PNG requirements.
+
 The Rust Local QA Host API and journal boundary described above is already
 activated in `host/`. The launcher, supervisor, guest agent, and Secret Broker
 remain intentionally inert hardened-profile shells.
