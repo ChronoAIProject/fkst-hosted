@@ -11,7 +11,9 @@ use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
 use super::test_support::*;
+use crate::audit::AuditHandle;
 use crate::log_config::LogConfig;
+use crate::storage::ChronoStorageClient;
 
 #[tokio::test]
 async fn no_bearer_with_oauth_configured_redirects_to_github() {
@@ -143,6 +145,103 @@ async fn oauth_callback_happy_path_streams_the_bundle_as_a_download() {
         .unwrap();
     assert_eq!(ct, "application/gzip");
     assert_eq!(body_bytes(response).await, BUNDLE_BYTES);
+}
+
+// ---- The recorded outcome of the flow ---------------------------------------
+
+/// A GitHub mock serving BOTH the OAuth token exchange and `/user`.
+async fn oauth_github(login: &str, id: i64) -> MockServer {
+    let gh = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/login/oauth/access_token"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "access_token": "user-token",
+            "token_type": "bearer",
+        })))
+        .mount(&gh)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/user"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "login": login,
+            "id": id,
+        })))
+        .mount(&gh)
+        .await;
+    gh
+}
+
+/// Drive one full callback and return `(status, recorded result)`.
+async fn callback_outcome(
+    gh: &MockServer,
+    storage: Option<Arc<ChronoStorageClient>>,
+) -> (StatusCode, serde_json::Value) {
+    let log = LogConfig {
+        admins: vec![],
+        public_base_url: Some("https://fkst.example".to_string()),
+        oauth_client_id: Some("Iv1.clientid".to_string()),
+        oauth_client_secret: Some(SecretString::from("oauth-secret".to_string())),
+        broader_oauth_client_id: None,
+        broader_oauth_client_secret: None,
+        oauth_base_url: gh.uri(),
+        frontend_url: None,
+    };
+    let mut st = state(gh.uri(), storage, log, registry(&[]));
+    let (audit, sink) = AuditHandle::recording();
+    st.audit = audit;
+    let signed = super::oauth::sign_state(b"oauth-secret", SESSION_ID);
+    let response = get(
+        st,
+        &format!("/api/v1/logs/oauth/callback?code=abc&state={signed}"),
+        None,
+    )
+    .await;
+    let status = response.status();
+    let event = sink
+        .events()
+        .into_iter()
+        .find(|event| event.operation_id == "session_logs_oauth_callback")
+        .expect("the callback recorded a terminal event");
+    let result = event
+        .arguments
+        .get("result")
+        .cloned()
+        .expect("the callback record carries its result");
+    (status, result)
+}
+
+/// A caller the session does not authorize is `denied`, not `success`: the
+/// record's `result` is a dashboard facet, and "success" on a refused log
+/// download would read as though the bundle had been handed over.
+#[tokio::test]
+async fn a_refused_callback_records_denied() {
+    let gh = oauth_github("mallory", AUTHOR_ID + 1).await;
+    let (storage, _s) = storage_server(true).await;
+    let (status, result) = callback_outcome(&gh, Some(storage)).await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    assert_eq!(result, serde_json::json!("denied"));
+}
+
+/// An authorized caller whose bundle cannot be read is `upstream_error` — the
+/// flow reached its dependency and the dependency is what failed.
+#[tokio::test]
+async fn a_callback_whose_bundle_is_missing_records_an_upstream_error() {
+    let gh = oauth_github("alice", AUTHOR_ID).await;
+    let (storage, _s) = storage_server(false).await;
+    let (status, result) = callback_outcome(&gh, Some(storage)).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    assert_eq!(result, serde_json::json!("upstream_error"));
+}
+
+/// …and the served download still says `success`, so the two cases above are a
+/// distinction rather than a blanket rename.
+#[tokio::test]
+async fn a_served_callback_records_success() {
+    let gh = oauth_github("alice", AUTHOR_ID).await;
+    let (storage, _s) = storage_server(true).await;
+    let (status, result) = callback_outcome(&gh, Some(storage)).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(result, serde_json::json!("success"));
 }
 
 // ---- Secret hygiene: the caller's token never reaches the logs --------------

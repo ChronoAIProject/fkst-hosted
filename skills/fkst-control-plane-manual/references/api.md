@@ -23,8 +23,8 @@ an `fkst-substrate-trigger` issue as the authenticated user.
 | `work_label` | no | one explicit work label; a collision returns `409` |
 | `environment` | no | reusable profile name; exclusive with `disposable_environment` |
 | `disposable_environment` | no | request-only object described below |
-| `source_branch` | no | source branch; repository default when omitted |
-| `target_branch` | no | target branch; `fkst-hosted-default` when omitted |
+| `source_branch` | no | upstream branch that receives completed target work; repository default when omitted |
+| `target_branch` | no | integration branch; `fkst-hosted-default` when omitted |
 | `auto_merge` | no | only JSON `true` enables it |
 | `log_access` | no | array of individual GitHub logins/ids granted log access and trust |
 | `collaborators` | no | array of individual GitHub logins/ids granted work-item authority |

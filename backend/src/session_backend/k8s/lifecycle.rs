@@ -20,6 +20,10 @@ use crate::k8s::{
 };
 use crate::models::RepoRef;
 use crate::reconcile::desired::{LivePod, PodLiveness};
+use crate::runtime_identity::{
+    plan as plan_identity, IdentityPlan, RuntimeIdentityMetadata, RuntimeIdentityOutcome,
+    RuntimeIncarnation, K8S_IDENTITY_KEYS,
+};
 
 use super::super::{BackendError, EnsureOutcome, KillReason};
 use super::{annotation, K8sBackend};
@@ -40,7 +44,14 @@ impl K8sBackend {
             }
         };
         match create_session_pod(self.kube.client(), spec, pod, creds).await {
-            Ok(SessionPodOutcome::Created) => Ok(EnsureOutcome::Created),
+            // The Pod name repeats across a respawn; its creationTimestamp does
+            // not, so that is what identifies THIS incarnation.
+            Ok(SessionPodOutcome::Created { created_at }) => {
+                Ok(EnsureOutcome::Created(RuntimeIncarnation {
+                    runtime_id: Some(session_object_name(&spec.session_id)),
+                    created_at,
+                }))
+            }
             Ok(SessionPodOutcome::AlreadyLive) => Ok(EnsureOutcome::AlreadyLive),
             Err(error) => {
                 tracing::error!(session_id = %spec.session_id, error = %error, "reconcile spawn: session pod create failed");
@@ -103,6 +114,109 @@ impl K8sBackend {
             Err(error) => Err(BackendError::Other(anyhow::Error::new(error))),
         }
     }
+
+    /// Fill absent attribution annotations on the named Pod (issue #5673).
+    ///
+    /// A GET decides against the runtime's CURRENT annotations rather than a
+    /// possibly stale observation, and the patch is a metadata-only JSON merge
+    /// patch carrying ONLY the absent keys — so a concurrent writer's value for
+    /// any other key is untouched, and no field of the pod spec can move.
+    pub(super) async fn ensure_runtime_identity_impl(
+        &self,
+        session_id: &str,
+        identity: &RuntimeIdentityMetadata,
+    ) -> Result<RuntimeIdentityOutcome, BackendError> {
+        let name = session_object_name(session_id);
+        let pod = match self.pods_api().get(&name).await {
+            Ok(pod) => pod,
+            Err(kube::Error::Api(e)) if e.code == 404 => {
+                return Ok(RuntimeIdentityOutcome::NotFound)
+            }
+            Err(error) => return Err(BackendError::Other(anyhow::Error::new(error))),
+        };
+        let annotations = pod.metadata.annotations.clone().unwrap_or_default();
+        let missing = match plan_identity(&K8S_IDENTITY_KEYS, &annotations, identity) {
+            IdentityPlan::Complete => return Ok(RuntimeIdentityOutcome::Unchanged),
+            IdentityPlan::Conflict { key, marker } => {
+                // The KEY is a bounded constant; the two disagreeing VALUES are
+                // deliberately absent from the line.
+                tracing::warn!(
+                    session_id = %session_id,
+                    key = key,
+                    "kubernetes runtime identity: stamped attribution disagrees with the current registration; leaving it untouched"
+                );
+                if let Some(marker) = marker {
+                    self.record_identity_conflict(session_id, &name, marker)
+                        .await;
+                }
+                return Ok(RuntimeIdentityOutcome::Conflict);
+            }
+            IdentityPlan::Backfill(missing) => missing,
+        };
+
+        let patch = identity_merge_patch(&missing);
+        match self
+            .pods_api()
+            .patch(&name, &PatchParams::default(), &Patch::Merge(patch))
+            .await
+        {
+            Ok(_) => {
+                tracing::info!(
+                    session_id = %session_id,
+                    keys = missing.len(),
+                    "kubernetes runtime identity: backfilled absent attribution annotations"
+                );
+                Ok(RuntimeIdentityOutcome::Backfilled)
+            }
+            Err(kube::Error::Api(e)) if e.code == 404 => Ok(RuntimeIdentityOutcome::NotFound),
+            Err(error) => Err(BackendError::Other(anyhow::Error::new(error))),
+        }
+    }
+
+    /// Record the durable conflict marker on the named Pod.
+    ///
+    /// Best-effort by design: the CONFLICT is the true outcome of the operation
+    /// and must still be reported (and audited) even if this one additive
+    /// annotation cannot be written. A failure is logged, never propagated —
+    /// turning it into an error would replace a precise "attribution disputed"
+    /// lifecycle event with a generic patch failure. The gate's cooldown bounds
+    /// the retry: the next sweep after it expires re-plans and tries again.
+    async fn record_identity_conflict(
+        &self,
+        session_id: &str,
+        name: &str,
+        marker: (&'static str, String),
+    ) {
+        let (key, value) = marker;
+        let patch = identity_merge_patch(&[(key, value.clone())]);
+        match self
+            .pods_api()
+            .patch(name, &PatchParams::default(), &Patch::Merge(patch))
+            .await
+        {
+            Ok(_) => tracing::info!(
+                session_id = %session_id,
+                field = %value,
+                "kubernetes runtime identity: recorded a durable attribution-conflict marker"
+            ),
+            Err(error) => tracing::warn!(
+                session_id = %session_id,
+                error = %error,
+                "kubernetes runtime identity: could not record the attribution-conflict marker; \
+                 the conflict is still reported for this pass"
+            ),
+        }
+    }
+}
+
+/// The metadata-only JSON merge patch that adds `pairs` to a Pod's annotations.
+/// Pure + unit-tested, so the patch can never grow a `spec` key.
+fn identity_merge_patch(pairs: &[(&'static str, String)]) -> serde_json::Value {
+    let annotations: serde_json::Map<String, serde_json::Value> = pairs
+        .iter()
+        .map(|(key, value)| ((*key).to_string(), serde_json::Value::String(value.clone())))
+        .collect();
+    serde_json::json!({ "metadata": { "annotations": serde_json::Value::Object(annotations) } })
 }
 
 /// The JSON merge patch that sets `last-pending-at` to `now` (RFC3339). Pure +
@@ -187,6 +301,18 @@ fn pod_to_live(pod: &Pod) -> Option<LivePod> {
         .map(split_work_labels)
         .unwrap_or_default();
 
+    // Read the attribution stamp back through the SHARED key set, so the pod's
+    // annotations and the OpenSandbox metadata can never be parsed by two
+    // different notions of what the keys are called.
+    let identity = pod
+        .metadata
+        .annotations
+        .as_ref()
+        .map(|annotations| {
+            crate::runtime_identity::read(&crate::runtime_identity::K8S_IDENTITY_KEYS, annotations)
+        })
+        .unwrap_or_default();
+
     Some(LivePod {
         session_id,
         trigger_issue,
@@ -195,6 +321,7 @@ fn pod_to_live(pod: &Pod) -> Option<LivePod> {
         last_pending_at,
         config_hash,
         work_labels,
+        identity,
     })
 }
 

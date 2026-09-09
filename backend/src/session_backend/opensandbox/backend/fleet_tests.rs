@@ -295,14 +295,14 @@ async fn two_serialized_ensures_both_create_then_list_fleet_converges_to_one() {
         )])
     };
     // Serialized, single-writer: two ensures in sequence, both create.
-    assert_eq!(
+    assert!(matches!(
         backend.ensure_session_impl(&spec(), creds()).await.unwrap(),
-        EnsureOutcome::Created
-    );
-    assert_eq!(
+        EnsureOutcome::Created(_)
+    ));
+    assert!(matches!(
         backend.ensure_session_impl(&spec(), creds()).await.unwrap(),
-        EnsureOutcome::Created
-    );
+        EnsureOutcome::Created(_)
+    ));
 
     // The reaper converges the duplicate fleet back to exactly one, keeping the oldest.
     let handles = backend.list_fleet_impl().await.expect("fleet");

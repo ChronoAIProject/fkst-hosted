@@ -157,8 +157,9 @@ hash_file() {
 case "$timeout_seconds" in
   ''|*[!0-9]*) fail "timeout must be an integer number of seconds" ;;
 esac
-[ "$timeout_seconds" -ge 1 ] && [ "$timeout_seconds" -le 3600 ] || \
+if [ "$timeout_seconds" -lt 1 ] || [ "$timeout_seconds" -gt 3600 ]; then
   fail "timeout must be between 1 and 3600 seconds"
+fi
 
 case "$context" in
   kind-*) ;;
@@ -187,8 +188,9 @@ case "$repository" in
 esac
 repo_owner=${repository%%/*}
 repo_name=${repository#*/}
-[ "$repository" = "$repo_owner/$repo_name" ] && [ -n "$repo_owner" ] && [ -n "$repo_name" ] || \
+if [ "$repository" != "$repo_owner/$repo_name" ] || [ -z "$repo_owner" ] || [ -z "$repo_name" ]; then
   fail "repository must contain exactly one slash"
+fi
 for segment in "$repo_owner" "$repo_name"; do
   printf '%s\n' "$segment" | grep -Eq '^[A-Za-z0-9_.-]+$' || \
     fail "repository segments contain unsupported characters"

@@ -1,12 +1,14 @@
-import { useCallback, useId, useRef, useState, type KeyboardEvent } from 'react';
+import { useCallback, useEffect, useId, useRef, useState, type KeyboardEvent } from 'react';
 import { useContent } from '@/i18n';
 import { useAuth } from '@/lib/auth/github-auth';
 import { cn } from '@/lib/utils';
 import { getObserve, ObserveError } from '@/lib/api/observe';
+import { getSessionHealth, HealthError } from '@/lib/api/health';
 import { canQueueSessionWork, decodeSessionStatus, sessionWorkLabels } from '@/lib/api/derive';
 import type { SessionDetail } from '@/lib/api/types';
 import { CreateWorkItemModal } from '@/components/modals/create-work-item-modal';
 import { Chip } from '@/components/ui/chip';
+import { ScrollArea } from '@/components/ui/scroll-area';
 import { CopyButton } from '@/components/ui/copy-button';
 import { FadeSwap } from '@/components/ui/motion';
 import { PHASE_TONE } from './tones';
@@ -15,15 +17,21 @@ import { TabStatus } from './tab-status';
 import { TabPackages } from './tab-packages';
 import { TabLogs } from './tab-logs';
 import { TabOutcomes } from './tab-outcomes';
+import { TabHealth, type HealthState } from './tab-health';
+import { TabEngine } from './tab-engine';
+import { SessionWorkflows } from '@/components/workflows/session-workflows';
+import { healthChip } from './health-state';
 
-type TabKey = 'status' | 'packages' | 'logs' | 'outcomes';
+type TabKey = 'status' | 'packages' | 'logs' | 'health' | 'workflows' | 'engine' | 'outcomes';
 
 /** The reusable inner detail surface: a sticky header with the decoded status
- *  pill and a four-tab body (status / packages / logs / outcomes). It renders
- *  identically inside the overlay drawer (SessionDetailDrawer) and an inline
- *  workspace scroll area — the only difference is the header Close button, which
- *  is emitted only when an `onClose` handler is supplied. The observe fetch is
- *  lifted here so the Status and Packages tabs share one slow pod-exec call.
+ *  pill and a seven-tab body (status / packages / logs / health / workflows /
+ *  engine / outcomes). It renders identically inside the overlay drawer
+ *  (SessionDetailDrawer) and an inline workspace scroll area — the only
+ *  difference is the header Close button, which is emitted only when an
+ *  `onClose` handler is supplied. The observe fetch STATE is lifted here so the
+ *  Engine and Packages tabs share one slow pod-exec call; only Engine triggers
+ *  it.
  *
  *  Tabs follow the WAI-ARIA tabs pattern: each `role="tab"` owns the single
  *  stable `role="tabpanel"` (`aria-controls`), the panel is labelled back by the
@@ -67,6 +75,11 @@ export function SessionDetailView({
 
   const [tab, setTab] = useState<TabKey>('status');
   const [observe, setObserve] = useState<ObserveState>({ status: 'idle' });
+  // The health listing is LIFTED here, not deferred to the tab, because the header
+  // chip is the "at a glance" half of the feature and cannot wait for the reader to
+  // open the tab. One fetch serves both surfaces, so this is strictly fewer requests
+  // than fetching per tab activation; the backend serves it from a TTL-cached index.
+  const [health, setHealth] = useState<HealthState>({ status: 'idle' });
   const [showWorkItem, setShowWorkItem] = useState(false);
 
   // Live refs to each tab button so the arrow-key handler can move focus onto
@@ -97,10 +110,40 @@ export function SessionDetailView({
       );
   }, [apiFetch, session.session_id]);
 
+  const loadHealth = useCallback(() => {
+    const sessionId = session.session_id;
+    if (!sessionId) {
+      setHealth({ status: 'error' });
+      return;
+    }
+    setHealth({ status: 'loading' });
+    getSessionHealth(apiFetch, sessionId)
+      .then((loaded) => setHealth({ status: 'loaded', health: loaded }))
+      .catch((err) =>
+        setHealth({
+          status: 'error',
+          httpStatus: err instanceof HealthError ? err.status : undefined,
+        })
+      );
+  }, [apiFetch, session.session_id]);
+
+  useEffect(() => {
+    loadHealth();
+  }, [loadHealth]);
+
+  const chip = healthChip(health.status === 'loaded' ? health.health : null);
+
   const tabs: Array<{ key: TabKey; label: string }> = [
     { key: 'status', label: t.tabStatus },
     { key: 'packages', label: t.tabPackages },
     { key: 'logs', label: t.tabLogs },
+    { key: 'health', label: t.tabHealth },
+    // Workflows and Engine both sit between Health and Outcomes deliberately:
+    // inserting there keeps ArrowRight from Status on Packages and {End} on
+    // Outcomes, so the drawer's existing keyboard contract is unchanged by
+    // adding a tab. Any further tab belongs in this same interior window.
+    { key: 'workflows', label: t.tabWorkflows },
+    { key: 'engine', label: t.tabEngine },
     { key: 'outcomes', label: t.tabOutcomes },
   ];
 
@@ -122,11 +165,11 @@ export function SessionDetailView({
   };
 
   return (
-    <>
-      {/* Frosted sticky header: a translucent bg-glass strip with backdrop-blur
+    <div className="flex min-h-0 flex-1 flex-col">
+      {/* Frosted header: a translucent bg-glass strip with backdrop-blur
           keeps it legible while body content scrolls faintly beneath it, and a
           layered highlight/hairline seats it above the panel. */}
-      <div className="sticky top-0 z-10 bg-glass backdrop-blur-glass border-b border-line px-5 py-4 flex flex-col gap-3 shadow-[var(--shadow-1),var(--highlight-top)]">
+      <div className="flex-none bg-glass backdrop-blur-glass border-b border-line px-5 py-4 flex flex-col gap-3 shadow-[var(--shadow-1),var(--highlight-top)]">
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0 flex flex-col gap-1.5">
             {/* Bright fg→dim display sweep on the session name for a premium
@@ -148,6 +191,17 @@ export function SessionDetailView({
                 <span className="anim-chip-in inline-flex">
                   <Chip tone={status.liveness === 'live' ? 'green' : 'neutral'}>
                     {status.liveness}
+                  </Chip>
+                </span>
+              )}
+              {/* Business-aware health. A STALE heartbeat overrides the reported
+                  status (a 35-minute-old "working" verdict is not evidence of
+                  work); `not_running` renders neutral because a reaped pod is
+                  normal; `never_reported` renders nothing at all. */}
+              {chip && (
+                <span className="anim-chip-in inline-flex">
+                  <Chip tone={chip.tone}>
+                    {chip.kind === 'stale' ? t.healthStaleChip : t.healthStatus[chip.status]}
                   </Chip>
                 </span>
               )}
@@ -255,16 +309,60 @@ export function SessionDetailView({
         id={panelId}
         aria-labelledby={tabId(tab)}
         tabIndex={0}
-        className="relative px-5 py-4 outline-none"
+        className="relative flex-1 min-h-0 flex flex-col outline-none"
       >
-        <FadeSwap k={tab}>
+        {/* The PANEL is the fixed box; each tab owns its own scrollbar inside it.
+            Scrolling here instead would drag the header and tablist away with the
+            body, and — for a master/detail tab like Logs or Health — slide the
+            navigation rail out of view while reading an entry. Every tab scrolls
+            through the same themed ScrollArea so the scrollbar looks identical
+            across tabs. */}
+        <FadeSwap k={tab} className="flex-1 min-h-0 flex flex-col">
           {tab === 'status' && (
-            <TabStatus session={session} observe={observe} onLoadObserve={loadObserve} />
+            <ScrollArea className="px-5 py-4">
+              <TabStatus session={session} />
+            </ScrollArea>
           )}
-          {tab === 'packages' && <TabPackages session={session} observe={observe} />}
-          {tab === 'logs' && <TabLogs session={session} />}
+          {tab === 'packages' && (
+            <ScrollArea className="px-5 py-4">
+              <TabPackages session={session} observe={observe} />
+            </ScrollArea>
+          )}
+          {/* Logs and Health are master/detail tabs: each manages TWO scroll
+              regions of its own (rail + detail), so they get the fixed box
+              rather than a scroller — nesting one inside another would give
+              them two competing scrollbars, and the outer one would scroll the
+              navigation rail out of view while reading. */}
+          {tab === 'logs' && (
+            <div className="flex-1 min-h-0 px-5 py-4">
+              <TabLogs session={session} />
+            </div>
+          )}
+          {tab === 'health' && (
+            <div className="flex-1 min-h-0 px-5 py-4">
+              <TabHealth sessionId={session.session_id ?? ''} state={health} onRetry={loadHealth} />
+            </div>
+          )}
+          {/* Workflows is a third master/detail tab (schedule rail + detail), so
+              it gets the fixed box for the same reason Logs and Health do. */}
+          {tab === 'workflows' && (
+            <div className="flex-1 min-h-0 flex flex-col px-5 py-4">
+              <SessionWorkflows owner={owner} name={name} creator={session.creator} />
+            </div>
+          )}
+          {/* The observe fetch is triggered HERE, by opening this tab — never by
+              Status, which must cost no request. The STATE stays lifted above so
+              Packages can surface the same snapshot's per-queue activity without
+              a second pod exec. */}
+          {tab === 'engine' && (
+            <ScrollArea className="px-5 py-4">
+              <TabEngine session={session} observe={observe} onLoadObserve={loadObserve} />
+            </ScrollArea>
+          )}
           {tab === 'outcomes' && (
-            <TabOutcomes owner={owner} name={name} issue={session.trigger.number} />
+            <ScrollArea className="px-5 py-4">
+              <TabOutcomes owner={owner} name={name} issue={session.trigger.number} />
+            </ScrollArea>
           )}
         </FadeSwap>
       </div>
@@ -283,6 +381,6 @@ export function SessionDetailView({
           }}
         />
       )}
-    </>
+    </div>
   );
 }

@@ -3,7 +3,8 @@ import { useContent } from '@/i18n';
 import { useAuth } from '@/lib/auth/github-auth';
 import { fetchBlob, saveBlob } from '@/lib/api/outcomes';
 import type { OutcomeFile } from '@/lib/api/types';
-import { Note, Spinner } from './parts';
+import { LoadingState, Spinner } from '@/components/ui/loading';
+import { Note } from './parts';
 
 // The preview never streams a file's bytes on mount. A committed file can be
 // large media; auto-fetching on expand pulls the whole thing into memory blind.
@@ -34,7 +35,8 @@ export function OutcomeFilePreview({
   /** Where "open on GitHub" points when the file is too large to preview. */
   githubHref: string;
 }) {
-  const t = useContent().dashboard.detail;
+  const c = useContent();
+  const t = c.dashboard.detail;
   const { apiFetch } = useAuth();
   const previewable = PREVIEWABLE.has(file.kind);
 
@@ -126,10 +128,7 @@ export function OutcomeFilePreview({
         </button>
       )}
       {state === 'loading' && (
-        <span className="inline-flex items-center gap-2 font-mono text-[11.5px] text-dim">
-          <Spinner />
-          {t.previewLoading}
-        </span>
+        <LoadingState label={t.previewLoading} detail={c.loading.github} />
       )}
       {state === 'error' && (
         <div className="flex items-center gap-2 flex-wrap">
@@ -190,11 +189,12 @@ export function OutcomeFilePreview({
           type="button"
           onClick={onDownload}
           disabled={downloading}
+          aria-busy={downloading}
           aria-label={t.downloadAria.replace('{name}', basename(file.filename))}
           className="self-start inline-flex items-center gap-1.5 font-ui font-semibold text-[11.5px] border border-line rounded-control px-2.5 py-1 text-dim hover:text-fg hover:border-line-2 hover:shadow-glow-amber transition-[color,border-color,box-shadow] duration-150 cursor-pointer disabled:cursor-default disabled:hover:text-dim disabled:hover:border-line disabled:hover:shadow-none"
         >
           {downloading && <Spinner />}
-          {t.download}
+          {downloading ? t.downloadPending : t.download}
         </button>
       )}
     </div>

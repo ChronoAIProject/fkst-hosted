@@ -31,6 +31,26 @@ fn issue_json(number: i64, body: &str, labels: &[&str], state: &str) -> serde_js
     })
 }
 
+/// A work issue routed to `assignees` under the sole-assignee ownership rule.
+///
+/// The projection attributes an issue to a session only when its ONE assignee is
+/// that session's creator, so a work fixture must state its assignee explicitly —
+/// a plain [`issue_json`] carries none and is therefore deliberately unrouted.
+fn work_issue_json(
+    number: i64,
+    body: &str,
+    labels: &[&str],
+    state: &str,
+    assignees: &[&str],
+) -> serde_json::Value {
+    let mut issue = issue_json(number, body, labels, state);
+    issue["assignees"] = serde_json::json!(assignees
+        .iter()
+        .map(|login| serde_json::json!({ "login": login }))
+        .collect::<Vec<_>>());
+    issue
+}
+
 async fn mount_installation_covering_site(server: &MockServer) {
     Mock::given(method("GET"))
         .and(path("/user/installations"))
@@ -69,14 +89,9 @@ async fn mount_trigger_and_work(server: &MockServer) {
     Mock::given(method("GET"))
         .and(path("/repos/acme/site/issues"))
         .and(query_param("labels", "site-build"))
-        .respond_with(
-            ResponseTemplate::new(200).set_body_json(serde_json::json!([issue_json(
-                8,
-                "work",
-                &["site-build"],
-                "open"
-            ),])),
-        )
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([
+            work_issue_json(8, "work", &["site-build"], "open", &["shining"]),
+        ])))
         .mount(server)
         .await;
     Mock::given(method("GET"))
@@ -114,7 +129,8 @@ async fn session_outcomes_groups_files_by_pr() {
 
     let Json(view) = session_outcomes(
         State(state),
-        Path(("acme".to_string(), "site".to_string(), 5)),
+        axum::http::Extensions::new(),
+        AuditedPath(("acme".to_string(), "site".to_string(), 5)),
         viewer_user(),
         auth_headers(),
     )
@@ -202,7 +218,8 @@ async fn global_admin_can_read_outcomes_and_blobs_outside_user_installations() {
 
     let Json(view) = session_outcomes(
         State(state.clone()),
-        Path(("acme".to_string(), "site".to_string(), 5)),
+        axum::http::Extensions::new(),
+        AuditedPath(("acme".to_string(), "site".to_string(), 5)),
         viewer_user(),
         auth_headers(),
     )
@@ -213,8 +230,9 @@ async fn global_admin_can_read_outcomes_and_blobs_outside_user_installations() {
 
     let response = outcome_blob(
         State(state),
-        Path(("acme".to_string(), "site".to_string(), "abc123".to_string())),
-        Query(BlobQuery {
+        axum::http::Extensions::new(),
+        AuditedPath(("acme".to_string(), "site".to_string(), "abc123".to_string())),
+        crate::audit::arguments::AuditedQuery(BlobQuery {
             name: Some("report.txt".to_string()),
             download: None,
         }),
@@ -275,14 +293,9 @@ acme/manifests@main:bundles/default.json\n";
         .and(path("/repos/acme/site/issues"))
         .and(query_param("labels", "fkst-dev"))
         .and(query_param("state", "all"))
-        .respond_with(
-            ResponseTemplate::new(200).set_body_json(serde_json::json!([issue_json(
-                3,
-                "implemented work",
-                &["fkst-dev"],
-                "closed"
-            )])),
-        )
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([
+            work_issue_json(3, "implemented work", &["fkst-dev"], "closed", &["shining"])
+        ])))
         .mount(&server)
         .await;
     Mock::given(method("GET"))
@@ -311,7 +324,8 @@ acme/manifests@main:bundles/default.json\n";
     state.config.reconcile.github_bot_login = Some("fkst-test[bot]".to_string());
     let Json(view) = session_outcomes(
         State(state),
-        Path(("acme".to_string(), "site".to_string(), 2)),
+        axum::http::Extensions::new(),
+        AuditedPath(("acme".to_string(), "site".to_string(), 2)),
         viewer_user(),
         auth_headers(),
     )
@@ -342,7 +356,8 @@ async fn session_outcomes_flags_files_error_but_keeps_the_pr() {
 
     let Json(view) = session_outcomes(
         State(state),
-        Path(("acme".to_string(), "site".to_string(), 5)),
+        axum::http::Extensions::new(),
+        AuditedPath(("acme".to_string(), "site".to_string(), 5)),
         viewer_user(),
         auth_headers(),
     )
@@ -368,7 +383,8 @@ async fn session_outcomes_unknown_trigger_is_404() {
     let state = test_state(&server.uri(), Some(test_app(&server.uri())));
     let err = session_outcomes(
         State(state),
-        Path(("acme".to_string(), "site".to_string(), 5)),
+        axum::http::Extensions::new(),
+        AuditedPath(("acme".to_string(), "site".to_string(), 5)),
         viewer_user(),
         auth_headers(),
     )
@@ -391,7 +407,8 @@ async fn session_outcomes_repo_not_visible_is_404() {
     let state = test_state(&server.uri(), Some(test_app(&server.uri())));
     let err = session_outcomes(
         State(state),
-        Path(("acme".to_string(), "site".to_string(), 5)),
+        axum::http::Extensions::new(),
+        AuditedPath(("acme".to_string(), "site".to_string(), 5)),
         viewer_user(),
         auth_headers(),
     )
@@ -406,7 +423,8 @@ async fn session_outcomes_rejects_a_malformed_owner() {
     let state = test_state(&server.uri(), None);
     let err = session_outcomes(
         State(state),
-        Path(("bad owner".to_string(), "site".to_string(), 5)),
+        axum::http::Extensions::new(),
+        AuditedPath(("bad owner".to_string(), "site".to_string(), 5)),
         viewer_user(),
         auth_headers(),
     )
@@ -431,8 +449,9 @@ async fn outcome_blob_streams_bytes_with_guessed_content_type() {
     let state = test_state(&server.uri(), Some(test_app(&server.uri())));
     let response = outcome_blob(
         State(state),
-        Path(("acme".to_string(), "site".to_string(), "abc123".to_string())),
-        Query(BlobQuery {
+        axum::http::Extensions::new(),
+        AuditedPath(("acme".to_string(), "site".to_string(), "abc123".to_string())),
+        crate::audit::arguments::AuditedQuery(BlobQuery {
             name: Some("logo.svg".to_string()),
             download: None,
         }),
@@ -471,8 +490,9 @@ async fn outcome_blob_download_sets_attachment_filename() {
     let state = test_state(&server.uri(), Some(test_app(&server.uri())));
     let response = outcome_blob(
         State(state),
-        Path(("acme".to_string(), "site".to_string(), "def456".to_string())),
-        Query(BlobQuery {
+        axum::http::Extensions::new(),
+        AuditedPath(("acme".to_string(), "site".to_string(), "def456".to_string())),
+        crate::audit::arguments::AuditedQuery(BlobQuery {
             name: Some("notes.txt".to_string()),
             download: Some(1),
         }),
@@ -505,8 +525,9 @@ async fn outcome_blob_over_cap_is_413() {
     let state = test_state(&server.uri(), Some(test_app(&server.uri())));
     let response = outcome_blob(
         State(state),
-        Path(("acme".to_string(), "site".to_string(), "beef99".to_string())),
-        Query(BlobQuery {
+        axum::http::Extensions::new(),
+        AuditedPath(("acme".to_string(), "site".to_string(), "beef99".to_string())),
+        crate::audit::arguments::AuditedQuery(BlobQuery {
             name: Some("video.mp4".to_string()),
             download: None,
         }),
@@ -523,12 +544,13 @@ async fn outcome_blob_rejects_a_non_hex_sha() {
     let state = test_state(&server.uri(), Some(test_app(&server.uri())));
     let response = outcome_blob(
         State(state),
-        Path((
+        axum::http::Extensions::new(),
+        AuditedPath((
             "acme".to_string(),
             "site".to_string(),
             "../etc/passwd".to_string(),
         )),
-        Query(BlobQuery {
+        crate::audit::arguments::AuditedQuery(BlobQuery {
             name: None,
             download: None,
         }),
@@ -553,8 +575,9 @@ async fn outcome_blob_repo_not_visible_is_404() {
     let state = test_state(&server.uri(), Some(test_app(&server.uri())));
     let response = outcome_blob(
         State(state),
-        Path(("acme".to_string(), "site".to_string(), "abc123".to_string())),
-        Query(BlobQuery {
+        axum::http::Extensions::new(),
+        AuditedPath(("acme".to_string(), "site".to_string(), "abc123".to_string())),
+        crate::audit::arguments::AuditedQuery(BlobQuery {
             name: None,
             download: None,
         }),

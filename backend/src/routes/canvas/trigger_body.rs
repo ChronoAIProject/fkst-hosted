@@ -24,7 +24,7 @@ use crate::routes::canvas::types::render_package_ref;
 /// Request body for creating a session (a trigger issue) on a repo.
 #[derive(Clone, Deserialize, ToSchema)]
 pub struct CreateSessionRequest {
-    /// The session name (`### Session Name`; also the issue title).
+    /// The session name (`### Session Name`; also the trigger-issue title suffix).
     pub name: String,
     /// Fully-qualified package references (`owner/repo@ref:path`). Optional since
     /// a `### Manifest` reference can supply the packages (epic #594 I7), but at
@@ -44,8 +44,9 @@ pub struct CreateSessionRequest {
     /// the trigger issue and are never returned by the API.
     #[serde(default)]
     pub disposable_environment: Option<DisposableEnvironmentRequest>,
-    /// The optional source branch (`### Source Branch`). When omitted, the
-    /// repository default branch seeds a missing target branch.
+    /// The optional upstream branch (`### Source Branch`). It seeds a missing
+    /// target and receives completed target work. When omitted, it resolves to
+    /// the repository default branch.
     #[serde(default)]
     pub source_branch: Option<String>,
     /// The optional target branch (`### Target Branch`). When omitted, the
@@ -259,7 +260,7 @@ fn render_trigger_body(req: &CreateSessionRequest) -> Result<String, AppError> {
 /// reconciler's later 422 on a live issue); any parse-back divergence — which
 /// would mean the created trigger registers something other than what was
 /// requested — fails closed as a 400.
-pub(super) fn validated_trigger_body(req: &CreateSessionRequest) -> Result<String, AppError> {
+pub(crate) fn validated_trigger_body(req: &CreateSessionRequest) -> Result<String, AppError> {
     let body = render_trigger_body(req)?;
     let spec = match parse_trigger_issue_body(&body) {
         Ok(spec) => spec,

@@ -245,3 +245,34 @@ fn environment_view_never_carries_secret_values() {
     );
     assert!(obj.get("secrets").is_none(), "no `secrets` field may exist");
 }
+
+// ---- the one non-`AppError` product response ------------------------------
+
+/// The detailed install-validation `422` is built by hand, so it has to carry
+/// its own stable code — otherwise the record for a real, client-visible
+/// failure would say nothing about why it failed while the client reads a code
+/// in the body.
+#[test]
+fn the_install_validation_422_tags_the_same_code_the_client_reads() {
+    let body = InstallValidationError {
+        error: codes::INSTALL_VALIDATION_FAILED.to_string(),
+        message: "install command 1 of 2 failed".to_string(),
+        failed_command_index: 1,
+        failed_command: "pip install nope".to_string(),
+        exit_code: 1,
+        timed_out: false,
+        stderr_tail: "No matching distribution".to_string(),
+    };
+    let client_visible = body.error.clone();
+    let response = install_validation_failed(body);
+
+    assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(
+        crate::audit::request::response::error_code_of(&response),
+        Some(codes::INSTALL_VALIDATION_FAILED)
+    );
+    assert_eq!(client_visible, codes::INSTALL_VALIDATION_FAILED);
+    // The caller WAS authenticated and authorized; their commands failed. That
+    // is an ordinary client error, not a policy short-circuit.
+    assert!(!crate::audit::request::response::is_rejected(&response));
+}

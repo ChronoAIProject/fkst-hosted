@@ -56,6 +56,31 @@ export function formatAbsolute(value: TimeInput, lang: Lang): string {
   }
 }
 
+/**
+ * A COMPACT absolute stamp for dense lists: month, day, and time, without the year
+ * or the timezone. `formatLocal` carries both and runs ~18 characters, which does not
+ * fit a narrow navigation rail without truncating — and a truncated timestamp is
+ * worse than a short one, because the part that gets cut is the part that
+ * distinguishes one entry from the next.
+ *
+ * Pair it with {@link formatAbsolute} in a `title` so the full, unambiguous value is
+ * always one hover away.
+ */
+export function formatTimeShort(value: TimeInput, lang: Lang): string {
+  const ms = toMs(value);
+  if (Number.isNaN(ms)) return typeof value === 'string' ? value : '';
+  try {
+    return new Intl.DateTimeFormat(locale(lang), {
+      month: 'short',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+    }).format(new Date(ms));
+  } catch {
+    return new Date(ms).toISOString();
+  }
+}
+
 /** Coarsest-first ranges for relative bucketing; `unit` feeds RelativeTimeFormat. */
 const RELATIVE_RANGES: ReadonlyArray<{ unit: Intl.RelativeTimeFormatUnit; ms: number }> = [
   { unit: 'year', ms: 31_536_000_000 },

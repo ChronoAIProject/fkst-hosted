@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
+import { BrowserRouter } from 'react-router-dom';
 import { AuthProvider } from '@/lib/auth/github-auth';
 import { BroaderOAuthProvider } from '@/lib/auth/broader-oauth';
 
@@ -26,7 +27,10 @@ describe('Dashboard (docs-only build)', () => {
     render(
       <AuthProvider>
         <BroaderOAuthProvider>
-          <Dashboard />
+          {/* The dashboard reads and writes its location from the URL. */}
+          <BrowserRouter>
+            <Dashboard />
+          </BrowserRouter>
         </BroaderOAuthProvider>
       </AuthProvider>
     );

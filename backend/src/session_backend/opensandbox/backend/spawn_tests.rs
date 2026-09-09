@@ -139,12 +139,12 @@ async fn ensure_session_creates_with_null_timeout_stamped_metadata_and_execd_tok
                 // create env too — proven here via the engine HostFact pair.
                 "FKST_CANDIDATE_PREFIX": "fkst-cand",
                 "FKST_CANDIDATE_FROM_SEP": "--from--",
-                // #626: both backends consume the corrected shared launcher pair.
+                // #5567: both backends preserve the resolved split topology.
                 "FKST_GITHUB_PROXY_POLL_LABEL_PREFIX":
                     "fkst-dev:,fkst-class:,fkst-security:,fkst-workflow:,fkst-dashboard",
                 "FKST_SESSION_WORK_LABEL": "fkst-work",
                 "FKST_SESSION_CREATOR": "author-login",
-                "FKST_DEVLOOP_UPSTREAM_BRANCH": "fkst-hosted-default",
+                "FKST_DEVLOOP_UPSTREAM_BRANCH": "develop",
                 "FKST_DEVLOOP_INTEGRATION_BRANCH": "fkst-hosted-default",
             },
         })))
@@ -169,7 +169,14 @@ async fn ensure_session_creates_with_null_timeout_stamped_metadata_and_execd_tok
         .ensure_session_impl(&spec(), one_cred())
         .await
         .expect("created");
-    assert_eq!(outcome, EnsureOutcome::Created);
+    assert_eq!(
+        outcome,
+        EnsureOutcome::Created(crate::runtime_identity::RuntimeIncarnation::from_handle(
+            "sbx-1"
+        )),
+        "the server-assigned sandbox id identifies THIS incarnation, so a respawn of the \
+         same session gets its own lifecycle rows"
+    );
 }
 
 #[tokio::test]
@@ -219,7 +226,14 @@ async fn ensure_session_renders_operator_rate_pools_on_the_create_env() {
         .ensure_session_impl(&spec(), one_cred())
         .await
         .expect("created");
-    assert_eq!(outcome, EnsureOutcome::Created);
+    assert_eq!(
+        outcome,
+        EnsureOutcome::Created(crate::runtime_identity::RuntimeIncarnation::from_handle(
+            "sbx-1"
+        )),
+        "the server-assigned sandbox id identifies THIS incarnation, so a respawn of the \
+         same session gets its own lifecycle rows"
+    );
 }
 
 #[tokio::test]
@@ -487,6 +501,68 @@ async fn ensure_existing_session_restores_the_full_bundle_when_runtime_creds_are
 }
 
 #[tokio::test]
+async fn warm_cache_detects_and_repairs_credentials_lost_by_a_replacement_pod() {
+    let server = MockServer::start().await;
+    // The BatchSandbox identity survives while its Kubernetes pod is replaced.
+    Mock::given(method("GET"))
+        .and(path("/v1/sandboxes"))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_json(list_page(json!([sandbox_json(
+                "sbx-existing",
+                "Running",
+                "2026-07-09T00:00:00Z",
+                json!({ "fkst-session-id": SESSION_ID }),
+            )]))),
+        )
+        .expect(2)
+        .mount(&server)
+        .await;
+    // Both the recovery predicate and adoption observe the replacement pod's empty
+    // credential directory.
+    Mock::given(method("GET"))
+        .and(path(EXISTING_FILE_INFO_PATH))
+        .respond_with(ResponseTemplate::new(404))
+        .expect(2)
+        .mount(&server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path(EXISTING_UPLOAD_PATH))
+        .respond_with(ResponseTemplate::new(200))
+        .mount(&server)
+        .await;
+
+    let b = backend(&server.uri(), osb_config());
+    b.creds
+        .lock()
+        .unwrap()
+        .insert(SESSION_ID.to_string(), complete_creds());
+
+    assert!(
+        b.credential_recovery_needed_impl(SESSION_ID)
+            .await
+            .expect("runtime probe"),
+        "a warm process cache must not hide lost runtime credentials"
+    );
+    let outcome = b
+        .ensure_session_impl(&spec(), complete_creds())
+        .await
+        .expect("complete recovery");
+    assert_eq!(outcome, EnsureOutcome::AlreadyLive);
+
+    let requests = server.received_requests().await.expect("recorded requests");
+    let uploads: Vec<String> = requests
+        .iter()
+        .filter(|request| request.url.path() == EXISTING_UPLOAD_PATH)
+        .map(|request| String::from_utf8_lossy(&request.body).into_owned())
+        .collect();
+    assert_eq!(uploads.len(), 7, "six credentials plus the sentinel");
+    assert!(uploads[6].contains(SENTINEL_PATH));
+    assert!(uploads[..6]
+        .iter()
+        .all(|upload| !upload.contains(SENTINEL_PATH)));
+}
+
+#[tokio::test]
 async fn ensure_existing_session_does_not_publish_or_cache_a_partial_recovery() {
     let server = MockServer::start().await;
     Mock::given(method("GET"))
@@ -523,4 +599,51 @@ async fn ensure_existing_session_does_not_publish_or_cache_a_partial_recovery() 
         .expect_err("partial recovery must fail visibly");
     assert!(matches!(error, BackendError::Other(_)));
     assert!(b.creds.lock().unwrap().get(SESSION_ID).is_none());
+}
+
+/// Cross-backend equality, asserted as ONE comparison rather than two independent
+/// assertions: the namespace is what a package stamps into artifact names, so the two
+/// backends agreeing is the property that matters, not each one being individually
+/// plausible.
+#[test]
+fn the_work_label_namespace_reaches_both_backends_identically() {
+    use crate::config::PodConfig;
+    use crate::reconcile::work_labels::WORK_LABEL_NAMESPACE_ENV;
+
+    let mut namespaced = spec();
+    namespaced.work_label_namespace = Some("chronoai-fkst".to_string());
+
+    let sandbox_env = backend("http://osb.invalid", osb_config()).create_env(&namespaced);
+    let pod_env: BTreeMap<String, String> =
+        crate::k8s::session_launcher::session_env_pairs(&namespaced, &PodConfig::default())
+            .into_iter()
+            .collect();
+
+    assert_eq!(
+        sandbox_env.get(WORK_LABEL_NAMESPACE_ENV),
+        pod_env.get(WORK_LABEL_NAMESPACE_ENV),
+        "both backends must render the identical binding"
+    );
+    assert_eq!(
+        sandbox_env
+            .get(WORK_LABEL_NAMESPACE_ENV)
+            .map(String::as_str),
+        Some("chronoai-fkst")
+    );
+}
+
+#[test]
+fn an_unnamespaced_deployment_renders_the_key_on_neither_backend() {
+    use crate::config::PodConfig;
+    use crate::reconcile::work_labels::WORK_LABEL_NAMESPACE_ENV;
+
+    let plain = spec();
+    let sandbox_env = backend("http://osb.invalid", osb_config()).create_env(&plain);
+    let pod_env: BTreeMap<String, String> =
+        crate::k8s::session_launcher::session_env_pairs(&plain, &PodConfig::default())
+            .into_iter()
+            .collect();
+
+    assert_eq!(sandbox_env.get(WORK_LABEL_NAMESPACE_ENV), None);
+    assert_eq!(pod_env.get(WORK_LABEL_NAMESPACE_ENV), None);
 }

@@ -20,6 +20,7 @@ use std::process::{ExitCode, Stdio};
 use secrecy::{ExposeSecret, SecretString};
 use tokio::process::Command;
 
+use crate::delivery_grants::{DEVLOOP_DELIVERY_GRANTS_ENV, SESSION_DELIVERY_GRANTS_ENV};
 use crate::reserved_env::{is_reserved_env_key, LLM_ENV_KEY};
 use crate::session_spec::creds::CredsLayout;
 
@@ -30,7 +31,8 @@ use super::creds_gate::{
 use super::creds_helper::{git_config_entries, materialize_helper_script, GitConfigEntry};
 use super::log_stream::collector::{collector_config_from_env, spawn_collector};
 use super::plan::{
-    build_supervise_args, plan_clones, read_substrate_env, substrate_child_env, SubstrateEnv,
+    build_supervise_args, plan_clones, plan_delivery_checkouts, read_substrate_env,
+    substrate_child_env, SubstrateEnv,
 };
 use super::supervise::{exec_supervise, FRAMEWORK_BIN};
 
@@ -40,7 +42,6 @@ const GH_SHIM_SCRIPT: &str = include_str!("gh-shim.sh");
 /// The shim filename (must be exactly `gh` so it shadows the real one on PATH).
 const GH_SHIM_NAME: &str = "gh";
 /// Subdirs the driver creates under the (writable) runtime root.
-const PLATFORM_SUBDIR: &str = "platform";
 const PROJECT_SUBDIR: &str = "project";
 const GITCRED_SUBDIR: &str = "gitcred";
 /// Repo-local workflow catalog. workflow-writer authors new `fkst.workflow.v1`
@@ -166,26 +167,64 @@ async fn run_substrate(env: &SubstrateEnv) -> Result<ExitCode, String> {
     let shim_dir = runtime_root.join(SHIM_SUBDIR);
     install_gh_shim(&shim_dir)?;
 
-    // 4. Fetch: the one workspace repo (all refs share it in v1) into
-    //    <runtime>/platform at its ref, and the target repo at its provisioned
-    //    integration branch into
-    //    <runtime>/project. Both authenticate via the credential helper (public
-    //    repos succeed regardless; a private target uses the App token).
-    let plan = plan_clones(&env.package_refs)?;
-    let platform_root = runtime_root.join(PLATFORM_SUBDIR);
+    // 4. Fetch: each distinct package workspace repo at its ref, then the target
+    //    repo at its provisioned integration branch into <runtime>/project. The
+    //    first package workspace keeps the legacy <runtime>/platform checkout root;
+    //    additional workspaces are cloned under <runtime>/platforms/<hash>. All
+    //    clones authenticate via the credential helper (public repos succeed
+    //    regardless; a private target uses the App token).
+    let plan = plan_clones(&env.package_refs, runtime_root)?;
     let project_root = runtime_root.join(PROJECT_SUBDIR);
-    let workspace_url = format!(
-        "https://github.com/{}/{}.git",
-        plan.platform_repo.owner, plan.platform_repo.repo
+    let primary_workspace = plan
+        .workspaces
+        .first()
+        .ok_or_else(|| "no package workspaces to clone".to_string())?;
+    for workspace in &plan.workspaces {
+        if let Some(parent) = workspace.root.parent() {
+            create_dir_idempotent(parent)?;
+        }
+        let workspace_url = format!(
+            "https://github.com/{}/{}.git",
+            workspace.repo.owner, workspace.repo.repo
+        );
+        git_clone(
+            &workspace_url,
+            Some(&workspace.repo.git_ref),
+            &workspace.root,
+            &git_entries,
+            &token_file,
+        )
+        .await?;
+    }
+
+    let platform_repo = format!(
+        "{}/{}",
+        primary_workspace.repo.owner, primary_workspace.repo.repo
     );
-    git_clone(
-        &workspace_url,
-        Some(&plan.platform_repo.git_ref),
-        &platform_root,
-        &git_entries,
-        &token_file,
-    )
-    .await?;
+    let delivery_plan = plan_delivery_checkouts(
+        &env.delivery_grants,
+        &env.repo,
+        env.target_branch.as_deref(),
+        &project_root,
+        &platform_repo,
+        &primary_workspace.repo.git_ref,
+        &primary_workspace.root,
+        runtime_root,
+    );
+    for checkout in &delivery_plan.clones {
+        if let Some(parent) = checkout.root.parent() {
+            create_dir_idempotent(parent)?;
+        }
+        let url = format!("https://github.com/{}.git", checkout.repository);
+        git_clone(
+            &url,
+            Some(&checkout.branch),
+            &checkout.root,
+            &git_entries,
+            &token_file,
+        )
+        .await?;
+    }
     let target_url = format!("https://github.com/{}.git", env.repo);
     git_clone(
         &target_url,
@@ -196,12 +235,26 @@ async fn run_substrate(env: &SubstrateEnv) -> Result<ExitCode, String> {
     )
     .await?;
 
+    // The clone above is `--single-branch` on the TARGET, so it leaves
+    // `refs/remotes/origin/<source>` absent. The devloop's rollup and sync scans
+    // resolve `origin/<source>..origin/<target>` on every branch tick; without
+    // that ref each tick dies `fatal: ambiguous argument` (git exit 128), and the
+    // accumulated faults eventually take the whole session pod down mid-work.
+    // Fetching the source ref is what makes a split source/target topology
+    // survivable; it is skipped when source and target are the same branch.
+    if let Some(source) = env.source_branch.as_deref() {
+        let differs = env.target_branch.as_deref() != Some(source);
+        if differs && !source.is_empty() {
+            fetch_extra_ref(source, &project_root, &git_entries, &token_file).await?;
+        }
+    }
+
     // 4b. The framework's host-root workspace discovery walks UP from --project-root
     //     for a `fkst.workspace.toml` and fails CLOSED without one. The target repo
     //     is a plain repo with no fkst workspace, so write a minimal manifest
     //     declaring zero units: the host root owns no departments, while each
-    //     platform `--package-root` resolves its `libraries/*` from the platform
-    //     clone's OWN `fkst.workspace.toml` (walk-up from that package root). Verified
+    //     `--package-root` resolves its `libraries/*` from that package root's
+    //     workspace clone OWN `fkst.workspace.toml` (walk-up from that root). Verified
     //     against fkst-substrate `path_resolver.rs` host-root discovery.
     let workspace_manifest = project_root.join("fkst.workspace.toml");
     std::fs::write(&workspace_manifest, "[workspace]\nunits = []\n")
@@ -214,8 +267,7 @@ async fn run_substrate(env: &SubstrateEnv) -> Result<ExitCode, String> {
     // 6. Build the supervise argv + the child env.
     let args = build_supervise_args(
         &project_root.to_string_lossy(),
-        &platform_root.to_string_lossy(),
-        &plan.package_paths,
+        &plan.package_roots,
         FRAMEWORK_BIN,
     );
     let mut child_env = substrate_child_env(
@@ -227,6 +279,10 @@ async fn run_substrate(env: &SubstrateEnv) -> Result<ExitCode, String> {
         &env.durable_root,
         &env.runtime_root,
     );
+    // The launcher contract is consumed by this driver only. Packages receive the
+    // resolved contract, which adds exact checkout roots and is absent when there
+    // are no grants.
+    apply_delivery_contract(&mut child_env, &delivery_plan.resolved_grants)?;
     // The helper + shim both read the mounted rotating token from this path.
     upsert_env(
         &mut child_env,
@@ -276,7 +332,7 @@ async fn run_substrate(env: &SubstrateEnv) -> Result<ExitCode, String> {
     //     block supervise.
     let log_stream = spawn_collector(collector_config_from_env(
         env.repo.clone(),
-        plan.platform_repo.git_ref.clone(),
+        primary_workspace.repo.git_ref.clone(),
         runtime_root.to_path_buf(),
         Path::new(&env.codex_home).to_path_buf(),
         Path::new(&env.creds_dir).to_path_buf(),
@@ -288,7 +344,7 @@ async fn run_substrate(env: &SubstrateEnv) -> Result<ExitCode, String> {
     // side of the run, not only the supervise/codex output.
     log_stream.emit_driver(format!(
         "run-substrate: supervising {} at engine ref {}",
-        env.repo, plan.platform_repo.git_ref
+        env.repo, primary_workspace.repo.git_ref
     ));
 
     // 7. exec supervise, forwarding SIGTERM to its group for a graceful drain, and
@@ -468,6 +524,7 @@ async fn git_clone(
     token_file: &Path,
 ) -> Result<(), String> {
     if dest.join(".git").is_dir() {
+        validate_existing_clone(url, git_ref, dest).await?;
         tracing::info!(dest = %dest.display(), "run-substrate: clone already present; reusing");
         return Ok(());
     }
@@ -505,6 +562,137 @@ async fn git_clone(
     Ok(())
 }
 
+/// Fail closed before reusing a restart-persistent checkout. The expected URL is
+/// token-free and was constructed by the driver; actual remote text is never
+/// logged because a corrupted checkout could contain credentials in its URL.
+async fn validate_existing_clone(
+    expected_url: &str,
+    git_ref: Option<&str>,
+    dest: &Path,
+) -> Result<(), String> {
+    let origin = git_output(dest, &["remote", "get-url", "origin"])
+        .await
+        .map_err(|_| {
+            format!(
+                "existing checkout {} has no readable origin",
+                dest.display()
+            )
+        })?;
+    if origin.trim() != expected_url {
+        return Err(format!(
+            "existing checkout {} has an unexpected origin",
+            dest.display()
+        ));
+    }
+
+    let Some(git_ref) = git_ref else {
+        return Ok(());
+    };
+    if let Ok(branch) = git_output(dest, &["symbolic-ref", "--quiet", "--short", "HEAD"]).await {
+        if branch.trim() == git_ref {
+            return Ok(());
+        }
+    }
+
+    // A tag checkout is detached. Accept it only when HEAD resolves to the exact
+    // requested tag or remote branch commit.
+    let head = git_output(dest, &["rev-parse", "HEAD^{commit}"])
+        .await
+        .map_err(|_| format!("existing checkout {} has no valid HEAD", dest.display()))?;
+    for candidate in [
+        format!("refs/tags/{git_ref}^{{commit}}"),
+        format!("refs/remotes/origin/{git_ref}^{{commit}}"),
+    ] {
+        if let Ok(expected) = git_output(dest, &["rev-parse", &candidate]).await {
+            if expected.trim() == head.trim() {
+                return Ok(());
+            }
+        }
+    }
+    Err(format!(
+        "existing checkout {} is not on the expected ref",
+        dest.display()
+    ))
+}
+
+async fn git_output(dest: &Path, args: &[&str]) -> Result<String, ()> {
+    let output = Command::new("git")
+        .arg("-C")
+        .arg(dest)
+        .args(args)
+        .stdin(Stdio::null())
+        .output()
+        .await
+        .map_err(|_| ())?;
+    if !output.status.success() {
+        return Err(());
+    }
+    String::from_utf8(output.stdout).map_err(|_| ())
+}
+
+/// Fetch one extra branch into an existing shallow clone so
+/// `refs/remotes/origin/<branch>` resolves.
+///
+/// `set-branches --add` widens the single-branch refspec first — without it the
+/// fetch would write the ref but leave the configured refspec unable to refresh
+/// it on later fetches. Kept at `--depth 1`: the scans need the ref to EXIST and
+/// count commits against it, not the full history, so this stays cheap.
+async fn fetch_extra_ref(
+    branch: &str,
+    dest: &Path,
+    git_entries: &[GitConfigEntry],
+    token_file: &Path,
+) -> Result<(), String> {
+    for args in [
+        vec![
+            OsString::from("remote"),
+            OsString::from("set-branches"),
+            OsString::from("--add"),
+            OsString::from("origin"),
+            OsString::from(branch),
+        ],
+        vec![
+            OsString::from("fetch"),
+            OsString::from("--depth"),
+            OsString::from("1"),
+            OsString::from("origin"),
+            OsString::from(format!("+refs/heads/{branch}:refs/remotes/origin/{branch}")),
+        ],
+    ] {
+        let mut command = Command::new("git");
+        command
+            .args(&args)
+            .current_dir(dest)
+            .env(TOKEN_FILE_ENV, token_file)
+            .env("GIT_TERMINAL_PROMPT", "0")
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+        command.env("GIT_CONFIG_COUNT", git_entries.len().to_string());
+        for (i, entry) in git_entries.iter().enumerate() {
+            command.env(format!("GIT_CONFIG_KEY_{i}"), &entry.key);
+            command.env(format!("GIT_CONFIG_VALUE_{i}"), &entry.value);
+        }
+        let output = command
+            .output()
+            .await
+            .map_err(|error| format!("git {args:?}: {error}"))?;
+        if !output.status.success() {
+            // Non-fatal: a source branch that does not exist yet (the launcher
+            // seeds it lazily) must not stop the session from starting. The scans
+            // degrade exactly as they do today rather than the pod failing to boot.
+            tracing::warn!(
+                branch = %branch,
+                stderr = %String::from_utf8_lossy(&output.stderr),
+                "run-substrate: could not fetch source branch ref; rollup/sync scans may not resolve"
+            );
+            return Ok(());
+        }
+    }
+    tracing::info!(branch = %branch, "run-substrate: fetched source branch ref for devloop scans");
+    Ok(())
+}
+
 /// Build the non-secret `git clone` argv. Factored out so branch selection is
 /// covered without spawning a process or exposing credential environment.
 fn git_clone_args(url: &str, git_ref: Option<&str>, dest: &Path) -> Vec<OsString> {
@@ -534,6 +722,20 @@ fn upsert_env(env: &mut Vec<(String, String)>, key: &str, value: &str) {
     } else {
         env.push((key.to_string(), value.to_string()));
     }
+}
+
+fn apply_delivery_contract(
+    env: &mut Vec<(String, String)>,
+    resolved_grants: &[crate::delivery_grants::ResolvedDeliveryGrant],
+) -> Result<(), String> {
+    env.retain(|(key, _)| key != SESSION_DELIVERY_GRANTS_ENV && key != DEVLOOP_DELIVERY_GRANTS_ENV);
+    if resolved_grants.is_empty() {
+        return Ok(());
+    }
+    let resolved = serde_json::to_string(resolved_grants)
+        .map_err(|error| format!("serialize resolved delivery grants: {error}"))?;
+    upsert_env(env, DEVLOOP_DELIVERY_GRANTS_ENV, &resolved);
+    Ok(())
 }
 
 /// Insert `key=value` only when the child env does not already carry `key`, so a
@@ -637,6 +839,24 @@ fn prepend_path(env: &mut Vec<(String, String)>, dir: &Path) {
 mod tests {
     use super::*;
 
+    fn init_checkout(url: &str, branch: &str) -> tempfile::TempDir {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let status = std::process::Command::new("git")
+            .args(["init", "-q", "-b", branch])
+            .arg(dir.path())
+            .status()
+            .expect("git init");
+        assert!(status.success());
+        let status = std::process::Command::new("git")
+            .arg("-C")
+            .arg(dir.path())
+            .args(["remote", "add", "origin", url])
+            .status()
+            .expect("git remote");
+        assert!(status.success());
+        dir
+    }
+
     #[test]
     fn clone_args_select_one_branch_when_present() {
         assert_eq!(
@@ -668,6 +888,75 @@ mod tests {
         );
         assert!(!args.contains(&OsString::from("--single-branch")));
         assert!(!args.contains(&OsString::from("--branch")));
+    }
+
+    #[tokio::test]
+    async fn existing_clone_reuse_requires_the_exact_origin_and_branch() {
+        let checkout = init_checkout("https://github.com/acme/tools.git", "release");
+        validate_existing_clone(
+            "https://github.com/acme/tools.git",
+            Some("release"),
+            checkout.path(),
+        )
+        .await
+        .expect("exact checkout is reusable");
+
+        assert!(validate_existing_clone(
+            "https://github.com/acme/other.git",
+            Some("release"),
+            checkout.path(),
+        )
+        .await
+        .unwrap_err()
+        .contains("unexpected origin"));
+        assert!(
+            validate_existing_clone(
+                "https://github.com/acme/tools.git",
+                Some("main"),
+                checkout.path(),
+            )
+            .await
+            .is_err(),
+            "a checkout on the wrong branch must not be reused"
+        );
+    }
+
+    #[test]
+    fn resolved_delivery_contract_replaces_raw_input_and_is_omitted_when_empty() {
+        let mut env = vec![
+            (
+                SESSION_DELIVERY_GRANTS_ENV.to_string(),
+                "raw-launcher-contract".to_string(),
+            ),
+            (
+                DEVLOOP_DELIVERY_GRANTS_ENV.to_string(),
+                "untrusted-preexisting-value".to_string(),
+            ),
+        ];
+        let resolved = [crate::delivery_grants::ResolvedDeliveryGrant {
+            lifecycle_repo: "acme/site".to_string(),
+            lifecycle_issue: 41,
+            implementation_repo: "acme/tools".to_string(),
+            implementation_branch: "main".to_string(),
+            implementation_root: "/runtime/delivery/1234".to_string(),
+        }];
+        apply_delivery_contract(&mut env, &resolved).expect("render");
+        assert!(env
+            .iter()
+            .all(|(key, _)| key != SESSION_DELIVERY_GRANTS_ENV));
+        let value = env
+            .iter()
+            .find(|(key, _)| key == DEVLOOP_DELIVERY_GRANTS_ENV)
+            .map(|(_, value)| value)
+            .expect("resolved contract");
+        let decoded: Vec<crate::delivery_grants::ResolvedDeliveryGrant> =
+            serde_json::from_str(value).expect("resolved json");
+        assert_eq!(decoded, resolved);
+
+        apply_delivery_contract(&mut env, &[]).expect("empty render");
+        assert!(env.iter().all(|(key, _)| {
+            key != SESSION_DELIVERY_GRANTS_ENV && key != DEVLOOP_DELIVERY_GRANTS_ENV
+        }));
     }
 
     #[test]

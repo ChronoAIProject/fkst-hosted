@@ -91,7 +91,7 @@ fn tokens(api: std::sync::Arc<SeedFake>) -> GithubAppTokens {
 /// The default fkst-manifest ref an I9 seed carries (matches
 /// `reconcile_config::DEFAULT_MANIFEST_REF`).
 const DEFAULT_MANIFEST: &str =
-    "ChronoAIProject/fkst-packages@fkst-hosted:manifests/default-workflows.json";
+    "ChronoAIProject/fkst-hosted@packages:manifests/default-workflows.json";
 
 #[test]
 fn manifest_seed_body_round_trips_with_manifest_and_no_packages_or_work_label() {
@@ -126,6 +126,10 @@ fn manifest_seed_body_round_trips_with_manifest_and_no_packages_or_work_label() 
         "names the default target branch: {body}"
     );
     assert!(
+        body.contains("target work rolls up into the repository default source branch"),
+        "explains where completed seeded work lands: {body}"
+    );
+    assert!(
         !body.contains("### Packages"),
         "manifest seed omits ### Packages"
     );
@@ -149,8 +153,8 @@ fn manifest_seed_body_round_trips_with_manifest_and_no_packages_or_work_label() 
     );
     let m = &spec.manifest_refs[0];
     assert_eq!(m.owner, "ChronoAIProject");
-    assert_eq!(m.repo, "fkst-packages");
-    assert_eq!(m.git_ref, "fkst-hosted");
+    assert_eq!(m.repo, "fkst-hosted");
+    assert_eq!(m.git_ref, "packages");
     assert_eq!(m.path, "manifests/default-workflows.json");
     assert!(spec.auto_merge, "seed sets auto-merge on");
     assert_eq!(
@@ -166,7 +170,7 @@ fn legacy_seed_body_round_trips_through_the_real_trigger_parser() {
     // explicit `### Packages` + `### Work Label` body — this pins that shape to the
     // parser so the two can never drift.
     let default_pkgs =
-        vec!["ChronoAIProject/fkst-packages@dev:packages/github-devloop-workflow".to_string()];
+        vec!["ChronoAIProject/fkst-hosted@packages:packages/github-devloop-workflow".to_string()];
     let legacy_body = build_seed_body(&default_pkgs, None, "installing-user", "octo-owner", None);
     // The legacy shape carries the same intro; with no frontend URL configured the
     // dashboard mention stays but no URL is rendered.
@@ -194,8 +198,8 @@ fn legacy_seed_body_round_trips_through_the_real_trigger_parser() {
     assert_eq!(spec.packages.len(), 1);
     let p = &spec.packages[0];
     assert_eq!(p.owner, "ChronoAIProject");
-    assert_eq!(p.repo, "fkst-packages");
-    assert_eq!(p.git_ref, "dev");
+    assert_eq!(p.repo, "fkst-hosted");
+    assert_eq!(p.git_ref, "packages");
     assert_eq!(p.path, "packages/github-devloop-workflow");
     assert!(spec.environment.is_none());
 }
@@ -211,6 +215,7 @@ async fn installation_created_with_sender_seeds_with_assignee() {
         "fkst-substrate-trigger",
         &[],
         Some(DEFAULT_MANIFEST),
+        Some("chronoai-fkst-cloud"),
         "octo-owner",
         "installing-user",
         &["octo-owner/repo-a".to_string()],
@@ -223,7 +228,10 @@ async fn installation_created_with_sender_seeds_with_assignee() {
     let (owner, repo, title, body, labels, assignees) = &created[0];
     assert_eq!(owner, "octo-owner");
     assert_eq!(repo, "repo-a");
-    assert_eq!(title, "[session] default-workflows (auto-seeded)");
+    assert_eq!(
+        title,
+        "🔔[CHRONOAI FKST CLOUD SESSION] Default FKST Substrate"
+    );
     assert_eq!(labels, &vec!["fkst-substrate-trigger".to_string()]);
     assert_eq!(
         assignees,
@@ -253,6 +261,7 @@ async fn skips_a_repo_that_already_has_an_open_trigger_issue() {
         "fkst-substrate-trigger",
         &[],
         Some(DEFAULT_MANIFEST),
+        None,
         "octo-owner",
         "installing-user",
         &["octo-owner/repo-a".to_string()],
@@ -275,7 +284,8 @@ async fn legacy_seed_used_when_no_default_manifest_is_configured() {
     seed_trigger_issues(
         &github,
         "fkst-substrate-trigger",
-        &["ChronoAIProject/fkst-packages@dev:packages/github-devloop-workflow".to_string()],
+        &["ChronoAIProject/fkst-hosted@packages:packages/github-devloop-workflow".to_string()],
+        None,
         None,
         "octo-owner",
         "installing-user",
@@ -346,7 +356,7 @@ fn seed_intro_lines_never_open_a_parsed_section() {
         Some("https://fkst.example"),
     );
     let legacy = build_seed_body(
-        &["ChronoAIProject/fkst-packages@dev:packages/github-devloop-workflow".to_string()],
+        &["ChronoAIProject/fkst-hosted@packages:packages/github-devloop-workflow".to_string()],
         None,
         "installing-user",
         "octo-owner",
@@ -387,7 +397,7 @@ fn seed_body_lists_installer_then_account_in_contributors_and_dedupes() {
         None,
     );
     let legacy = build_seed_body(
-        &["ChronoAIProject/fkst-packages@dev:packages/github-devloop-workflow".to_string()],
+        &["ChronoAIProject/fkst-hosted@packages:packages/github-devloop-workflow".to_string()],
         None,
         "Octo-Owner",
         "octo-owner",

@@ -2,13 +2,19 @@
 //!
 //! Split from the effectful [`super::driver`] so the launch DECISIONS — reading the
 //! injected `FKST_*` env into a [`SubstrateEnv`], grouping the fetched package refs
-//! into a single-workspace [`ClonePlan`], building the exact `supervise` argv, and
+//! into a multi-workspace [`ClonePlan`], building the exact `supervise` argv, and
 //! folding the supervise child env (git-cred wiring + LLM key + userenv with
 //! reserved-key filtering) — are unit-testable with ZERO cluster / network /
 //! process side effects. The driver is the thin I/O shell around these.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
+use std::path::{Path, PathBuf};
 
+use sha2::{Digest, Sha256};
+
+use crate::delivery_grants::{
+    DeliveryGrant, DeliveryGrantPolicy, ResolvedDeliveryGrant, SESSION_DELIVERY_GRANTS_ENV,
+};
 use crate::goals::package_ref::{parse_package_ref, PackageRef};
 use crate::reserved_env::{is_reserved_env_key, GIT_TRACE_SILENCING_ENV, LLM_ENV_KEY};
 
@@ -29,6 +35,7 @@ const RUNTIME_ROOT_ENV: &str = "FKST_RUNTIME_ROOT";
 const CREDS_DIR_ENV: &str = "FKST_SESSION_CREDS_DIR";
 const CODEX_HOME_ENV: &str = "CODEX_HOME";
 const DEVLOOP_INTEGRATION_BRANCH_ENV: &str = "FKST_DEVLOOP_INTEGRATION_BRANCH";
+const DEVLOOP_UPSTREAM_BRANCH_ENV: &str = "FKST_DEVLOOP_UPSTREAM_BRANCH";
 
 /// `git config` count key + the LLM env key the child reads its API key from.
 const GIT_CONFIG_COUNT_ENV: &str = "GIT_CONFIG_COUNT";
@@ -47,6 +54,10 @@ const DEFAULT_LLM_REASONING_EFFORT: &str = "max";
 
 /// The `supervise` subcommand token.
 const SUPERVISE_SUBCOMMAND: &str = "supervise";
+/// Legacy primary platform checkout root under `FKST_RUNTIME_ROOT`.
+const PRIMARY_PLATFORM_SUBDIR: &str = "platform";
+/// Additional package workspaces are cloned under this root, keyed by repo/ref hash.
+const ADDITIONAL_PLATFORM_SUBDIR: &str = "platforms";
 
 /// The non-secret launch inputs the `run-substrate` entrypoint reads from the
 /// pod-injected `FKST_*` env. Non-secret: a `{:?}` of it can never leak a token
@@ -78,6 +89,15 @@ pub struct SubstrateEnv {
     /// Target branch to clone. `None` preserves the legacy default-branch clone
     /// for callers outside the hosted session launcher.
     pub target_branch: Option<String>,
+    /// Upstream (source) branch the devloop rolls completed target work into.
+    /// Read so the clone can ALSO fetch this ref: the shallow `--single-branch`
+    /// clone otherwise leaves `refs/remotes/origin/<source>` absent, and the
+    /// devloop's rollup/sync scans resolve ranges against it on every branch
+    /// tick. `None` for callers outside the hosted launcher.
+    pub source_branch: Option<String>,
+    /// Exact operator grants for this lifecycle repository. Empty preserves the
+    /// historical single-repository worker contract.
+    pub delivery_grants: Vec<DeliveryGrant>,
 }
 
 /// Read the injected env into a [`SubstrateEnv`] from the process environment.
@@ -127,6 +147,11 @@ pub(crate) fn read_substrate_env_from(
         return Err(format!("{PACKAGE_ROOTS_ENV} lists no package refs"));
     }
 
+    let delivery_grants = DeliveryGrantPolicy::parse_session_value(
+        get(SESSION_DELIVERY_GRANTS_ENV).as_deref(),
+        &repo,
+    )?;
+
     Ok(SubstrateEnv {
         repo,
         package_refs,
@@ -141,11 +166,108 @@ pub(crate) fn read_substrate_env_from(
         creds_dir: required(CREDS_DIR_ENV)?,
         codex_home: required(CODEX_HOME_ENV)?,
         target_branch: optional(DEVLOOP_INTEGRATION_BRANCH_ENV),
+        source_branch: optional(DEVLOOP_UPSTREAM_BRANCH_ENV),
+        delivery_grants,
     })
 }
 
-/// The single workspace repo `(owner, repo, git_ref)` all v1 package refs must
-/// share (cloned once into `<runtime>/platform`).
+/// One additional checkout the driver must clone. Grants that exactly match the
+/// lifecycle or platform checkout are resolved to those existing roots instead.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DeliveryClone {
+    pub repository: String,
+    pub branch: String,
+    pub root: PathBuf,
+}
+
+/// Pure cross-repository checkout plan consumed by the effectful driver.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DeliveryCheckoutPlan {
+    pub resolved_grants: Vec<ResolvedDeliveryGrant>,
+    pub clones: Vec<DeliveryClone>,
+}
+
+/// Resolve every grant to an exact checkout. Repository comparison follows
+/// GitHub's case-insensitive identity; branches remain case-sensitive. Distinct
+/// repo/branch pairs get one deterministic runtime root and one clone operation.
+#[allow(clippy::too_many_arguments)]
+pub fn plan_delivery_checkouts(
+    grants: &[DeliveryGrant],
+    lifecycle_repo: &str,
+    lifecycle_branch: Option<&str>,
+    project_root: &Path,
+    platform_repo: &str,
+    platform_branch: &str,
+    platform_root: &Path,
+    runtime_root: &Path,
+) -> DeliveryCheckoutPlan {
+    let mut resolved_grants = Vec::with_capacity(grants.len());
+    let mut clones = Vec::new();
+    let mut seen = BTreeSet::new();
+
+    for grant in grants {
+        let root = if checkout_matches(
+            &grant.implementation_repo,
+            &grant.implementation_branch,
+            platform_repo,
+            Some(platform_branch),
+        ) {
+            platform_root.to_path_buf()
+        } else if checkout_matches(
+            &grant.implementation_repo,
+            &grant.implementation_branch,
+            lifecycle_repo,
+            lifecycle_branch,
+        ) {
+            project_root.to_path_buf()
+        } else {
+            let identity = format!(
+                "{}\0{}",
+                grant.implementation_repo.to_ascii_lowercase(),
+                grant.implementation_branch
+            );
+            let digest = Sha256::digest(identity.as_bytes());
+            let suffix: String = digest
+                .iter()
+                .take(8)
+                .map(|byte| format!("{byte:02x}"))
+                .collect();
+            let root = runtime_root.join("delivery").join(suffix);
+            if seen.insert(identity) {
+                clones.push(DeliveryClone {
+                    repository: grant.implementation_repo.clone(),
+                    branch: grant.implementation_branch.clone(),
+                    root: root.clone(),
+                });
+            }
+            root
+        };
+
+        resolved_grants.push(ResolvedDeliveryGrant {
+            lifecycle_repo: grant.lifecycle_repo.clone(),
+            lifecycle_issue: grant.lifecycle_issue,
+            implementation_repo: grant.implementation_repo.clone(),
+            implementation_branch: grant.implementation_branch.clone(),
+            implementation_root: root.to_string_lossy().into_owned(),
+        });
+    }
+
+    DeliveryCheckoutPlan {
+        resolved_grants,
+        clones,
+    }
+}
+
+fn checkout_matches(
+    repository: &str,
+    branch: &str,
+    checkout_repo: &str,
+    checkout_branch: Option<&str>,
+) -> bool {
+    repository.eq_ignore_ascii_case(checkout_repo) && checkout_branch == Some(branch)
+}
+
+/// One package workspace repo `(owner, repo, git_ref)`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WorkspaceRepo {
     pub owner: String,
@@ -153,58 +275,85 @@ pub struct WorkspaceRepo {
     pub git_ref: String,
 }
 
-/// The resolved clone plan: the one workspace repo to fetch + the platform-package
-/// names to activate under it.
+/// One package workspace checkout to fetch.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ClonePlan {
-    pub platform_repo: WorkspaceRepo,
-    /// Package roots to activate, as repo-relative paths under the workspace clone
-    /// (e.g. `packages/github-devloop`). Each becomes one
-    /// `--package-root <platform_root>/<path>` supervise arg.
-    pub package_paths: Vec<String>,
+pub struct WorkspaceClone {
+    pub repo: WorkspaceRepo,
+    pub root: PathBuf,
 }
 
-/// Group the package refs into a single-workspace [`ClonePlan`].
-///
-/// **v1 constraint:** every ref must share ONE `(owner, repo, git_ref)` — a lone
-/// workspace repo whose clone brings the sibling `libraries/*` + `fkst.lock` a
-/// workspace package needs (issue #359 §5.3). More than one distinct
-/// `(owner,repo,git_ref)` → `Err` (multi-workspace fetch is a documented
-/// follow-up). Each platform-package name is the LAST path segment of a ref's
-/// `path` (`packages/github-devloop` → `github-devloop`), preserving ref order.
-pub fn plan_clones(refs: &[PackageRef]) -> Result<ClonePlan, String> {
-    let first = refs
-        .first()
-        .ok_or_else(|| "no package refs to plan".to_string())?;
-    let platform_repo = WorkspaceRepo {
-        owner: first.owner.clone(),
-        repo: first.repo.clone(),
-        git_ref: first.git_ref.clone(),
-    };
+/// The resolved package clone plan: one checkout per distinct workspace plus every
+/// concrete `--package-root` path in the original effective-package order.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ClonePlan {
+    pub workspaces: Vec<WorkspaceClone>,
+    pub package_roots: Vec<PathBuf>,
+}
 
-    let mut package_paths = Vec::with_capacity(refs.len());
+/// Group package refs into package workspace checkouts.
+///
+/// Each distinct `(owner, repo, git_ref)` is cloned once. The first workspace keeps
+/// the historical `<runtime>/platform` root for backward-compatible paths and
+/// delivery-grant reuse; later workspaces live under `<runtime>/platforms/<hash>`.
+/// The returned `package_roots` preserve the input order, so explicit package refs
+/// still win any ordering-sensitive behavior before manifest-expanded refs.
+pub fn plan_clones(refs: &[PackageRef], runtime_root: &Path) -> Result<ClonePlan, String> {
+    if refs.is_empty() {
+        return Err("no package refs to plan".to_string());
+    }
+
+    type WorkspaceKey = (String, String, String);
+    let mut seen: BTreeMap<WorkspaceKey, usize> = BTreeMap::new();
+    let mut workspaces: Vec<WorkspaceClone> = Vec::new();
+    let mut package_roots = Vec::with_capacity(refs.len());
+
     for candidate in refs {
-        if candidate.owner != platform_repo.owner
-            || candidate.repo != platform_repo.repo
-            || candidate.git_ref != platform_repo.git_ref
-        {
-            return Err(format!(
-                "all packages must currently come from one workspace repo \
-                 ({}/{}@{}), but {}/{}@{} differs; multi-workspace fetch is a follow-up",
-                platform_repo.owner,
-                platform_repo.repo,
-                platform_repo.git_ref,
-                candidate.owner,
-                candidate.repo,
-                candidate.git_ref,
-            ));
-        }
-        package_paths.push(candidate.path.clone());
+        let key = (
+            candidate.owner.to_ascii_lowercase(),
+            candidate.repo.to_ascii_lowercase(),
+            candidate.git_ref.clone(),
+        );
+        let index = match seen.get(&key) {
+            Some(index) => *index,
+            None => {
+                let index = workspaces.len();
+                let root = workspace_root(runtime_root, index, &key);
+                workspaces.push(WorkspaceClone {
+                    repo: WorkspaceRepo {
+                        owner: candidate.owner.clone(),
+                        repo: candidate.repo.clone(),
+                        git_ref: candidate.git_ref.clone(),
+                    },
+                    root,
+                });
+                seen.insert(key, index);
+                index
+            }
+        };
+        package_roots.push(
+            workspaces[index]
+                .root
+                .join(candidate.path.trim_start_matches('/')),
+        );
     }
     Ok(ClonePlan {
-        platform_repo,
-        package_paths,
+        workspaces,
+        package_roots,
     })
+}
+
+fn workspace_root(runtime_root: &Path, index: usize, key: &(String, String, String)) -> PathBuf {
+    if index == 0 {
+        return runtime_root.join(PRIMARY_PLATFORM_SUBDIR);
+    }
+    let identity = format!("{}\0{}\0{}", key.0, key.1, key.2);
+    let digest = Sha256::digest(identity.as_bytes());
+    let suffix: String = digest
+        .iter()
+        .take(8)
+        .map(|byte| format!("{byte:02x}"))
+        .collect();
+    runtime_root.join(ADDITIONAL_PLATFORM_SUBDIR).join(suffix)
 }
 
 /// Build the exact `fkst-framework supervise` argv. The real CLI (verified
@@ -214,13 +363,10 @@ pub fn plan_clones(refs: &[PackageRef]) -> Result<ClonePlan, String> {
 /// durable + runtime roots are read from the `FKST_DURABLE_ROOT`/
 /// `FKST_RUNTIME_ROOT` env instead (set on the child by [`substrate_child_env`]).
 ///
-/// Each `package_path` is a repo-relative dir under the cloned workspace and
-/// becomes a `--package-root <platform_root>/<path>` arg; the sibling
-/// `libraries/*` + `fkst.lock` resolve from that same clone.
+/// Each `package_root` is already resolved under its owning workspace checkout.
 pub fn build_supervise_args(
     project_root: &str,
-    platform_root: &str,
-    package_paths: &[String],
+    package_roots: &[PathBuf],
     framework_bin: &str,
 ) -> Vec<String> {
     let mut args = vec![
@@ -228,10 +374,9 @@ pub fn build_supervise_args(
         "--project-root".to_string(),
         project_root.to_string(),
     ];
-    let root = platform_root.trim_end_matches('/');
-    for path in package_paths {
+    for path in package_roots {
         args.push("--package-root".to_string());
-        args.push(format!("{root}/{}", path.trim_start_matches('/')));
+        args.push(path.to_string_lossy().into_owned());
     }
     args.push("--framework-bin".to_string());
     args.push(framework_bin.to_string());

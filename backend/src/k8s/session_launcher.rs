@@ -28,6 +28,7 @@ use kube::api::{Api, PostParams};
 use secrecy::{ExposeSecret, SecretString};
 
 use crate::config::PodConfig;
+use crate::delivery_grants::SESSION_DELIVERY_GRANTS_ENV;
 use crate::models::RepoRef;
 use crate::session_pod::log_stream::{
     ENV_CONFIG_HASH, ENV_POD_NAME, ENV_POD_UID, ENV_SESSION_ID, ENV_TRIGGER_ISSUE,
@@ -108,6 +109,11 @@ const LLM_REASONING_EFFORT_ENV: &str = "FKST_LLM_REASONING_EFFORT";
 const DURABLE_ROOT_ENV: &str = "FKST_DURABLE_ROOT";
 const RUNTIME_ROOT_ENV: &str = "FKST_RUNTIME_ROOT";
 const SESSION_CREDS_DIR_ENV: &str = "FKST_SESSION_CREDS_DIR";
+/// The in-pod credentials-gate wait (`session_pod::creds_gate`). Injected so the
+/// operator knob `FKST_POD_CREDS_WAIT_TIMEOUT_SECS` actually REACHES the pod —
+/// the gate has always read this var, but nothing ever set it, so every pod was
+/// pinned to the in-pod default (issue #5927).
+const CREDS_WAIT_TIMEOUT_ENV: &str = "FKST_CREDS_WAIT_TIMEOUT_SECS";
 const CODEX_HOME_ENV: &str = "CODEX_HOME";
 const GIT_AUTHOR_NAME_ENV: &str = "GIT_AUTHOR_NAME";
 const GIT_COMMITTER_NAME_ENV: &str = "GIT_COMMITTER_NAME";
@@ -156,6 +162,11 @@ pub const SESSION_ID_LABEL: &str = "fkst.chrono-ai.fun/session-id";
 
 /// What the control plane needs to launch (and later reconcile) one long-lived
 /// substrate-session Pod. Non-secret: a `{:?}` of it can never leak a token.
+/// The single env var carrying per-package configuration into the session pod.
+/// Named in [`crate::goals::package_env::PLATFORM_OWNED_SESSION_ENV`] so a trigger
+/// author cannot set it themselves and forge another package's configuration.
+pub const SESSION_PACKAGE_ENV_JSON_ENV: &str = "FKST_SESSION_PACKAGE_ENV_JSON";
+
 pub struct SessionPodSpec {
     /// Session id; `fkst-sess-<session_id>` is the deterministic Pod (and Secret)
     /// name, so a re-trigger is an at-most-one / 409-idempotent no-op.
@@ -177,6 +188,30 @@ pub struct SessionPodSpec {
     /// label value. Built via [`crate::k8s::work_label_wire::join_work_labels`];
     /// recovered on observe via [`crate::k8s::work_label_wire::split_work_labels`].
     pub work_label: String,
+    /// Optional deterministic logical-to-effective work-label mapping for package
+    /// discovery and outbound GitHub effects. Absent on unnamespaced deployments.
+    pub work_label_map_json: Option<String>,
+    /// The deployment's fkst WORK-LABEL namespace (NOT a Kubernetes namespace),
+    /// rendered into the session as [`crate::reconcile::work_labels::WORK_LABEL_NAMESPACE_ENV`].
+    ///
+    /// It already reaches the session baked INTO every effective label string; this
+    /// carries the value itself, so a package that needs it — the health reporter
+    /// stamps it into each report filename — reads it directly instead of recovering
+    /// it by stripping a suffix off a label, which is fragile the moment a logical
+    /// label contains a hyphen.
+    ///
+    /// `None` on an unnamespaced deployment, and then the variable is ABSENT rather
+    /// than empty: unnamespaced genuinely means "there is no namespace", and a
+    /// consumer must treat absence as that rather than substituting a placeholder.
+    /// Sits beside [`Self::work_label_map_json`] because both are derived from the
+    /// same [`crate::reconcile::work_labels::apply_work_label_namespace`] input.
+    pub work_label_namespace: Option<String>,
+    /// Optional per-package configuration, as one JSON object of
+    /// `{package: {KEY: value}}` (`### Package Env` merged with the manifest's
+    /// `packageEnv`). `None` when the session configures no package, which renders
+    /// NO env key at all — an unconfigured session's pod env stays byte-identical
+    /// to what it was before this feature existed.
+    pub package_env_json: Option<String>,
     /// The bot login (`FKST_GITHUB_BOT_LOGIN` + git author/committer name).
     pub bot_login: String,
     /// Config-hash annotation used by the reconciler for drift detection.
@@ -188,14 +223,42 @@ pub struct SessionPodSpec {
     /// Tighten-merged with the operator rate-pool defaults at render time —
     /// see [`crate::k8s::engine_env::engine_tunables_env`].
     pub engine_config: BTreeMap<String, String>,
-    /// Effective session creator, used by package-side assignee routing.
+    /// Effective session creator, used by package-side assignee routing AND
+    /// stamped as durable runtime attribution (see [`SessionPodSpec::identity`]).
     pub creator_login: String,
+    /// The effective creator's immutable GitHub id when available. `None` is
+    /// load-bearing: an App-authored trigger's creator comes from its sole
+    /// assignee, whose id GitHub's issue metadata never exposes. The trigger
+    /// author's id is NEVER substituted for it.
+    pub creator_id: Option<i64>,
+    /// The trigger issue author's immutable GitHub id.
+    pub trigger_author_id: i64,
+    /// The trigger issue author's GitHub login. Stays the historical author even
+    /// when the effective creator is a different person.
+    pub trigger_author_login: String,
     /// The session's allowed work authors (creator, Session Collaborators, and
     /// login-shaped deployment admins), case-insensitively deduped.
     pub contributors: Vec<String>,
+    /// Resolved source branch that receives completed integration work. Always
+    /// concrete (the repository default when omitted by the author).
+    pub upstream_branch: String,
     /// Resolved branch the target repository is cloned from and every session PR
     /// targets. Always concrete (`fkst-hosted-default` when omitted by the author).
     pub target_branch: String,
+    /// Validated grants scoped to this lifecycle repository. `None` is load-bearing:
+    /// sessions without an operator grant do not receive a new environment key.
+    pub delivery_grants_json: Option<String>,
+}
+
+impl SessionPodSpec {
+    /// The durable attribution this session's runtime is stamped with.
+    ///
+    /// Deliberately DERIVED rather than stored: the identity is a projection of
+    /// four fields the launch spec already carries, and a fifth stored copy is a
+    /// fifth thing that can disagree with the runtime it describes.
+    pub fn identity(&self) -> crate::runtime_identity::RuntimeIdentityMetadata {
+        crate::runtime_identity::RuntimeIdentityMetadata::from_spec(self)
+    }
 }
 
 /// The deterministic Pod/Secret name for a session (`fkst-sess-<session_id>`).
@@ -301,13 +364,17 @@ pub(crate) fn session_env_pairs(
         (DURABLE_ROOT_ENV, DURABLE_ROOT_DIR.to_string()),
         (RUNTIME_ROOT_ENV, RUNTIME_ROOT_DIR.to_string()),
         (SESSION_CREDS_DIR_ENV, CREDS_MOUNT_DIR.to_string()),
+        (
+            CREDS_WAIT_TIMEOUT_ENV,
+            config.creds_wait_timeout_secs.to_string(),
+        ),
         (CODEX_HOME_ENV, CODEX_HOME_DIR.to_string()),
         (GIT_AUTHOR_NAME_ENV, spec.bot_login.clone()),
         (GIT_COMMITTER_NAME_ENV, spec.bot_login.clone()),
         (SESSION_PACKAGE_ROOTS_ENV, spec.package_roots.join(" ")),
         (SESSION_WORK_LABEL_ENV, spec.work_label.clone()),
         (SESSION_CREATOR_ENV, spec.creator_login.clone()),
-        (DEVLOOP_UPSTREAM_BRANCH_ENV, spec.target_branch.clone()),
+        (DEVLOOP_UPSTREAM_BRANCH_ENV, spec.upstream_branch.clone()),
         (DEVLOOP_INTEGRATION_BRANCH_ENV, spec.target_branch.clone()),
         // The engine's required HostFacts — without them any package calling
         // `setup_worktree()` fails at runtime with a HostFact-missing error.
@@ -329,6 +396,33 @@ pub(crate) fn session_env_pairs(
         env.push((
             GITHUB_AUTHORIZED_LOGINS_ENV.to_string(),
             spec.contributors.join(","),
+        ));
+    }
+    if let Some(grants) = &spec.delivery_grants_json {
+        env.push((SESSION_DELIVERY_GRANTS_ENV.to_string(), grants.clone()));
+    }
+    if let Some(work_label_map_json) = &spec.work_label_map_json {
+        env.push((
+            crate::reconcile::work_labels::SESSION_WORK_LABEL_MAP_JSON_ENV.to_string(),
+            work_label_map_json.clone(),
+        ));
+    }
+    // ABSENT when unset, like every other optional var in this block: an unset
+    // namespace means labels are unnamespaced, so there is nothing to inject.
+    if let Some(work_label_namespace) = &spec.work_label_namespace {
+        env.push((
+            crate::reconcile::work_labels::WORK_LABEL_NAMESPACE_ENV.to_string(),
+            work_label_namespace.clone(),
+        ));
+    }
+    // Per-package configuration travels as ONE variable rather than as flattened
+    // per-package keys: the packages read it through a single funnel, and a lone
+    // variable keeps the platform-owned surface (and its denylist) small enough to
+    // enumerate. Absent when unconfigured, like every conditional var above.
+    if let Some(package_env_json) = &spec.package_env_json {
+        env.push((
+            SESSION_PACKAGE_ENV_JSON_ENV.to_string(),
+            package_env_json.clone(),
         ));
     }
     // The engine-tunable tail: output locale + the tighten-merged engine config
@@ -390,7 +484,26 @@ fn session_labels(spec: &SessionPodSpec) -> BTreeMap<String, String> {
 /// Annotations the reconciler reads (owner/repo can exceed the label charset, so
 /// these are annotations). `last-pending-at` is seeded to now (RFC3339) and stays
 /// settable — the caller/reconciler overwrites it as the session goes pending.
+///
+/// The creator/trigger-author attribution is stamped here too, as ANNOTATIONS
+/// and never labels: it is displayed, not selected on, so promoting it would
+/// grow the apiserver's label index by one value per creator for no query
+/// anyone issues (see [`crate::runtime_identity::keys`]).
 fn session_annotations(spec: &SessionPodSpec) -> BTreeMap<String, String> {
+    let mut annotations = base_session_annotations(spec);
+    annotations.extend(
+        crate::runtime_identity::stamp_pairs(
+            &crate::runtime_identity::K8S_IDENTITY_KEYS,
+            &spec.identity(),
+        )
+        .into_iter()
+        .map(|(key, value)| (key.to_string(), value)),
+    );
+    annotations
+}
+
+/// The pre-attribution correlation annotations.
+fn base_session_annotations(spec: &SessionPodSpec) -> BTreeMap<String, String> {
     BTreeMap::from([
         (ANNOTATION_OWNER.to_string(), spec.repo.owner.clone()),
         (ANNOTATION_REPO.to_string(), spec.repo.name.clone()),
@@ -537,9 +650,15 @@ fn pod_owner_reference(pod: &Pod) -> Option<OwnerReference> {
 
 /// What a create did: a freshly created Pod, or an idempotent no-op because the
 /// deterministically-named Pod already existed (the session is already live).
+///
+/// `Created` carries the apiserver's `creationTimestamp` for the Pod it just
+/// made. The Pod NAME is derived from the session id and therefore identical
+/// across a kill/respawn cycle, so the timestamp is the only thing that
+/// distinguishes a session's second runtime from its first — which the lifecycle
+/// audit trail needs in order not to deduplicate them into one row.
 #[derive(Debug, PartialEq, Eq)]
 pub enum SessionPodOutcome {
-    Created,
+    Created { created_at: Option<DateTime<Utc>> },
     AlreadyLive,
 }
 
@@ -600,9 +719,18 @@ pub async fn create_session_pod(
         namespace = %namespace,
         "session pod create: pod created"
     );
-    Ok(SessionPodOutcome::Created)
+    Ok(SessionPodOutcome::Created {
+        created_at: created
+            .metadata
+            .creation_timestamp
+            .as_ref()
+            .map(|k8s_openapi::apimachinery::pkg::apis::meta::v1::Time(at)| *at),
+    })
 }
 
+#[cfg(test)]
+#[path = "session_launcher_identity_tests.rs"]
+mod identity_tests;
 #[cfg(test)]
 #[path = "session_launcher_tests.rs"]
 mod tests;

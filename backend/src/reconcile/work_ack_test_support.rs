@@ -249,6 +249,7 @@ pub(super) fn issue_by(
         assignees: assignees.iter().map(|value| value.to_string()).collect(),
         user_login: user_login.to_string(),
         user_id,
+        created_at: k8s_openapi::chrono::DateTime::UNIX_EPOCH,
     }
 }
 
@@ -281,6 +282,7 @@ pub(super) fn registration_for(
             engine_config: std::collections::BTreeMap::new(),
             source_branch: None,
             target_branch: None,
+            package_env: crate::goals::package_env::PackageEnv::new(),
         },
         effective_packages: Vec::new(),
         session_id: session_id.to_string(),
@@ -288,6 +290,7 @@ pub(super) fn registration_for(
         auto_merge: false,
         log_access: vec![],
         collaborators: vec![],
+        effective_package_env: crate::goals::package_env::PackageEnv::new(),
     }
 }
 

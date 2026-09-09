@@ -41,6 +41,7 @@ fn orphan_live_pod_with_work_label_also_retires_its_work_issues() {
                 ReconcileAction::Kill {
                     session_id: "orphan".to_string(),
                     reason: KillReason::TriggerClosed,
+                    audit: orphan_audit(&live[0]),
                 },
                 ReconcileAction::RetireWorkIssues {
                     work_labels: vec!["fkst-run".to_string()],
@@ -83,6 +84,7 @@ fn orphan_live_pod_with_multiple_work_labels_retires_across_all_of_them() {
             ReconcileAction::Kill {
                 session_id: "orphan".to_string(),
                 reason: KillReason::TriggerClosed,
+                audit: orphan_audit(&live[0]),
             },
             ReconcileAction::RetireWorkIssues {
                 work_labels: vec!["fkst-run".to_string(), "pkg-discovered".to_string()],
@@ -122,6 +124,7 @@ fn orphan_live_pod_without_work_label_only_kills() {
         vec![ReconcileAction::Kill {
             session_id: "orphan".to_string(),
             reason: KillReason::TriggerClosed,
+            audit: orphan_audit(&live[0]),
         }],
         "an orphan pod without a work label must not emit RetireWorkIssues"
     );
@@ -157,6 +160,7 @@ fn orphan_terminal_pod_with_work_label_only_cleans_up() {
         actions,
         vec![ReconcileAction::CleanupTerminal {
             session_id: "orphan".to_string(),
+            audit: orphan_audit(&live[0]),
         }],
         "a terminal orphan is only cleaned up, never retire-notified"
     );

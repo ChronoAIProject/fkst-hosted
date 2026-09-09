@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { fireEvent, render, screen } from '@testing-library/react';
 import { Dashboard, formatSgt } from './dashboard';
+import { BrowserRouter } from 'react-router-dom';
 import { AuthProvider } from '@/lib/auth/github-auth';
 import { BroaderOAuthProvider } from '@/lib/auth/broader-oauth';
 
@@ -8,7 +9,11 @@ function renderDashboard() {
   return render(
     <AuthProvider>
       <BroaderOAuthProvider>
-        <Dashboard />
+        {/* The dashboard reads and writes its location from the URL, so it needs a
+            router even in the suites that never navigate. */}
+        <BrowserRouter>
+          <Dashboard />
+        </BrowserRouter>
       </BroaderOAuthProvider>
     </AuthProvider>
   );

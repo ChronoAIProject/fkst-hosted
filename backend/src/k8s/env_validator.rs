@@ -140,6 +140,16 @@ pub async fn validate_environment(
         BackendError::NotFound => {
             AppError::Internal(anyhow::anyhow!("env validation backend resource not found"))
         }
+        // Validation runtimes carry no attribution metadata, so this is not a
+        // reachable code path either; it must still map to Err, never a pass.
+        BackendError::InvalidMetadata => {
+            AppError::Internal(anyhow::anyhow!("env validation backend rejected metadata"))
+        }
+        // Only the live-inventory read can raise this; validation never lists a
+        // fleet. Mapped explicitly so a future refactor cannot let it pass.
+        BackendError::InventoryTooLarge { .. } => AppError::Internal(anyhow::anyhow!(
+            "env validation backend reported an inventory ceiling"
+        )),
     })
 }
 

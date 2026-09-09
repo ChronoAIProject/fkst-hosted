@@ -27,6 +27,7 @@ fn config_hash(
         manifest_refs,
         None,
         None,
+        &crate::goals::package_env::PackageEnv::new(),
     )
 }
 
@@ -58,6 +59,7 @@ fn issue(number: i64, body: &str, user_id: i64) -> IssueSummary {
         assignees: vec![],
         user_login: "carol".to_string(),
         user_id,
+        created_at: k8s_openapi::chrono::DateTime::UNIX_EPOCH,
     }
 }
 
@@ -146,6 +148,7 @@ fn branch_sections_round_trip_into_the_registration_and_config_hash() {
             &reg.def.manifest_refs,
             Some("release/v1"),
             Some("feature-x"),
+            &crate::goals::package_env::PackageEnv::new(),
         )
     );
 }

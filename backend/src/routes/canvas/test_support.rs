@@ -10,7 +10,7 @@ use wiremock::{Mock, MockServer, ResponseTemplate};
 use crate::config::Config;
 use crate::github_app::{GithubAppConfig, GithubAppTokens};
 use crate::github_identity::GithubUser;
-use crate::state::AppState;
+use crate::state::{empty_self_router, AppState};
 
 pub(crate) fn auth_headers() -> HeaderMap {
     let mut headers = HeaderMap::new();
@@ -59,9 +59,13 @@ pub(crate) fn test_state(server_uri: &str, github_app: Option<GithubAppTokens>) 
         reconciler: None,
         session_backend: None,
         storage: None,
-        log_registry: Default::default(),
+        session_access: Default::default(),
+        operations: Default::default(),
         log_bundle_cache: Default::default(),
         disposable_environments: Default::default(),
+        self_router: empty_self_router(),
+        chat: None,
+        audit: Default::default(),
     }
 }
 

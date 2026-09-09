@@ -66,14 +66,18 @@ describe('DrawerShell', () => {
     expect(screen.getByRole('button', { name: 'first' })).toHaveFocus();
   });
 
-  it('scrolls the body internally through a bounded ScrollArea', () => {
+  it('bounds the body height without owning the scroll', () => {
     renderShell();
     const dialog = screen.getByRole('dialog');
-    // The ScrollArea primitive is the sole internal scroller; the body lives
-    // inside it, keeping the drawer viewport-anchored independent of page scroll.
-    const scroller = dialog.querySelector('.overflow-y-auto');
-    expect(scroller).not.toBeNull();
-    expect(scroller).toContainElement(screen.getByRole('button', { name: 'first' }));
+
+    // The drawer supplies a bounded, shrinkable flex box and stops there. Its
+    // CONTENT owns scrolling, so a tabbed detail can keep its header and tablist
+    // pinned while only the active tab's body scrolls. A scroller here would drag
+    // all of that away together.
+    const box = dialog.querySelector('.flex.min-h-0.flex-1.flex-col');
+    expect(box).not.toBeNull();
+    expect(box).toContainElement(screen.getByRole('button', { name: 'first' }));
+    expect(dialog.querySelector('.overflow-y-auto')).toBeNull();
   });
 
   it('closes on Escape and stops the event from reaching the page', async () => {

@@ -136,6 +136,7 @@ fn pr_with(number: u64, author: &str, head_ref: &str, title: &str) -> PullReques
         author_login: author.to_string(),
         head_sha: format!("sha{number}"),
         head_ref: head_ref.to_string(),
+        head_repo_full_name: Some("acme/site".to_string()),
         title: title.to_string(),
     }
 }

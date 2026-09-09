@@ -21,7 +21,6 @@ use secrecy::SecretString;
 use crate::access_policy::AccessPolicy;
 use crate::error::AppError;
 use crate::github_app::listing::{GithubListing, IssueSummary};
-use crate::log_access::LogSessionContext;
 use crate::models::RepoRef;
 use crate::reconcile::announce::parse_config_hash_marker;
 use crate::reconcile::collision::{detect_missing_work_labels, detect_work_label_collisions};
@@ -31,10 +30,11 @@ use crate::reconcile::effective_packages::EffectivePackages;
 use crate::reconcile::execute::{execute, ReconcileCtx};
 use crate::reconcile::pending::{LabelCountPending, PendingWork};
 use crate::reconcile::registry::parse_registration;
+use crate::reconcile::session_contexts::record_session_contexts;
 use crate::reconcile::trigger_authz::{
     check_trigger_creator, TriggerAuthzCache, TriggerGateDecision,
 };
-use crate::reconcile::work_labels::resolve_work_label_sets;
+use crate::reconcile::work_labels::{apply_work_label_namespace, resolve_work_label_sets};
 
 use super::{
     SUBSTRATE_ANNOUNCED_LABEL, SUBSTRATE_CONFIG_REJECTED_LABEL, SUBSTRATE_INVALID_LABEL,
@@ -176,13 +176,20 @@ pub async fn reconcile_repo(
     // no-op on the vast majority of reconciles. Placed BEFORE the fallible reads
     // below so a later GitHub/K8s read failure (which `?`-returns) never skips the
     // template ensure; a failure inside the ensure never aborts the reconcile.
-    crate::reconcile::ensure_issue_templates(
+    let templates_installed = crate::reconcile::ensure_issue_templates(
         (installation_id, repo.clone()),
         &owner_repo,
         &ctx.github,
         &ctx.ensured_templates,
     )
     .await;
+    // Ride along with the (rare) template install rather than paying six label
+    // round-trips per repo per sweep. A repository that already has the current
+    // templates already had this run; the version bump that ships a new template
+    // is what carries the bootstrap out to the existing fleet.
+    if templates_installed {
+        crate::github_app::labels::ensure_platform_labels(&ctx.github, &owner_repo).await;
+    }
 
     // 1. One repo-scoped installation token drives every GitHub read below.
     let token = ctx.github.token_for_repo(&owner_repo, None).await?;
@@ -279,11 +286,11 @@ pub async fn reconcile_repo(
     // it when the last trigger issue is gone so idle repos don't churn the sweep.
     set_active(ctx, installation_id, repo, !regs.is_empty());
 
-    // Record each valid session's log-access context so the identity-gated
-    // log-download endpoint can reverse a `session_id` (a one-way hash) to the
-    // author id + `### Log Access Allowlist` allow-list it authorizes against. Cheap in-memory
-    // upsert; carries only public metadata (ids + the allow-list), never a token.
-    record_log_contexts(ctx, &regs);
+    // Publish this repository's COMPLETE session-access set so every
+    // session-scoped route can reverse a `session_id` (a one-way hash) into the
+    // creator + collaborator + log-access facts it authorizes against. Cheap
+    // in-memory replacement; carries only public metadata, never a token.
+    record_session_contexts(ctx, installation_id, repo, &regs);
 
     // I7 manifest expand pass (epic #594). Resolve each session's EFFECTIVE package set —
     // its explicit `### Packages` followed by every `### Manifest` reference expanded into
@@ -298,11 +305,13 @@ pub async fn reconcile_repo(
     let EffectivePackages {
         by_session: effective_by_session,
         demotions: manifest_demotions,
+        package_env_by_session,
     } = crate::reconcile::effective_packages::resolve_effective_packages(
         &ctx.http,
         &ctx.config.github_api_base_url,
         &token,
         &regs,
+        &cfg.mandatory_packages,
     )
     .await;
     if !manifest_demotions.is_empty() {
@@ -319,6 +328,12 @@ pub async fn reconcile_repo(
         if let Some(packages) = effective_by_session.get(&reg.session_id) {
             reg.effective_packages = packages.clone();
         }
+        // The effective (manifest-merged) configuration replaces the trigger-only
+        // map parsed at registration, so every downstream consumer reads one value
+        // and never has to re-apply precedence.
+        if let Some(package_env) = package_env_by_session.get(&reg.session_id) {
+            reg.effective_package_env = package_env.clone();
+        }
     }
 
     // Resolve each session's FULL work-label set (explicit ∪ package-discovered) ONCE
@@ -328,8 +343,43 @@ pub async fn reconcile_repo(
     // immutable per session config), bounding the manifest fetches to one resolve per
     // distinct session config. Walks each session's EFFECTIVE package set (I7), so a
     // manifest's packages' `[github].work_labels` are auto-discovered too.
-    let work_labels_by_session =
+    let logical_work_labels_by_session =
         resolve_work_label_sets(&ctx.http, &ctx.config.github_api_base_url, &token, &regs).await;
+
+    // Apply the deployment/provider namespace after package discovery. Trigger bodies
+    // and package manifests stay provider-neutral; every GitHub-facing operation below
+    // uses only this effective set. Invalid/overlong labels and case-insensitive output
+    // collisions fail closed through the ordinary invalid-trigger latch.
+    let mut effective_work_labels_by_session: HashMap<String, Vec<String>> = HashMap::new();
+    let mut work_label_demotions = Vec::new();
+    for reg in &regs {
+        let logical = logical_work_labels_by_session
+            .get(&reg.session_id)
+            .cloned()
+            .unwrap_or_default();
+        match apply_work_label_namespace(&logical, cfg.work_label_namespace.as_deref()) {
+            Ok(labels) => {
+                effective_work_labels_by_session.insert(reg.session_id.clone(), labels.effective);
+            }
+            Err(error) => work_label_demotions.push((
+                reg.trigger_issue,
+                format!("invalid effective work labels: {error}"),
+            )),
+        }
+    }
+    if !work_label_demotions.is_empty() {
+        let losers: HashSet<i64> = work_label_demotions
+            .iter()
+            .map(|(issue, _)| *issue)
+            .collect();
+        tracing::info!(
+            owner_repo = %owner_repo,
+            demoted = work_label_demotions.len(),
+            "reconcile: effective work-label validation failed; demoting trigger(s) to invalid"
+        );
+        regs.retain(|reg| !losers.contains(&reg.trigger_issue));
+        invalid.extend(work_label_demotions);
+    }
 
     // I4 label-less reject (epic #594). A session whose EFFECTIVE work-label set is empty
     // (no explicit `### Work Label` AND no package-declared `[github].work_labels`) can
@@ -340,7 +390,7 @@ pub async fn reconcile_repo(
     // queue, so it never collides anyway; ordering it first keeps its reason precise). A
     // spawned session therefore always carries ≥1 work label, keeping the in-pod guard
     // satisfied.
-    let missing = detect_missing_work_labels(&regs, &work_labels_by_session);
+    let missing = detect_missing_work_labels(&regs, &logical_work_labels_by_session);
     if !missing.is_empty() {
         let losers: HashSet<i64> = missing.iter().map(|(issue, _)| *issue).collect();
         tracing::info!(
@@ -361,7 +411,7 @@ pub async fn reconcile_repo(
     // as a parse failure (it un-flags itself the moment the collision resolves and it
     // becomes a plain valid registration again). Removing losers from `regs` before the
     // pending gate + planner is what actually blocks the competing pod from spawning.
-    let collisions = detect_work_label_collisions(&regs, &work_labels_by_session);
+    let collisions = detect_work_label_collisions(&regs, &effective_work_labels_by_session);
     if !collisions.is_empty() {
         let losers: HashSet<i64> = collisions.iter().map(|(issue, _)| *issue).collect();
         tracing::info!(
@@ -440,7 +490,7 @@ pub async fn reconcile_repo(
         &token,
         repo,
         &regs,
-        &work_labels_by_session,
+        &effective_work_labels_by_session,
         &ctx.config.access,
         cfg.github_bot_login.as_deref(),
     )
@@ -465,7 +515,7 @@ pub async fn reconcile_repo(
     );
     let mut pending: HashMap<String, bool> = HashMap::new();
     for reg in &regs {
-        let labels = work_labels_by_session
+        let labels = effective_work_labels_by_session
             .get(&reg.session_id)
             .cloned()
             .unwrap_or_default();
@@ -478,7 +528,7 @@ pub async fn reconcile_repo(
     // 5. Plan (pure), then execute each action best-effort.
     let mut actions = plan_repo(
         &regs,
-        &work_labels_by_session,
+        &logical_work_labels_by_session,
         &invalid,
         &live,
         &pending,
@@ -506,29 +556,74 @@ pub async fn reconcile_repo(
     for action in actions {
         execute(action, repo, ctx).await;
     }
-    Ok(())
-}
 
-/// Upsert every valid registration's [`LogSessionContext`] into the shared registry
-/// the log-download endpoint authorizes against. Called every sweep so the map stays
-/// current (a re-registration with an edited allow-list overwrites the old context);
-/// carries only public metadata, never a token.
-fn record_log_contexts(ctx: &ReconcileCtx, regs: &[SessionRegistration]) {
-    for reg in regs {
-        ctx.log_registry.upsert(
-            reg.session_id.clone(),
-            LogSessionContext {
-                installation_id: reg.installation_id,
-                repo: reg.repo.clone(),
-                trigger_issue: reg.trigger_issue,
-                creator: SessionCreator {
-                    login: reg.creator_login.clone(),
-                    id: reg.creator_id,
-                },
-                log_access: reg.log_access.clone(),
-            },
-        );
+    // 5b. The schedule pass: a SECOND enumeration, over this repository's open
+    //     `fkst-scheduled-workflow` definitions. Deliberately not folded into
+    //     `plan_repo`: it diffs a different desired state (a clock against a run
+    //     history) against a different observed state (issue labels and markers),
+    //     and it must not be able to change which pods the lifecycle planner
+    //     spawns. It reaches sessions only the way a human does — by creating an
+    //     ordinary routed work issue.
+    //
+    //     It runs here, and therefore only on the Lease holder, inheriting leader
+    //     scoping from the reconciler rather than needing its own election.
+    //
+    //     Fail-soft as a WHOLE: a read failure drops this sweep's schedule effects
+    //     with a warning instead of aborting the repo, because the session
+    //     lifecycle above must never depend on the clock. Planning from partial
+    //     reads is separately impossible — the pass itself returns `Err` rather
+    //     than treating a failed history read as an empty one.
+    match crate::reconcile::schedule_pass::plan_repo_schedules(
+        ctx.listing.as_ref(),
+        ctx.comments.as_ref(),
+        &token,
+        repo,
+        &regs,
+        &ctx.config.access,
+        Utc::now(),
+        cfg,
+    )
+    .await
+    {
+        Ok(effects) => {
+            if !effects.is_empty() {
+                tracing::info!(
+                    owner_repo = %owner_repo,
+                    effects = effects.len(),
+                    "reconcile: schedule pass planned"
+                );
+            }
+            for effect in effects {
+                crate::reconcile::schedule_execute::execute_schedule_effect(
+                    effect,
+                    repo,
+                    &ctx.github,
+                )
+                .await;
+            }
+        }
+        Err(error) => tracing::warn!(
+            owner_repo = %owner_repo,
+            error = %error,
+            "reconcile: schedule pass failed; retrying next sweep"
+        ),
     }
+
+    // 6. Backfill durable creator/trigger attribution onto any live runtime this
+    //    pass matched to a registration but that predates the launch stamp. Uses
+    //    the stamp already read in step 3, so a settled runtime costs no API call;
+    //    a conflict or a permanent failure is parked by the bounded gate rather
+    //    than re-decided every sweep.
+    //
+    //    It runs after the actions, but works from the PRE-action `live`
+    //    snapshot, so a runtime an action just killed still reads as `Live` here
+    //    and is patched on its way out. That is harmless by construction: the
+    //    patch re-reads the runtime and a deleted one answers 404 →
+    //    `RuntimeIdentityOutcome::NotFound`, which writes nothing and emits
+    //    nothing. Re-observing after the actions purely to avoid that no-op would
+    //    cost one extra backend LIST per repo per sweep.
+    crate::reconcile::runtime_identity::backfill_runtime_identities(ctx, &regs, &live).await;
+    Ok(())
 }
 
 /// Insert or remove `(installation, repo)` in the shared active-repos set (present

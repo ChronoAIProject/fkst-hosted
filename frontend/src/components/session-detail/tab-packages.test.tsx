@@ -25,7 +25,7 @@ const session = (over: Partial<SessionDetail> = {}): SessionDetail => ({
   environment: null,
   source_branch: null,
   target_branch: 'fkst-hosted-default',
-  packages: ['ChronoAIProject/fkst-packages@fkst-hosted:codex/triage'],
+  packages: ['ChronoAIProject/fkst-hosted@packages:codex/triage'],
   invalid_reason: null,
   status_labels: [],
   trigger,
@@ -48,7 +48,7 @@ describe('TabPackages', () => {
     expect(screen.getByText('Triage')).toBeInTheDocument();
     expect(screen.getByText('triage')).toBeInTheDocument();
     expect(
-      screen.getByText('ChronoAIProject/fkst-packages@fkst-hosted:codex/triage')
+      screen.getByText('ChronoAIProject/fkst-hosted@packages:codex/triage')
     ).toBeInTheDocument();
   });
 
@@ -76,8 +76,8 @@ describe('TabPackages', () => {
       <TabPackages
         session={session({
           packages: [
-            'ChronoAIProject/fkst-packages@fkst-hosted:codex/triage',
-            'ChronoAIProject/fkst-packages@fkst-hosted:tools/lint',
+            'ChronoAIProject/fkst-hosted@packages:codex/triage',
+            'ChronoAIProject/fkst-hosted@packages:tools/lint',
           ],
         })}
         observe={idle}

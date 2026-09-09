@@ -96,9 +96,14 @@ async fn overview_assembles_accounts_counts_and_totals() {
         .await;
 
     let state = test_state(&server.uri(), Some(test_app(&server.uri())));
-    let Json(view) = overview(State(state), viewer_user(), auth_headers())
-        .await
-        .expect("200");
+    let Json(view) = overview(
+        State(state),
+        axum::http::Extensions::new(),
+        viewer_user(),
+        auth_headers(),
+    )
+    .await
+    .expect("200");
 
     assert_eq!(view.app_slug.as_deref(), Some("fkst-test"));
     assert_eq!(view.viewer.login, "shining");
@@ -275,6 +280,7 @@ async fn global_admin_overview_adds_app_wide_repos_to_normal_user_visibility() {
 
     let Json(view) = overview(
         State(state),
+        axum::http::Extensions::new(),
         viewer_user(),
         auth_headers_with_broader("broader-token"),
     )
@@ -463,6 +469,7 @@ async fn overview_uses_the_broader_token_for_enumeration_on_same_user() {
     let state = test_state(&server.uri(), Some(test_app(&server.uri())));
     let Json(view) = overview(
         State(state),
+        axum::http::Extensions::new(),
         viewer_user(),
         auth_headers_with_broader("broader-token"),
     )
@@ -498,6 +505,7 @@ async fn overview_ignores_a_broader_token_for_a_different_user() {
     let state = test_state(&server.uri(), Some(test_app(&server.uri())));
     let Json(view) = overview(
         State(state),
+        axum::http::Extensions::new(),
         viewer_user(),
         auth_headers_with_broader("foreign-token"),
     )
@@ -530,6 +538,7 @@ async fn overview_falls_back_to_the_app_token_when_the_broader_token_is_rejected
     let state = test_state(&server.uri(), Some(test_app(&server.uri())));
     let Json(view) = overview(
         State(state),
+        axum::http::Extensions::new(),
         viewer_user(),
         auth_headers_with_broader("bad-broader"),
     )
@@ -548,9 +557,14 @@ async fn overview_reports_broader_oauth_available_when_configured() {
     state.config.log.broader_oauth_client_secret =
         Some(SecretString::from("classic-secret".to_string()));
 
-    let Json(view) = overview(State(state), viewer_user(), auth_headers())
-        .await
-        .expect("200");
+    let Json(view) = overview(
+        State(state),
+        axum::http::Extensions::new(),
+        viewer_user(),
+        auth_headers(),
+    )
+    .await
+    .expect("200");
     assert!(
         view.broader_oauth_available,
         "the broader pair is configured, so the connect flow must be advertised"
@@ -631,9 +645,14 @@ async fn overview_returns_promptly_when_one_repo_scan_hangs() {
 
     let state = test_state(&server.uri(), Some(test_app(&server.uri())));
     let started = std::time::Instant::now();
-    let Json(view) = overview(State(state), viewer_user(), auth_headers())
-        .await
-        .expect("a hung repo scan must NOT fail or stall the whole call");
+    let Json(view) = overview(
+        State(state),
+        axum::http::Extensions::new(),
+        viewer_user(),
+        auth_headers(),
+    )
+    .await
+    .expect("a hung repo scan must NOT fail or stall the whole call");
     assert!(
         started.elapsed() < std::time::Duration::from_secs(3),
         "the call must return around the 1s scan timeout, well before the hung \
@@ -662,9 +681,14 @@ async fn overview_marks_counts_incomplete_when_a_trigger_read_fails() {
         .await;
 
     let state = test_state(&server.uri(), Some(test_app(&server.uri())));
-    let Json(view) = overview(State(state), viewer_user(), auth_headers())
-        .await
-        .expect("a failing repo scan must NOT fail the whole call");
+    let Json(view) = overview(
+        State(state),
+        axum::http::Extensions::new(),
+        viewer_user(),
+        auth_headers(),
+    )
+    .await
+    .expect("a failing repo scan must NOT fail the whole call");
 
     let org = &view.accounts[1];
     assert!(!org.counts_complete, "the failed scan flags the account");
@@ -720,9 +744,14 @@ async fn overview_renders_an_omitted_repository_selection_as_null() {
     // No App configured: the account still resolves its installation, which is
     // all this test cares about.
     let state = test_state(&server.uri(), None);
-    let Json(view) = overview(State(state), viewer_user(), auth_headers())
-        .await
-        .expect("200");
+    let Json(view) = overview(
+        State(state),
+        axum::http::Extensions::new(),
+        viewer_user(),
+        auth_headers(),
+    )
+    .await
+    .expect("200");
     let org = &view.accounts[1];
     assert!(org.installed);
     assert_eq!(
@@ -737,9 +766,14 @@ async fn overview_marks_counts_incomplete_when_the_app_is_unconfigured() {
     mount_user_reads(&server).await;
 
     let state = test_state(&server.uri(), None);
-    let Json(view) = overview(State(state), viewer_user(), auth_headers())
-        .await
-        .expect("200 without an App");
+    let Json(view) = overview(
+        State(state),
+        axum::http::Extensions::new(),
+        viewer_user(),
+        auth_headers(),
+    )
+    .await
+    .expect("200 without an App");
 
     assert!(view.app_slug.is_none());
     let org = &view.accounts[1];
@@ -763,9 +797,14 @@ async fn overview_propagates_a_rejected_user_token() {
         .await;
 
     let state = test_state(&server.uri(), None);
-    let err = overview(State(state), viewer_user(), auth_headers())
-        .await
-        .expect_err("401 from GitHub rejects the call");
+    let err = overview(
+        State(state),
+        axum::http::Extensions::new(),
+        viewer_user(),
+        auth_headers(),
+    )
+    .await
+    .expect_err("401 from GitHub rejects the call");
     assert!(matches!(err, AppError::Unauthorized(_)), "got {err:?}");
 }
 
@@ -773,8 +812,13 @@ async fn overview_propagates_a_rejected_user_token() {
 async fn overview_requires_a_bearer_token() {
     let server = MockServer::start().await;
     let state = test_state(&server.uri(), None);
-    let err = overview(State(state), viewer_user(), HeaderMap::new())
-        .await
-        .expect_err("missing Authorization header is a 401");
+    let err = overview(
+        State(state),
+        axum::http::Extensions::new(),
+        viewer_user(),
+        HeaderMap::new(),
+    )
+    .await
+    .expect_err("missing Authorization header is a 401");
     assert!(matches!(err, AppError::Unauthorized(_)), "got {err:?}");
 }

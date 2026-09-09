@@ -4,7 +4,8 @@
 
 use std::sync::Arc;
 
-use axum::extract::{Path, State};
+use crate::audit::arguments::AuditedPath;
+use axum::extract::State;
 use k8s_openapi::chrono::Utc;
 use wiremock::matchers::{method, path, query_param};
 use wiremock::{Mock, MockServer, ResponseTemplate};
@@ -43,6 +44,26 @@ fn issue_json(number: i64, body: &str, labels: &[&str], state: &str) -> serde_js
     })
 }
 
+/// A work issue routed to `assignees` under the sole-assignee ownership rule.
+///
+/// The projection attributes an issue to a session only when its ONE assignee is
+/// that session's creator, so a work fixture must state its assignee explicitly —
+/// a plain [`issue_json`] carries none and is therefore deliberately unrouted.
+fn work_issue_json(
+    number: i64,
+    body: &str,
+    labels: &[&str],
+    state: &str,
+    assignees: &[&str],
+) -> serde_json::Value {
+    let mut issue = issue_json(number, body, labels, state);
+    issue["assignees"] = serde_json::json!(assignees
+        .iter()
+        .map(|login| serde_json::json!({ "login": login }))
+        .collect::<Vec<_>>());
+    issue
+}
+
 fn pull_json(
     number: i64,
     author: &str,
@@ -73,6 +94,7 @@ fn work_meta(number: i64, state: &str, labels: &[&str]) -> IssueWithMeta {
             assignees: Vec::new(),
             user_login: "worker".to_string(),
             user_id: 9,
+            created_at: k8s_openapi::chrono::DateTime::UNIX_EPOCH,
         },
         html_url: format!("https://github.com/acme/site/issues/{number}"),
         created_at: "2026-07-01T00:00:00Z".to_string(),
@@ -137,8 +159,8 @@ async fn repo_sessions_assembles_the_full_detail() {
         .and(query_param("labels", "site-build"))
         .and(query_param("state", "all"))
         .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([
-            issue_json(8, "work", &["site-build"], "open"),
-            issue_json(9, "done work", &["site-build"], "closed"),
+            work_issue_json(8, "work", &["site-build"], "open", &["shining"]),
+            work_issue_json(9, "done work", &["site-build"], "closed", &["shining"]),
         ])))
         .mount(&server)
         .await;
@@ -199,12 +221,14 @@ async fn repo_sessions_assembles_the_full_detail() {
             last_pending_at: None,
             config_hash: None,
             work_labels: vec!["site-build".to_string()],
+            identity: Default::default(),
         },
     ])));
 
     let Json(view) = repo_sessions(
         State(state),
-        Path(("acme".to_string(), "site".to_string())),
+        axum::http::Extensions::new(),
+        AuditedPath(("acme".to_string(), "site".to_string())),
         viewer_user(),
         auth_headers(),
     )
@@ -374,14 +398,15 @@ acme/manifests@main:bundles/default.json\n";
         .and(path("/repos/acme/site/issues"))
         .and(query_param("labels", "fkst-dev"))
         .and(query_param("state", "all"))
-        .respond_with(
-            ResponseTemplate::new(200).set_body_json(serde_json::json!([issue_json(
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([
+            work_issue_json(
                 3,
                 "implemented work",
                 &["fkst-dev", "fkst-security"],
-                "closed"
-            )])),
-        )
+                "closed",
+                &["shining"]
+            )
+        ])))
         .mount(&server)
         .await;
     Mock::given(method("GET"))
@@ -389,13 +414,14 @@ acme/manifests@main:bundles/default.json\n";
         .and(query_param("labels", "fkst-security"))
         .and(query_param("state", "all"))
         .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([
-            issue_json(
+            work_issue_json(
                 3,
                 "implemented work",
                 &["fkst-dev", "fkst-security"],
-                "closed"
+                "closed",
+                &["shining"]
             ),
-            issue_json(4, "security work", &["fkst-security"], "open")
+            work_issue_json(4, "security work", &["fkst-security"], "open", &["shining"])
         ])))
         .mount(&server)
         .await;
@@ -419,7 +445,8 @@ acme/manifests@main:bundles/default.json\n";
     state.config.reconcile.github_bot_login = Some("fkst-test[bot]".to_string());
     let Json(view) = repo_sessions(
         State(state),
-        Path(("acme".to_string(), "site".to_string())),
+        axum::http::Extensions::new(),
+        AuditedPath(("acme".to_string(), "site".to_string())),
         viewer_user(),
         auth_headers(),
     )
@@ -483,7 +510,8 @@ async fn repo_sessions_canonicalizes_a_case_variant_path() {
     let state = test_state(&server.uri(), Some(test_app(&server.uri())));
     let Json(view) = repo_sessions(
         State(state),
-        Path(("ACME".to_string(), "Site".to_string())),
+        axum::http::Extensions::new(),
+        AuditedPath(("ACME".to_string(), "Site".to_string())),
         viewer_user(),
         auth_headers(),
     )
@@ -516,7 +544,8 @@ async fn repo_sessions_outside_the_callers_installations_is_not_installed() {
     let state = test_state(&server.uri(), Some(test_app(&server.uri())));
     let Json(view) = repo_sessions(
         State(state),
-        Path(("acme".to_string(), "site".to_string())),
+        axum::http::Extensions::new(),
+        AuditedPath(("acme".to_string(), "site".to_string())),
         viewer_user(),
         auth_headers(),
     )
@@ -572,7 +601,8 @@ async fn global_admin_can_read_a_repo_outside_user_installations() {
     grant_global_admin(&mut state, "shining");
     let Json(view) = repo_sessions(
         State(state),
-        Path(("ACME".to_string(), "Site".to_string())),
+        axum::http::Extensions::new(),
+        AuditedPath(("ACME".to_string(), "Site".to_string())),
         viewer_user(),
         auth_headers(),
     )
@@ -597,7 +627,8 @@ async fn repo_sessions_without_an_app_is_unavailable() {
     let state = test_state(&server.uri(), None);
     let err = repo_sessions(
         State(state),
-        Path(("acme".to_string(), "site".to_string())),
+        axum::http::Extensions::new(),
+        AuditedPath(("acme".to_string(), "site".to_string())),
         viewer_user(),
         auth_headers(),
     )
@@ -618,7 +649,8 @@ async fn repo_sessions_propagates_a_github_failure() {
     let state = test_state(&server.uri(), None);
     let err = repo_sessions(
         State(state),
-        Path(("acme".to_string(), "site".to_string())),
+        axum::http::Extensions::new(),
+        AuditedPath(("acme".to_string(), "site".to_string())),
         viewer_user(),
         auth_headers(),
     )
@@ -633,7 +665,8 @@ async fn repo_sessions_rejects_a_malformed_owner() {
     let state = test_state(&server.uri(), None);
     let err = repo_sessions(
         State(state),
-        Path(("bad owner".to_string(), "site".to_string())),
+        axum::http::Extensions::new(),
+        AuditedPath(("bad owner".to_string(), "site".to_string())),
         viewer_user(),
         auth_headers(),
     )

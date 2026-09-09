@@ -5,9 +5,15 @@ pub mod auth;
 // credential (`repo` + `read:org`) used only to enumerate the caller's repos/orgs.
 // Merged into the auth router; inert unless the broader OAuth pair is configured.
 pub mod auth_broader;
+// The pure signed-state / redirect-URI / token-shaping helpers both OAuth login
+// flows share. Split out so `auth.rs` stays within the source line budget.
+pub mod auth_oauth_state;
 // The canvas dashboard's live REST surface: whole-account overview + per-repo
 // session detail/create/stop, all computed from live GitHub reads (stateless).
 pub mod canvas;
+// The chat concierge's single public surface (`POST /api/v1/chat`): an authenticated
+// SSE stream of one conversation turn. Mounted only when chat is configured.
+pub mod chat;
 pub mod dashboard;
 pub mod environments;
 pub mod github_app_webhook;
@@ -18,4 +24,10 @@ pub mod health;
 pub mod logs;
 pub mod metrics;
 pub mod observe;
+// The authenticated operations surface (`/api/v1/operations/*`, milestone #22):
+// the scoped historical activity trace, row-authorized server-side.
+pub mod operations;
 pub mod repos;
+// The identity-gated session health read surface (milestone "Session health
+// reports"): the report listing + heartbeat verdict, and one full report.
+pub mod session_health;

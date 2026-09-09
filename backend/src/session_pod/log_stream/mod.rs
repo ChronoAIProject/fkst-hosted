@@ -28,6 +28,8 @@
 pub mod bundle;
 pub mod classify;
 pub mod collector;
+pub mod copied;
+pub mod health_publish;
 pub mod instance;
 pub mod redact;
 pub mod runs;
@@ -35,6 +37,7 @@ pub mod seed;
 pub mod sink;
 pub mod tail;
 pub mod tee;
+pub mod tree_writer;
 pub mod uploader;
 
 pub use classify::LogClass;

@@ -24,12 +24,14 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use std::time::Duration;
 
 use axum::extract::State;
-use axum::http::HeaderMap;
+use axum::http::{Extensions, HeaderMap};
 use axum::Json;
 use futures::stream::{self, StreamExt};
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
+use crate::audit::arguments::canvas::SafeCanvasOverview;
+use crate::audit::arguments::record_safe;
 use crate::error::{AppError, ErrorEnvelope};
 use crate::github_app::GithubAppTokens;
 use crate::github_identity::GithubUser;
@@ -686,9 +688,17 @@ async fn assemble_overview(
 )]
 pub(super) async fn overview(
     State(state): State<AppState>,
+    extensions: Extensions,
     user: GithubUser,
     headers: HeaderMap,
 ) -> Result<Json<OverviewResponse>, AppError> {
+    // Only that the optional broader-visibility header was PRESENT. Its value is
+    // a GitHub credential, and the repositories the response enumerates are
+    // response data, never arguments.
+    record_safe(
+        &extensions,
+        &SafeCanvasOverview::new(headers.contains_key(crate::routes::canvas::BROADER_TOKEN_HEADER)),
+    );
     let token = bearer_token(&headers)?;
     let gh = DashboardGithub::new(&state.config.github_api_base_url)?;
     let global_admin = state.config.access.is_global_admin(user.id, &user.login);

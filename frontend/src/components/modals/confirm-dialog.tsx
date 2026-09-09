@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { Spinner } from '@/components/ui/loading';
 import { cn } from '@/lib/utils';
 import type { MutationResult } from '@/lib/api/canvas';
 import { ModalShell } from './modal-shell';
@@ -93,6 +94,7 @@ export function ConfirmDialog({
           type="button"
           onClick={onConfirm}
           disabled={pending}
+          aria-busy={pending}
           className={cn(
             'font-ui font-semibold text-[12.5px] rounded-control px-4 py-2 transition-[filter,box-shadow]',
             pending
@@ -100,6 +102,7 @@ export function ConfirmDialog({
               : 'bg-red text-white shadow-[var(--shadow-1),var(--glow-red)] anim-sheen hover:brightness-110 cursor-pointer'
           )}
         >
+          {pending && <Spinner className="mr-1.5 border-t-white" />}
           {pending ? pendingLabel : confirmLabel}
         </button>
       </div>

@@ -13,7 +13,13 @@ use secrecy::SecretString;
 use crate::k8s::SessionPodSpec;
 use crate::models::RepoRef;
 use crate::reconcile::desired::{KillReason, LivePod};
+use crate::runtime_identity::{
+    RuntimeBackendKind, RuntimeIdentityMetadata, RuntimeIdentityOutcome, RuntimeIncarnation,
+};
 
+use super::inventory::{
+    BoundedInventoryWarning, RuntimeInventoryItem, RuntimeInventorySnapshot, RuntimeLifetimePolicy,
+};
 use super::{
     BackendError, DeliveryOutcome, EnsureOutcome, RuntimeStatus, SessionBackend, SessionHandle,
     ValidationOutcome, ValidationRequest,
@@ -33,6 +39,9 @@ pub(crate) struct FakeSessionBackend {
     pub(crate) delivered: Mutex<Vec<(String, String)>>,
     mark_pending_not_found: bool,
     ensure_error: bool,
+    /// Whether the scripted `ensure_session` failure is a metadata rejection
+    /// rather than a generic transport error.
+    ensure_metadata_rejected: bool,
     /// The fleet `list_fleet` returns.
     fleet: Vec<SessionHandle>,
     /// The pods `observe_repo` returns (regardless of repo).
@@ -41,6 +50,46 @@ pub(crate) struct FakeSessionBackend {
     gone_sessions: HashSet<String>,
     /// Per-session scripted `recent_output` (absent → `None`).
     recent: HashMap<String, Option<String>>,
+    /// Per-session scripted `credential_recovery_needed`. `Some(v)` → `Ok(v)`;
+    /// `None` → the probe FAILS (the "pod is not reachable yet" path). A session
+    /// absent from the map keeps the historical default of `Ok(true)`.
+    creds_probe: HashMap<String, Option<bool>>,
+    /// How many more `deliver_credential` calls must fail TRANSIENTLY per session
+    /// before it starts succeeding. Drives the token-rotation retry tests.
+    deliver_failures: Mutex<HashMap<String, usize>>,
+    /// How many more `list_fleet` calls must fail before the fleet is served.
+    list_failures: Mutex<usize>,
+    /// Every `ensure_runtime_identity` call as `(session_id, identity)`.
+    pub(crate) identity_calls: Mutex<Vec<(String, RuntimeIdentityMetadata)>>,
+    /// The outcome `ensure_runtime_identity` reports (default `Backfilled`).
+    identity_outcome: Option<RuntimeIdentityOutcome>,
+    /// Whether `ensure_runtime_identity` fails instead of reporting an outcome.
+    identity_error: bool,
+    /// Whether `stop_session` reports the runtime as already gone.
+    stop_not_found: bool,
+    /// Whether `stop_session` fails with a non-404 backend error.
+    stop_error: bool,
+    /// The items `list_runtime_inventory` reports.
+    inventory: Vec<RuntimeInventoryItem>,
+    /// The snapshot-level warnings `list_runtime_inventory` reports alongside
+    /// them.
+    inventory_warnings: Vec<BoundedInventoryWarning>,
+    /// A scripted `list_runtime_inventory` failure. `Some(None)` is a generic
+    /// backend error; `Some(Some(limit))` is the oversize refusal.
+    inventory_failure: Option<Option<usize>>,
+    /// How long `list_runtime_inventory` sleeps before answering, so a caller's
+    /// bounded budget can actually be exercised.
+    inventory_delay: Option<std::time::Duration>,
+    /// The instant the snapshot reports. `None` uses the wall clock.
+    inventory_observed_at: Option<k8s_openapi::chrono::DateTime<k8s_openapi::chrono::Utc>>,
+    /// Every policy `list_runtime_inventory` was called with, so a caller can be
+    /// held to "exactly one inventory read per request".
+    pub(crate) inventory_calls: Mutex<Vec<RuntimeLifetimePolicy>>,
+    /// Scripted `status_summary` phase (absent → the default all-`None` status, which
+    /// is what a gone runtime looks like).
+    status_phase: Option<String>,
+    /// When set, `status_summary` fails — drives the fail-open liveness paths.
+    status_error: bool,
 }
 
 impl FakeSessionBackend {
@@ -58,9 +107,39 @@ impl FakeSessionBackend {
         }
     }
 
+    /// A fake whose `ensure_session` fails because the runtime's metadata
+    /// contract rejected a value — a permanent, self-inflicted failure that must
+    /// be reported differently from an unreachable backend.
+    pub(crate) fn with_ensure_metadata_rejected() -> Self {
+        Self {
+            ensure_error: true,
+            ensure_metadata_rejected: true,
+            ..Default::default()
+        }
+    }
+
+    /// Script the phase `status_summary` reports (e.g. `"Running"` for a live pod).
+    pub(crate) fn with_status_phase(mut self, phase: &str) -> Self {
+        self.status_phase = Some(phase.to_string());
+        self
+    }
+
+    /// Make `status_summary` fail, so a caller's fail-open behaviour is exercised.
+    pub(crate) fn with_status_error(mut self) -> Self {
+        self.status_error = true;
+        self
+    }
+
     /// Script the fleet `list_fleet` returns.
     pub(crate) fn with_fleet(mut self, fleet: Vec<SessionHandle>) -> Self {
         self.fleet = fleet;
+        self
+    }
+
+    /// Script one session's `credential_recovery_needed`: `Some(v)` → `Ok(v)`,
+    /// `None` → a probe failure. Sessions left unscripted keep the default `true`.
+    pub(crate) fn with_creds_probe(mut self, session_id: &str, outcome: Option<bool>) -> Self {
+        self.creds_probe.insert(session_id.to_string(), outcome);
         self
     }
 
@@ -82,10 +161,137 @@ impl FakeSessionBackend {
         self.recent.insert(session_id.to_string(), output);
         self
     }
+
+    /// Make this session's next `count` credential deliveries fail transiently
+    /// ([`BackendError::Other`], NOT the 404-equivalent `NotFound`), then succeed.
+    /// A caller retrying correctly therefore converges; one that does not, does not.
+    pub(crate) fn with_deliver_failures(self, session_id: &str, count: usize) -> Self {
+        self.deliver_failures
+            .lock()
+            .unwrap()
+            .insert(session_id.to_string(), count);
+        self
+    }
+
+    /// Make the next `count` `list_fleet` calls fail, so a sweep that cannot even
+    /// enumerate the fleet can be exercised.
+    pub(crate) fn with_list_failures(self, count: usize) -> Self {
+        *self.list_failures.lock().unwrap() = count;
+        self
+    }
+
+    /// A fake whose `stop_session` reports the runtime as already gone (the
+    /// idempotent 404-equivalent the executor swallows).
+    pub(crate) fn with_stop_not_found() -> Self {
+        Self {
+            stop_not_found: true,
+            ..Default::default()
+        }
+    }
+
+    /// A fake whose `stop_session` fails with a non-404 backend error.
+    pub(crate) fn with_stop_error() -> Self {
+        Self {
+            stop_error: true,
+            ..Default::default()
+        }
+    }
+
+    /// Script the outcome `ensure_runtime_identity` reports.
+    pub(crate) fn with_identity_outcome(mut self, outcome: RuntimeIdentityOutcome) -> Self {
+        self.identity_outcome = Some(outcome);
+        self
+    }
+
+    /// Make `ensure_runtime_identity` fail, so the executor's error path runs.
+    pub(crate) fn with_identity_error(mut self) -> Self {
+        self.identity_error = true;
+        self
+    }
+
+    /// Script the fleet `list_runtime_inventory` reports.
+    pub(crate) fn with_inventory(mut self, items: Vec<RuntimeInventoryItem>) -> Self {
+        self.inventory = items;
+        self
+    }
+
+    /// Script the snapshot-level warnings reported alongside the fleet.
+    pub(crate) fn with_inventory_warnings(
+        mut self,
+        warnings: Vec<BoundedInventoryWarning>,
+    ) -> Self {
+        self.inventory_warnings = warnings;
+        self
+    }
+
+    /// Make `list_runtime_inventory` fail with a generic backend error.
+    pub(crate) fn with_inventory_error(mut self) -> Self {
+        self.inventory_failure = Some(None);
+        self
+    }
+
+    /// Make `list_runtime_inventory` refuse as oversize against `limit`.
+    pub(crate) fn with_inventory_too_large(mut self, limit: usize) -> Self {
+        self.inventory_failure = Some(Some(limit));
+        self
+    }
+
+    /// Make `list_runtime_inventory` take `delay` to answer, so a caller's
+    /// bounded budget is exercised rather than assumed.
+    pub(crate) fn with_inventory_delay(mut self, delay: std::time::Duration) -> Self {
+        self.inventory_delay = Some(delay);
+        self
+    }
+
+    /// Pin the instant the snapshot reports, so a caller can be held to
+    /// returning the backend's own `observed_at` verbatim.
+    pub(crate) fn with_inventory_observed_at(
+        mut self,
+        observed_at: k8s_openapi::chrono::DateTime<k8s_openapi::chrono::Utc>,
+    ) -> Self {
+        self.inventory_observed_at = Some(observed_at);
+        self
+    }
+
+    /// [`Self::with_deliver_failures`] applied to a fake that is already running, so a
+    /// test can start a session failing PART-WAY through a loop's lifetime.
+    pub(crate) fn fail_next_deliveries(&self, session_id: &str, count: usize) {
+        self.deliver_failures
+            .lock()
+            .unwrap()
+            .insert(session_id.to_string(), count);
+    }
 }
 
 #[async_trait]
 impl SessionBackend for FakeSessionBackend {
+    fn backend_kind(&self) -> RuntimeBackendKind {
+        RuntimeBackendKind::Kubernetes
+    }
+
+    fn deterministic_runtime_id(&self, session_id: &str) -> Option<String> {
+        Some(format!("fkst-sess-{session_id}"))
+    }
+
+    async fn ensure_runtime_identity(
+        &self,
+        session_id: &str,
+        identity: &RuntimeIdentityMetadata,
+    ) -> Result<RuntimeIdentityOutcome, BackendError> {
+        self.identity_calls
+            .lock()
+            .unwrap()
+            .push((session_id.to_string(), identity.clone()));
+        if self.identity_error {
+            return Err(BackendError::Other(anyhow::anyhow!(
+                "scripted identity failure"
+            )));
+        }
+        Ok(self
+            .identity_outcome
+            .unwrap_or(RuntimeIdentityOutcome::Backfilled))
+    }
+
     async fn check_reachable(&self) -> Result<String, BackendError> {
         Ok("fake".to_string())
     }
@@ -97,21 +303,34 @@ impl SessionBackend for FakeSessionBackend {
     ) -> Result<EnsureOutcome, BackendError> {
         // Record the session id + the assembled creds KEYS (never their values).
         let keys: Vec<String> = creds.keys().cloned().collect();
-        self.ensured
-            .lock()
-            .unwrap()
-            .push((spec.session_id.clone(), keys));
+        let ordinal = {
+            let mut ensured = self.ensured.lock().unwrap();
+            let ordinal = ensured.len();
+            ensured.push((spec.session_id.clone(), keys));
+            ordinal
+        };
         if self.ensure_error {
-            Err(BackendError::Other(anyhow::anyhow!(
-                "scripted ensure failure"
-            )))
-        } else {
-            Ok(EnsureOutcome::Created)
+            return Err(match self.ensure_metadata_rejected {
+                true => BackendError::InvalidMetadata,
+                false => BackendError::Other(anyhow::anyhow!("scripted ensure failure")),
+            });
         }
+        // Each create reports a distinct incarnation, exactly as a real backend
+        // does — a fake that reused one handle would hide the very collision the
+        // lifecycle event id exists to prevent.
+        Ok(EnsureOutcome::Created(RuntimeIncarnation::from_handle(
+            format!("fake-{}-{ordinal}", spec.session_id),
+        )))
     }
 
-    async fn credential_recovery_needed(&self, _session_id: &str) -> Result<bool, BackendError> {
-        Ok(true)
+    async fn credential_recovery_needed(&self, session_id: &str) -> Result<bool, BackendError> {
+        match self.creds_probe.get(session_id) {
+            Some(Some(needed)) => Ok(*needed),
+            Some(None) => Err(BackendError::Other(anyhow::anyhow!(
+                "scripted credential probe failure"
+            ))),
+            None => Ok(true),
+        }
     }
 
     async fn observe_repo(&self, _repo: &RepoRef) -> Result<Vec<LivePod>, BackendError> {
@@ -135,6 +354,14 @@ impl SessionBackend for FakeSessionBackend {
             .lock()
             .unwrap()
             .push((session_id.to_string(), reason));
+        if self.stop_not_found {
+            return Err(BackendError::NotFound);
+        }
+        if self.stop_error {
+            return Err(BackendError::Other(anyhow::anyhow!(
+                "scripted stop failure"
+            )));
+        }
         Ok(())
     }
 
@@ -147,7 +374,43 @@ impl SessionBackend for FakeSessionBackend {
     }
 
     async fn list_fleet(&self) -> Result<Vec<SessionHandle>, BackendError> {
+        {
+            let mut remaining = self.list_failures.lock().unwrap();
+            if *remaining > 0 {
+                *remaining -= 1;
+                return Err(BackendError::Other(anyhow::anyhow!(
+                    "scripted list_fleet failure"
+                )));
+            }
+        }
         Ok(self.fleet.clone())
+    }
+
+    async fn list_runtime_inventory(
+        &self,
+        policy: &RuntimeLifetimePolicy,
+    ) -> Result<RuntimeInventorySnapshot, BackendError> {
+        self.inventory_calls.lock().unwrap().push(*policy);
+        if let Some(delay) = self.inventory_delay {
+            tokio::time::sleep(delay).await;
+        }
+        match self.inventory_failure {
+            Some(Some(limit)) => return Err(BackendError::InventoryTooLarge { limit }),
+            Some(None) => {
+                return Err(BackendError::Other(anyhow::anyhow!(
+                    "scripted inventory failure"
+                )))
+            }
+            None => {}
+        }
+        Ok(RuntimeInventorySnapshot {
+            observed_at: self
+                .inventory_observed_at
+                .unwrap_or_else(k8s_openapi::chrono::Utc::now),
+            backend: RuntimeBackendKind::Kubernetes,
+            items: self.inventory.clone(),
+            warnings: self.inventory_warnings.clone(),
+        })
     }
 
     async fn deliver_credential(
@@ -160,6 +423,17 @@ impl SessionBackend for FakeSessionBackend {
             .lock()
             .unwrap()
             .push((session_id.to_string(), file.to_string()));
+        {
+            let mut failures = self.deliver_failures.lock().unwrap();
+            if let Some(remaining) = failures.get_mut(session_id) {
+                if *remaining > 0 {
+                    *remaining -= 1;
+                    return Err(BackendError::Other(anyhow::anyhow!(
+                        "scripted delivery failure"
+                    )));
+                }
+            }
+        }
         if self.gone_sessions.contains(session_id) {
             Ok(DeliveryOutcome::SessionGone)
         } else {
@@ -168,7 +442,15 @@ impl SessionBackend for FakeSessionBackend {
     }
 
     async fn status_summary(&self, _session_id: &str) -> Result<RuntimeStatus, BackendError> {
-        Ok(RuntimeStatus::default())
+        if self.status_error {
+            return Err(BackendError::Other(anyhow::anyhow!(
+                "scripted status failure"
+            )));
+        }
+        Ok(RuntimeStatus {
+            phase: self.status_phase.clone(),
+            ..RuntimeStatus::default()
+        })
     }
 
     async fn recent_output(&self, session_id: &str) -> Option<String> {

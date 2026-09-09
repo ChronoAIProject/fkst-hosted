@@ -19,8 +19,15 @@ use axum::body::Bytes;
 use crate::session_spec::creds::CredsLayout;
 use crate::storage::{ChronoStorageClient, ChronoStorageConfig, StorageError};
 
-/// The content type every log bundle is uploaded with.
+/// The content type a log bundle is uploaded with.
 pub const BUNDLE_CONTENT_TYPE: &str = "application/gzip";
+
+/// The content type an index object (the run index, the health index) is uploaded
+/// with.
+pub const JSON_CONTENT_TYPE: &str = "application/json";
+
+/// The content type a health report object is uploaded with.
+pub const MARKDOWN_CONTENT_TYPE: &str = "text/markdown; charset=utf-8";
 
 /// A sink failure. Deliberately narrow: it carries at most the leak-free
 /// [`crate::storage::StorageError`] rendering, so logging or rendering it can never
@@ -38,10 +45,15 @@ pub enum SinkError {
 /// depends only on this trait, so the concrete destination is interchangeable.
 #[async_trait]
 pub trait LogSink: Send + Sync {
-    /// Upload the gzip'd bundle `gz` under object `key`. Best-effort at the call
-    /// site (the collector logs + swallows an `Err`); an implementation must never
-    /// leak a credential into the returned error.
-    async fn put(&self, key: &str, gz: Bytes) -> Result<(), SinkError>;
+    /// Upload `body` under object `key`, tagged with `content_type`. Best-effort at
+    /// the call site (the collector logs + swallows an `Err`); an implementation must
+    /// never leak a credential into the returned error.
+    ///
+    /// The content type is a parameter rather than a constant because this sink now
+    /// carries three different kinds of object — a gzip bundle, a JSON index, and a
+    /// markdown report — and storing all three as `application/gzip` would make the
+    /// stored metadata simply wrong.
+    async fn put(&self, key: &str, body: Bytes, content_type: &str) -> Result<(), SinkError>;
 
     /// Read the object at `key`, or `Ok(None)` when it does not exist (a `404`).
     /// Used for the run-index read-modify-write: the collector `get`s the current
@@ -92,11 +104,11 @@ impl ChronoStorageSink {
 
 #[async_trait]
 impl LogSink for ChronoStorageSink {
-    async fn put(&self, key: &str, gz: Bytes) -> Result<(), SinkError> {
+    async fn put(&self, key: &str, body: Bytes, content_type: &str) -> Result<(), SinkError> {
         // Discard the returned object URL; map any failure through the leak-free
         // StorageError Display so no token/secret/signed-URL can ride the error.
         self.client
-            .upload(key, gz, BUNDLE_CONTENT_TYPE)
+            .upload(key, body, content_type)
             .await
             .map(|_url| ())
             .map_err(|e| SinkError::Upload(e.to_string()))
@@ -150,12 +162,20 @@ pub(crate) struct FakeSink {
     /// followed by a successful shutdown recovery can be exercised. `None` (default)
     /// = permanent (every matching op fails). Shared across clones + interior-mutable.
     pub fail_key_remaining: std::sync::Arc<std::sync::Mutex<Option<usize>>>,
+    /// The content type each key was last `put` with, so a test can assert an object
+    /// is stored as what it actually is.
+    pub content_types: std::sync::Arc<std::sync::Mutex<std::collections::HashMap<String, String>>>,
 }
 
 #[cfg(test)]
 impl FakeSink {
     pub fn calls(&self) -> Vec<(String, Bytes)> {
         self.calls.lock().expect("lock").clone()
+    }
+
+    /// The content type `key` was last stored with.
+    pub fn content_type(&self, key: &str) -> Option<String> {
+        self.content_types.lock().expect("lock").get(key).cloned()
     }
 
     /// The current stored object for `key` (the last successful `put`), or `None`.
@@ -193,17 +213,24 @@ impl FakeSink {
 #[cfg(test)]
 #[async_trait]
 impl LogSink for FakeSink {
-    async fn put(&self, key: &str, gz: Bytes) -> Result<(), SinkError> {
+    async fn put(&self, key: &str, body: Bytes, content_type: &str) -> Result<(), SinkError> {
         // Record the attempt (order-sensitive) BEFORE the fail check, so a
         // programmed-failure put is still observable in `calls`.
         self.calls
             .lock()
             .expect("lock")
-            .push((key.to_string(), gz.clone()));
+            .push((key.to_string(), body.clone()));
+        self.content_types
+            .lock()
+            .expect("lock")
+            .insert(key.to_string(), content_type.to_string());
         if self.should_fail(key) {
             return Err(SinkError::Upload("status 500".to_string()));
         }
-        self.store.lock().expect("lock").insert(key.to_string(), gz);
+        self.store
+            .lock()
+            .expect("lock")
+            .insert(key.to_string(), body);
         Ok(())
     }
 

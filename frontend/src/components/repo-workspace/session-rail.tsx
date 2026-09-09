@@ -7,7 +7,7 @@ import type { RepoSessionsResponse, SessionDetail } from '@/lib/api/types';
 import { sessionWorkLabels } from '@/lib/api/derive';
 import { ConfirmDialog } from '@/components/modals/confirm-dialog';
 import { CreateTriggerModal } from '@/components/modals/create-trigger-modal';
-import { Spinner } from '@/components/session-detail/parts';
+import { LoadingState, Spinner } from '@/components/ui/loading';
 import { StaggerItem } from '@/components/ui/motion';
 import { SessionCard } from '@/components/sidebar/session-card';
 import { sessionKey } from './repo-workspace';
@@ -59,7 +59,8 @@ export function SessionRail({
   /** App-wide cross-account views expose inspection and refresh only. */
   readOnly?: boolean;
 }) {
-  const c = useContent().dashboard;
+  const site = useContent();
+  const c = site.dashboard;
   const cc = c.canvas;
   const { lang } = useLang();
   const { apiFetch } = useAuth();
@@ -170,6 +171,9 @@ export function SessionRail({
       {data != null && lastUpdated != null && (
         <p
           title={cc.pollNote}
+          // The ring is aria-hidden, so without this the refresh is conveyed to
+          // sighted users only — and to nobody at all under reduced motion.
+          aria-busy={refreshing}
           className="flex items-center gap-1.5 font-mono text-[10.5px] text-ghost"
         >
           {cc.sessionsFreshness.replace('{time}', formatRelative(lastUpdated, lang))}
@@ -198,6 +202,7 @@ export function SessionRail({
             type="button"
             onClick={requestRefresh}
             disabled={refreshing}
+            aria-busy={refreshing}
             className="self-start inline-flex items-center gap-1.5 font-ui font-semibold text-[12px] border border-line rounded-control px-3 py-1.5 text-fg transition-[color,border-color,box-shadow] hover:border-line-2 hover:shadow-glow-amber disabled:opacity-60 disabled:cursor-default cursor-pointer"
           >
             {refreshing && <Spinner className="w-2.5 h-2.5" />}
@@ -240,7 +245,12 @@ export function SessionRail({
             );
           })}
         </div>
-      ) : null}
+      ) : (
+        // First load, nothing to show yet. This was `null` — a blank rail that
+        // looked identical to a repository with no sessions at all. The read is
+        // a live GitHub fan-out, so it says so.
+        <LoadingState label={cc.sessionsLoading} detail={site.loading.github} />
+      )}
 
       {showCreate && !readOnly && (
         <CreateTriggerModal

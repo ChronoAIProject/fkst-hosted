@@ -11,11 +11,15 @@
 
 import { expect, type Page } from '@playwright/test';
 
-/** Absolute screenshot directory handed down by the orchestrator (the scratchpad
- *  for this session). Kept identical to dashboard.spec's original constant so
- *  every spec drops its shots in one place. */
-export const SHOTS =
-  '/private/tmp/claude-501/-Users-chronoai-code-work-fkst-hosted/1faa5963-9e29-40ef-a0bd-52444366bc74/scratchpad/ui-shots';
+/** Where every spec drops its screenshots.
+ *
+ *  Repository-relative (under the already-gitignored `test-results/`) rather
+ *  than an absolute path, so the shots a review asks for land somewhere the
+ *  reviewer can actually open — a machine-specific absolute path puts them
+ *  outside the checkout, where nobody but the process that wrote them can find
+ *  them. `FKST_E2E_SHOTS` overrides it for an orchestrator that wants them
+ *  elsewhere. */
+export const SHOTS = process.env.FKST_E2E_SHOTS ?? 'test-results/ui-shots';
 
 /** Wait out every FINITE entrance animation (drawer slide, overlay fade, row
  *  stagger, route crossfade) so a capture or a post-settle assertion sees the

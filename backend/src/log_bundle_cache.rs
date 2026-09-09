@@ -12,7 +12,7 @@
 //! The cache holds the raw (still-gzip'd) bundle bytes keyed by `session_id`, so a
 //! burst of manifest/file requests for one session hits chrono-storage at most once
 //! per TTL window. A cheap `Arc`-backed handle, exactly like
-//! [`crate::log_access::LogAccessRegistry`]: cloning it shares the one backing store,
+//! [`crate::session_access::SessionAccessRegistry`]: cloning it shares the one backing store,
 //! and it lives on [`crate::state::AppState`] (NOT a module-level global) so each test
 //! gets its own isolated cache and nothing leaks across tests.
 //!

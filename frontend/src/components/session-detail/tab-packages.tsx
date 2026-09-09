@@ -3,6 +3,7 @@ import { CopyButton } from '@/components/ui/copy-button';
 import { StaggerItem } from '@/components/ui/motion';
 import type { SessionDetail } from '@/lib/api/types';
 import { packageRole } from '@/lib/api/derive';
+import { LoadingState } from '@/components/ui/loading';
 import { Note, SectionLabel } from './parts';
 import { ConfigPanel } from './config-panel';
 import { ObserveView } from './observe-view';
@@ -10,7 +11,7 @@ import type { ObserveState } from './observe-state';
 
 /** Packages tab: the frozen session configuration (ConfigPanel), then each
  *  declared package decoded to a friendly role + short handle with the full
- *  `owner/repo@ref:path` kept verbatim in a copyable `<code>`. When the Status
+ *  `owner/repo@ref:path` kept verbatim in a copyable `<code>`. When the Engine
  *  tab has already fetched the engine snapshot, the same per-queue activity is
  *  surfaced here too (no second fetch). */
 export function TabPackages({
@@ -75,6 +76,17 @@ export function TabPackages({
           </ul>
         )}
       </section>
+
+      {/* The observe snapshot is SHARED with the Engine tab, so it can already be
+          in flight when this tab is opened. Rendering nothing at all left the
+          section silently missing — indistinguishable from a session that has no
+          queue activity. Same copy as the Engine tab: one wait, one explanation. */}
+      {observe.status === 'loading' && (
+        <section className="flex flex-col gap-2">
+          <SectionLabel>{t.queueActivity}</SectionLabel>
+          <LoadingState label={t.liveEngineLoading} detail={t.liveEngineSlow} />
+        </section>
+      )}
 
       {observe.status === 'loaded' && (
         <section className="flex flex-col gap-2">

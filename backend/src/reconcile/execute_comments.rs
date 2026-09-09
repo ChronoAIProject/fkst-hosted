@@ -33,6 +33,31 @@ pub(super) fn invalid_refs_comment(failures: &[(String, String)]) -> String {
     body
 }
 
+/// Feedback for a package tree that resolves fine but ships no session-isolation
+/// rule. Deliberately NOT `invalid_refs_comment`: that one tells the author their
+/// ref is unreachable and to check the repo is public with an `fkst.toml`, and both
+/// are false here — the ref resolved, it just cannot honour issue routing. Sending
+/// the author after a reachability problem that does not exist wastes their time.
+pub(super) fn missing_isolation_comment(failures: &[(String, String)]) -> String {
+    let mut body = String::from(
+        "⚠️ fkst couldn't start this session: its package tree does not implement \
+         session isolation.\n\n\
+         A session that cannot route work by assignee would act on issues belonging to \
+         OTHER people's sessions — redriving their in-progress work, and even \
+         implementing and merging their issues onto this session's branch. So the \
+         session is refused rather than started.\n\n",
+    );
+    for (tree, reason) in failures {
+        body.push_str(&format!("- `{tree}` — {reason}\n"));
+    }
+    body.push_str(
+        "\nPoint the affected `### Packages` / `### Manifest` refs at a package tree \
+         that carries the rule, then re-trigger. This deployment's own catalog \
+         (`ChronoAIProject/fkst-hosted@packages`) carries it.",
+    );
+    body
+}
+
 pub(super) fn config_rejected_comment() -> String {
     "⚠️ **Config changes are not allowed after a session trigger exists.** Your edit \
      has been ignored and will not be accepted. To change packages, environment, the \
@@ -66,7 +91,7 @@ pub(super) fn trigger_unauthorized_comment(detail: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::flag_invalid_comment;
+    use super::{flag_invalid_comment, missing_isolation_comment};
 
     #[test]
     fn invalid_trigger_guidance_describes_the_current_contract() {
@@ -77,6 +102,40 @@ mod tests {
              lines or a `### Manifest` reference); `### Work Label`, `### Source Branch`, `### Target \
              Branch`, and `### Environment` are optional. Its effective work labels must not overlap \
              another of **your** active sessions on this repo. Fix the issue and the reconciler will retry."
+        );
+    }
+
+    /// The refusal must describe the ACTUAL failure. Reusing `invalid_refs_comment`
+    /// told the author their ref was unreachable and to check the repo is public with
+    /// an `fkst.toml` -- both false here, and both send them chasing a problem that
+    /// does not exist.
+    #[test]
+    fn missing_isolation_comment_does_not_claim_unreachability() {
+        let body = missing_isolation_comment(&[(
+            "o/old@legacy".to_string(),
+            "ships claims.lua WITHOUT issue_owned_by_session".to_string(),
+        )]);
+        assert!(
+            body.contains("does not implement session isolation"),
+            "{body}"
+        );
+        assert!(body.contains("o/old@legacy"), "{body}");
+        assert!(body.contains("issue_owned_by_session"), "{body}");
+        assert!(!body.contains("not reachable"), "{body}");
+        assert!(!body.contains("PUBLIC repo"), "{body}");
+    }
+
+    #[test]
+    fn missing_isolation_comment_names_every_offending_tree_and_the_remedy() {
+        let body = missing_isolation_comment(&[
+            ("o/a@x".to_string(), "reason a".to_string()),
+            ("o/b@y".to_string(), "reason b".to_string()),
+        ]);
+        assert!(body.contains("o/a@x"), "{body}");
+        assert!(body.contains("o/b@y"), "{body}");
+        assert!(
+            body.contains("ChronoAIProject/fkst-hosted@packages"),
+            "{body}"
         );
     }
 }

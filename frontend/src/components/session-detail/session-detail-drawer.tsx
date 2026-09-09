@@ -5,7 +5,7 @@ import { SessionDetailView } from './session-detail-view';
 
 /** The per-session detail drawer: a thin overlay wrapper around the reusable
  *  {@link SessionDetailView}. DrawerShell owns the slide-in chrome, scrim, focus
- *  trap and Escape-to-close; the view owns the sticky header + four-tab body.
+ *  trap and Escape-to-close; the view owns the sticky header + six-tab body.
  *
  *  The `titleId` generated here is handed to BOTH DrawerShell (as the dialog's
  *  `aria-labelledby` target) and the view (as its heading id), so the dialog is

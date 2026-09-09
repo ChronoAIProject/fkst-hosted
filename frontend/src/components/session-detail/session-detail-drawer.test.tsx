@@ -31,7 +31,7 @@ const session = (over: Partial<SessionDetail> = {}): SessionDetail => ({
   environment: null,
   source_branch: null,
   target_branch: 'fkst-hosted-default',
-  packages: ['ChronoAIProject/fkst-packages@fkst-hosted:codex/base'],
+  packages: ['ChronoAIProject/fkst-hosted@packages:codex/base'],
   invalid_reason: null,
   status_labels: ['fkst-substrate-active'],
   trigger,
@@ -63,11 +63,42 @@ describe('SessionDetailDrawer', () => {
 
     const dialog = await screen.findByRole('dialog');
     expect(dialog).toBeInTheDocument();
-    // Header decoded pill + the four tabs.
+    // Header decoded pill + the seven tabs.
     expect(screen.getByRole('tab', { name: 'Status' })).toBeInTheDocument();
     expect(screen.getByRole('tab', { name: 'Packages' })).toBeInTheDocument();
     expect(screen.getByRole('tab', { name: 'Logs' })).toBeInTheDocument();
+    // Health sits between Logs and Outcomes: the second thing a reader wants after
+    // "is it running", and before the finished-work view.
+    expect(screen.getByRole('tab', { name: 'Health' })).toBeInTheDocument();
+    // Workflows: this session's schedules, which run in this session's pod.
+    expect(screen.getByRole('tab', { name: 'Workflows' })).toBeInTheDocument();
+    // Engine sits between Workflows and Outcomes: live runtime observation, split
+    // out of Status so the lifecycle view costs no pod exec.
+    expect(screen.getByRole('tab', { name: 'Engine' })).toBeInTheDocument();
     expect(screen.getByRole('tab', { name: 'Outcomes' })).toBeInTheDocument();
+  });
+
+  /// Every tab scrolls inside the panel, not by moving the page or the header.
+  /// Regression for a reported fault: reading one Health report scrolled the whole
+  /// tab and slid the navigation rail out of view.
+  it('gives every tab its own scroll region inside the panel', async () => {
+    const user = userEvent.setup();
+    vi.stubGlobal('fetch', vi.fn(async () => jsonResponse([])));
+    render(
+      <AuthProvider>
+        <SessionDetailDrawer owner="acme" name="site" session={session()} onClose={() => {}} />
+      </AuthProvider>
+    );
+    const panel = await screen.findByRole('tabpanel');
+    // The panel is the fixed box; it must not scroll itself.
+    expect(panel.className).toContain('min-h-0');
+    expect(panel.className).not.toContain('overflow-y-auto');
+
+    for (const name of ['Status', 'Packages', 'Logs', 'Health', 'Workflows', 'Engine', 'Outcomes']) {
+      await user.click(screen.getByRole('tab', { name }));
+      const scroller = (await screen.findByRole('tabpanel')).querySelector('.overflow-y-auto');
+      expect(scroller, `${name} tab must own a scroll region`).not.toBeNull();
+    }
   });
 
   it('renders the effective creator and authored/resolved branch facts', () => {
@@ -102,11 +133,11 @@ describe('SessionDetailDrawer', () => {
     await user.click(screen.getByRole('tab', { name: 'Packages' }));
     expect(screen.getByText('Base')).toBeInTheDocument();
     expect(
-      screen.getByText('ChronoAIProject/fkst-packages@fkst-hosted:codex/base')
+      screen.getByText('ChronoAIProject/fkst-hosted@packages:codex/base')
     ).toBeInTheDocument();
   });
 
-  it('loads observe on demand and shares it into the Packages tab', async () => {
+  it('loads observe when the Engine tab opens and shares it into the Packages tab', async () => {
     const user = userEvent.setup();
     vi.stubGlobal(
       'fetch',
@@ -118,8 +149,10 @@ describe('SessionDetailDrawer', () => {
       </AuthProvider>
     );
 
-    await user.click(screen.getByRole('button', { name: 'Live engine details' }));
-    // The shared snapshot renders on Status…
+    // Opening the tab IS the request — there is no button to press, and Status
+    // never triggers it.
+    await user.click(screen.getByRole('tab', { name: 'Engine' }));
+    // The shared snapshot renders on Engine…
     expect(await screen.findByText('events')).toBeInTheDocument();
     // …and is reused on Packages without a second fetch.
     await user.click(screen.getByRole('tab', { name: 'Packages' }));
@@ -174,6 +207,9 @@ describe('SessionDetailDrawer', () => {
     expect(statusTab).toHaveAttribute('aria-selected', 'true');
     expect(statusTab).toHaveFocus();
 
+    // Every tab added since has been inserted in the INTERIOR of the strip, so
+    // both ends of the keyboard contract are where they have always been:
+    // ArrowRight from Status lands on Packages, and {End} on Outcomes.
     await user.keyboard('{End}');
     expect(screen.getByRole('tab', { name: 'Outcomes' })).toHaveAttribute('aria-selected', 'true');
 

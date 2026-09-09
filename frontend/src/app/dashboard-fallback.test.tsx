@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
-import { DashboardFallback } from './index';
+import { DashboardFallback, OperationsFallback } from './index';
 import { NotFound } from '../pages/not-found';
 import { ErrorFallbackView } from '../components/ui/error-boundary';
 
@@ -13,6 +13,19 @@ describe('DashboardFallback', () => {
     expect(status).toBeInTheDocument();
     // The shimmer vocabulary from index.css carries the loading animation.
     expect(status.querySelectorAll('.anim-shimmer').length).toBeGreaterThan(0);
+  });
+});
+
+describe('OperationsFallback', () => {
+  it('renders a labeled, page-shaped skeleton so the fixed-height route never jumps', () => {
+    render(<OperationsFallback />);
+
+    const status = screen.getByRole('status', { name: 'Loading operations' });
+    expect(status).toBeInTheDocument();
+    expect(status.querySelectorAll('.anim-shimmer').length).toBeGreaterThan(0);
+    // The route is fixed-height, so the skeleton must fill it rather than
+    // collapsing and letting the layout resize when the real page mounts.
+    expect(status.className).toContain('h-full');
   });
 });
 

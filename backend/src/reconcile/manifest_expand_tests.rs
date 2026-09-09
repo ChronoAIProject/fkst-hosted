@@ -3,8 +3,8 @@
 
 use secrecy::SecretString;
 use serde_json::json;
-use wiremock::matchers::{method, path, query_param};
-use wiremock::{Mock, MockServer, ResponseTemplate};
+use wiremock::matchers::{header, method, path, query_param};
+use wiremock::{Mock, MockServer, Request, ResponseTemplate};
 
 use super::{expand_manifest, ManifestError};
 use crate::goals::trigger_parse::PackageRef;
@@ -31,8 +31,8 @@ fn tok() -> SecretString {
 fn manifest_ref() -> PackageRef {
     pkg(
         "ChronoAIProject",
-        "fkst-packages",
         "fkst-hosted",
+        "packages",
         "manifests/default-workflows.json",
     )
 }
@@ -59,7 +59,7 @@ const PACKAGE_NAMES: [&str; 14] = [
 fn fourteen_ref_strings() -> Vec<String> {
     PACKAGE_NAMES
         .iter()
-        .map(|name| format!("ChronoAIProject/fkst-packages@fkst-hosted:packages/{name}"))
+        .map(|name| format!("ChronoAIProject/fkst-hosted@packages:packages/{name}"))
         .collect()
 }
 
@@ -67,8 +67,8 @@ fn fourteen_ref_strings() -> Vec<String> {
 fn expected_ref(name: &str) -> PackageRef {
     pkg(
         "ChronoAIProject",
-        "fkst-packages",
         "fkst-hosted",
+        "packages",
         &format!("packages/{name}"),
     )
 }
@@ -112,7 +112,16 @@ async fn mount_status(server: &MockServer, status: u16) {
         .await;
 }
 
+/// The package list only — every pre-existing test asserts on packages, so this
+/// keeps them expressing exactly what they did before `packageEnv` existed.
 async fn expand(server: &MockServer) -> Result<Vec<PackageRef>, ManifestError> {
+    expand_full(server).await.map(|expanded| expanded.packages)
+}
+
+/// The whole expansion, for the `packageEnv` tests.
+async fn expand_full(
+    server: &MockServer,
+) -> Result<crate::reconcile::manifest_expand::ExpandedManifest, ManifestError> {
     expand_manifest(
         &reqwest::Client::new(),
         &server.uri(),
@@ -134,10 +143,96 @@ async fn valid_manifest_expands_all_fourteen_refs() {
     // Spot-check the parse landed on the manifest's owner/repo/ref, not the file path.
     assert_eq!(refs.len(), 14);
     assert_eq!(refs[0].owner, "ChronoAIProject");
-    assert_eq!(refs[0].repo, "fkst-packages");
-    assert_eq!(refs[0].git_ref, "fkst-hosted");
+    assert_eq!(refs[0].repo, "fkst-hosted");
+    assert_eq!(refs[0].git_ref, "packages");
     assert_eq!(refs[0].path, "packages/workflow-dev");
     assert_eq!(refs[13].path, "packages/log-streamer");
+}
+
+async fn mount_authenticated_status_then_anonymous_body(
+    server: &MockServer,
+    status: u16,
+    body: String,
+) {
+    let m = manifest_ref();
+    let manifest_path = format!("/repos/{}/{}/contents/{}", m.owner, m.repo, m.path);
+
+    Mock::given(method("GET"))
+        .and(path(manifest_path.as_str()))
+        .and(query_param("ref", m.git_ref.as_str()))
+        .and(header(
+            "authorization",
+            format!("Bearer {SECRET_TOKEN}").as_str(),
+        ))
+        .respond_with(ResponseTemplate::new(status))
+        .expect(1)
+        .mount(server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path(manifest_path))
+        .and(query_param("ref", m.git_ref.as_str()))
+        .and(|request: &Request| !request.headers.contains_key("authorization"))
+        .respond_with(ResponseTemplate::new(200).set_body_string(body))
+        .expect(1)
+        .mount(server)
+        .await;
+}
+
+#[tokio::test]
+async fn authenticated_fallback_statuses_retry_public_manifest_read() {
+    for status in [401, 403, 404] {
+        let server = MockServer::start().await;
+        mount_authenticated_status_then_anonymous_body(
+            &server,
+            status,
+            manifest_body(
+                1,
+                &["ChronoAIProject/fkst-hosted@packages:packages/workflow-dev".to_string()],
+            ),
+        )
+        .await;
+
+        let refs = expand(&server)
+            .await
+            .unwrap_or_else(|err| panic!("auth {status} should fall back anonymously: {err}"));
+
+        assert_eq!(refs, vec![expected_ref("workflow-dev")]);
+    }
+}
+
+#[tokio::test]
+async fn authenticated_404_followed_by_anonymous_404_is_not_found() {
+    let server = MockServer::start().await;
+    let m = manifest_ref();
+    let manifest_path = format!("/repos/{}/{}/contents/{}", m.owner, m.repo, m.path);
+
+    Mock::given(method("GET"))
+        .and(path(manifest_path.as_str()))
+        .and(query_param("ref", m.git_ref.as_str()))
+        .and(header(
+            "authorization",
+            format!("Bearer {SECRET_TOKEN}").as_str(),
+        ))
+        .respond_with(ResponseTemplate::new(404))
+        .expect(1)
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path(manifest_path))
+        .and(query_param("ref", m.git_ref.as_str()))
+        .and(|request: &Request| !request.headers.contains_key("authorization"))
+        .respond_with(ResponseTemplate::new(404))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let err = expand(&server)
+        .await
+        .expect_err("anonymous 404 remains a genuine not-found");
+    assert!(
+        matches!(err, ManifestError::NotFound),
+        "expected NotFound, got {err:?}"
+    );
 }
 
 #[tokio::test]
@@ -171,7 +266,7 @@ async fn over_the_cap_is_rejected() {
     let server = MockServer::start().await;
     // 65 valid refs — one past the 64 ceiling.
     let packages: Vec<String> = (0..65)
-        .map(|i| format!("ChronoAIProject/fkst-packages@fkst-hosted:packages/p{i}"))
+        .map(|i| format!("ChronoAIProject/fkst-hosted@packages:packages/p{i}"))
         .collect();
     mount_body(&server, manifest_body(1, &packages)).await;
 
@@ -187,9 +282,9 @@ async fn malformed_ref_names_its_index() {
     let server = MockServer::start().await;
     // A bad entry (no `@`) sits at index 1, between two valid refs.
     let packages = vec![
-        "ChronoAIProject/fkst-packages@fkst-hosted:packages/workflow-dev".to_string(),
+        "ChronoAIProject/fkst-hosted@packages:packages/workflow-dev".to_string(),
         "not-a-valid-package-reference".to_string(),
-        "ChronoAIProject/fkst-packages@fkst-hosted:packages/workflow-writer".to_string(),
+        "ChronoAIProject/fkst-hosted@packages:packages/workflow-writer".to_string(),
     ];
     mount_body(&server, manifest_body(1, &packages)).await;
 
@@ -250,7 +345,7 @@ async fn unknown_extra_field_still_parses() {
         "schemaVersion": 1,
         "name": "default-workflows",
         "description": "…",
-        "packages": ["ChronoAIProject/fkst-packages@fkst-hosted:packages/workflow-dev"],
+        "packages": ["ChronoAIProject/fkst-hosted@packages:packages/workflow-dev"],
         "futureField": { "nested": true },
     })
     .to_string();
@@ -281,5 +376,86 @@ async fn errors_never_leak_the_token_or_url() {
     for rendered in [format!("{nf_err}"), format!("{nf_err:?}")] {
         assert!(!rendered.contains(SECRET_TOKEN), "leaked token: {rendered}");
         assert!(!rendered.contains(&nf_uri), "leaked url: {rendered}");
+    }
+}
+
+/// A manifest may supply per-package configuration for every session that uses it,
+/// so a fleet-wide package setting is written once instead of in every trigger.
+#[tokio::test]
+async fn package_env_is_expanded() {
+    let server = MockServer::start().await;
+    mount_body(
+        &server,
+        serde_json::json!({
+            "schemaVersion": 1,
+            "packages": ["acme/tools@main:pkg/a"],
+            "packageEnv": {
+                "github-devloop": { "FKST_DEVLOOP_AUTO_REFINE_MAX": "2" }
+            }
+        })
+        .to_string(),
+    )
+    .await;
+
+    let expanded = expand_full(&server).await.expect("valid manifest");
+    assert_eq!(
+        expanded.package_env["github-devloop"]["FKST_DEVLOOP_AUTO_REFINE_MAX"],
+        "2"
+    );
+}
+
+/// Every manifest written before this key existed must expand byte-identically.
+#[tokio::test]
+async fn a_manifest_without_package_env_expands_to_an_empty_map() {
+    let server = MockServer::start().await;
+    mount_body(
+        &server,
+        manifest_body(1, &["acme/tools@main:pkg/a".to_string()]),
+    )
+    .await;
+
+    let expanded = expand_full(&server).await.expect("valid manifest");
+    assert!(expanded.package_env.is_empty());
+}
+
+/// The manifest and the trigger share ONE validator, so a manifest can never ship
+/// configuration a trigger author would be refused. Each case here is rejected by
+/// the same rule that rejects it in `### Package Env`.
+#[tokio::test]
+async fn a_malformed_package_env_fails_closed() {
+    for (label, block) in [
+        (
+            "bad key",
+            serde_json::json!({ "pkg": { "lowercase": "x" } }),
+        ),
+        (
+            "platform-owned key",
+            serde_json::json!({ "pkg": { "FKST_GITHUB_BOT_LOGIN": "x" } }),
+        ),
+        (
+            "cross-block conflict",
+            serde_json::json!({ "a": { "FKST_SHARED": "1" }, "b": { "FKST_SHARED": "2" } }),
+        ),
+        (
+            "bad package name",
+            serde_json::json!({ "has spaces": { "FKST_A": "1" } }),
+        ),
+    ] {
+        let server = MockServer::start().await;
+        mount_body(
+            &server,
+            serde_json::json!({
+                "schemaVersion": 1,
+                "packages": ["acme/tools@main:pkg/a"],
+                "packageEnv": block
+            })
+            .to_string(),
+        )
+        .await;
+
+        match expand_full(&server).await {
+            Err(ManifestError::BadPackageEnv { .. }) => {}
+            other => panic!("{label}: expected BadPackageEnv, got {other:?}"),
+        }
     }
 }

@@ -1,92 +1,67 @@
 # fkst-hosted
 
-**fkst-hosted** is ChronoAI's hosted control plane and web experience for
-running **fkst** coding sessions against GitHub repositories. Users declare
-sessions and work through GitHub issues; the control plane reconciles that
-declared state, manages the session runtime, and writes progress and pull
-requests back to GitHub.
+**fkst-hosted** turns GitHub issues into autonomous coding sessions. Install the
+GitHub App on a repository, describe work as issues, and receive a pull request
+for each task without operating the session infrastructure yourself.
 
 ## Current capabilities
 
-- **Run issue-driven sessions.** Install the ChronoAI GitHub App, open a trigger
-  issue, and queue isolated tasks as issues carrying the session's work label.
-- **Operate sessions from the dashboard.** Sign in with GitHub to browse
-  installations and repositories, create or stop sessions, add work items, and
-  inspect session status and outcomes.
-- **Inspect session activity.** Authorized users can browse redacted logs,
-  historical runs, and the live engine observation read model.
-- **Manage reusable environments.** Create, update, and remove named environment
-  profiles. Install commands are validated in an isolated pod before a profile
-  is persisted.
-- **Manage repository access.** Connect existing repositories, create new ones,
-  and open the appropriate GitHub installation settings from the dashboard.
-
-Session configuration is frozen after registration. Closing the trigger issue
-permanently retires the session; the dashboard's **Stop** action performs that
-same GitHub lifecycle operation.
+- **Run coding sessions for your repositories.** Declare each session with a
+  GitHub trigger issue and configure the workflows and environment it should use.
+- **Queue work with issues.** Add focused work items, follow their status, and
+  review the pull requests the session creates.
+- **Work from GitHub or the dashboard.** Use issues as the durable source of
+  truth, or sign in with GitHub for a visual view of repositories and sessions.
+- **Inspect and control sessions.** Start or stop sessions, manage environments
+  and GitHub App installations, and review live state, logs, and outcomes.
+- **Review your own activity and sandboxes.** The **Operations** view shows the
+  API calls you made and the live sandboxes you own or were explicitly given
+  access to. It is scoped to you: sharing a session never exposes another
+  person's API activity, and a deployment administrator is the only role that
+  can see across users.
+- **Automate through REST.** Use the dashboard's machine-readable API for
+  supported session, work-item, environment, log, and outcome operations.
 
 ## Get started
 
-The web application provides three user-facing entry points:
+1. Install the fkst-hosted GitHub App on the repositories where sessions should
+   run.
+2. Start a session from the dashboard or the installed **fkst substrate
+   session** issue template.
+3. Queue a task from the dashboard or the **fkst work item** issue template,
+   then follow its issue status and review the resulting pull request.
 
-- `/` — product overview
-- `/get-started` — GitHub App installation, trigger format, work queue, status,
-  logs, and lifecycle guide
-- `/dashboard` — authenticated repository and session operations
-
-For the complete issue contract, configuration grammar, authorization rules,
-and operational behavior, see the
-[`fkst-control-plane-manual`](skills/fkst-control-plane-manual/SKILL.md).
-
-## API
-
-The control plane serves a live **OpenAPI 3.1** document at
-`GET /openapi.json`. It is generated from the operations registered by the
-running server and is the source of truth for available paths and schemas.
-Authentication and authorization are enforced by individual handlers and are
-not fully represented as OpenAPI security schemes; use the operator manual and
-the web application for the supported user workflows.
+See the [fkst-hosted user manual](skills/fkst-control-plane-manual/SKILL.md) for
+session configuration, work labels, environments, permissions, and lifecycle
+details.
 
 ## Repository layout
 
-- `backend/` — Rust control plane, GitHub reconciliation, runtime dispatch, and
+- `backend/` - Rust control plane, GitHub reconciliation, runtime dispatch, and
   HTTP API
-- `frontend/` — React web application, user guide, and authenticated dashboard
-- `deploy/kubernetes/` — Kubernetes manifests, validation tools, and recovery
+- `frontend/` - React web application, user guide, and authenticated dashboard
+- `deploy/kubernetes/` - Kubernetes manifests, validation tools, and recovery
   runbooks
-- `skills/fkst-control-plane-manual/` — canonical user and operator contract
-- `apps/local-qa-runtime/` — independently buildable boundary for **Local QA
-  Host** and the reserved hardened Runtime shells
+- `skills/fkst-control-plane-manual/` - canonical user and operator contract
+- `apps/local-qa-runtime/` - independently buildable Local QA Host and reserved
+  hardened Runtime shells
+- `packages/qa-contracts/` - shared Local QA contracts and Rust/TypeScript fixtures
 
-Local QA Host is an activated executable application boundary with an explicit
-loopback-only `local-demo --listen <loopback> --database <path>` mode. Its
-current HTTP surface is:
+Local QA Host starts through the explicit loopback-only
+`local-demo --listen <loopback> --database <path>` command. It persists Runs,
+ordered Events, and cancellation intent in a migrated SQLite WAL journal.
+Production v2 admission remains fail-closed without a current-claim authority
+adapter; the real Worker/Browser walk is gated behind `mvp0-browser-test` and
+is not production composition. The launcher, supervisor, guest agent, and Secret
+Broker remain inert shells. See
+[`apps/local-qa-runtime/README.md`](apps/local-qa-runtime/README.md) for the
+supported HTTP routes, verification commands, and deferred capabilities.
 
-- `GET /v1/health`
-- `PUT /v1/runs/{run_id}`
-- `GET /v1/runs/{run_id}`
-- `GET /v1/runs/{run_id}/events?after={cursor}&limit={limit}`
-- `POST /v1/runs/{run_id}:cancel`
+Kernel-engine code remains upstream in `fkst-substrate`, and upstream engine
+and package repositories are reference-only from this checkout. The FKST Cloud
+package catalog resides on this repository's `packages` branch.
 
-The Host persists accepted requests, Runs, ordered Events, and cancellation
-intent in a migrated SQLite WAL journal. Same-key submission replay and
-snapshot/Event reads survive restart; cancellation does not terminate a worker,
-browser, or process. Zero-argument and unsupported invocation remains
-fail-closed with the exact `no supported configuration` error.
-
-The pure TypeScript browser-smoke worker is active production policy code over
-injected session, Evidence-staging, and clock ports, but it is not integrated
-with the Host and does not launch Chrome or access network, filesystem, profile,
-download, or process resources. The launcher, supervisor, guest agent, and
-Secret Broker remain inert scaffolds. See the canonical Local QA capability and
-deferral details in
-[`apps/local-qa-runtime/README.md`](apps/local-qa-runtime/README.md).
-
-Kernel-engine code remains upstream in `fkst-substrate`, and shared fkst
-packages remain upstream in `fkst-packages`; both are reference-only from this
-checkout.
-
-## Development and deployment
+## Development
 
 Run the frontend development server (it proxies `/api` to the control plane on
 port `8080`):
@@ -100,7 +75,19 @@ npm run dev
 Use `npm run typecheck`, `npm run lint`, `npm run test`, and `npm run build` for
 the frontend's local verification gates.
 
-- The checked-in Kubernetes deployment sources and validation commands are
-  documented in [`deploy/kubernetes/README.md`](deploy/kubernetes/README.md).
-- The full local stack procedure is in the
-  [FKST Local Deployment Guide](CLAUDE.md#fkst-local-deployment-guide).
+## API and deployment
+
+The control plane serves its runtime-generated **OpenAPI 3.1** contract at
+`GET /openapi.json`. Use that contract as the authority for available routes,
+request and response shapes, and each operation's authentication requirements.
+
+For self-hosting, follow the
+[FKST Local Deployment Guide](CLAUDE.md#fkst-local-deployment-guide). Checked-in
+namespace deployment sources and validation commands are documented in
+[`deploy/kubernetes/README.md`](deploy/kubernetes/README.md).
+
+The activity trace behind the Operations view is optional and operator-owned:
+[AUDIT-TRACE.md](deploy/kubernetes/AUDIT-TRACE.md) documents its architecture,
+data boundaries, authorization model, and retention;
+[AUDIT-RUNBOOK.md](deploy/kubernetes/AUDIT-RUNBOOK.md) documents provisioning,
+rollout, and incident response.

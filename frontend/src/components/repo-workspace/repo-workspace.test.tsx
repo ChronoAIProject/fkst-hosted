@@ -29,7 +29,7 @@ const session = (over: Partial<SessionDetail>): SessionDetail => ({
   environment: 'staging',
   source_branch: null,
   target_branch: 'fkst-hosted-default',
-  packages: ['ChronoAIProject/fkst-packages@fkst-hosted:codex/base'],
+  packages: ['ChronoAIProject/fkst-hosted@packages:codex/base'],
   invalid_reason: null,
   status_labels: ['fkst-substrate-active'],
   trigger: issue({ number: 7, title: 'nightly session' }),
@@ -96,7 +96,12 @@ describe('RepoWorkspace', () => {
   it('renders the rail plus the first session detail by default', () => {
     renderWorkspace();
 
-    expect(screen.getByTestId('repo-workspace')).toHaveClass(
+    // The rail/detail row is now nested under the view switch, so the stacking
+    // and no-horizontal-overflow guarantee is asserted where it moved to rather
+    // than dropped: the sessions body is what must stack, and the outer element
+    // is a plain column holding the switch above it.
+    expect(screen.getByTestId('repo-workspace')).toHaveClass('flex-col');
+    expect(screen.getByTestId('sessions-view')).toHaveClass(
       'flex-col',
       'md:flex-row',
       'overflow-x-hidden'
@@ -116,6 +121,27 @@ describe('RepoWorkspace', () => {
     // (its name is the level-2 heading, distinct from the rail's <span>).
     expect(screen.getByRole('heading', { level: 2, name: 'alpha' })).toBeInTheDocument();
     expect(screen.queryByRole('heading', { level: 2, name: 'beta' })).not.toBeInTheDocument();
+  });
+
+  it('has no repository-level workflows view — a schedule is reached through its session', async () => {
+    // A repository briefly carried a Sessions | Workflows switch. It is gone: a
+    // schedule is assigned to a session creator and runs in that session's pod,
+    // so a repository-level list mixed schedules that different sessions own and
+    // could never run for each other. The sessions body is now unconditional,
+    // and the only Workflows tab in the tree belongs to the selected session.
+    renderWorkspace();
+
+    expect(screen.getByTestId('sessions-view')).toBeInTheDocument();
+    expect(screen.queryByTestId('workspace-view-switch')).not.toBeInTheDocument();
+    expect(screen.queryByRole('tab', { name: 'Sessions' })).not.toBeInTheDocument();
+
+    const detail = screen.getByTestId('session-detail');
+    await userEvent.click(within(detail).getByRole('tab', { name: 'Workflows' }));
+
+    expect(screen.getByTestId('session-workflows')).toBeInTheDocument();
+    // Switching a session-detail tab must not disturb the workspace around it.
+    expect(screen.getByTestId('sessions-view')).toBeInTheDocument();
+    expect(screen.getByTestId('session-rail')).toBeInTheDocument();
   });
 
   it('keeps App-wide cross-account sessions inspectable but read-only', () => {
@@ -244,5 +270,64 @@ describe('RepoWorkspace', () => {
     // The rail's Retry re-fetches immediately rather than waiting on the poll.
     await user.click(screen.getByRole('button', { name: 'Retry' }));
     expect(onChanged).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('RepoWorkspace — deep-linked selection', () => {
+  beforeEach(() => {
+    window.localStorage.clear();
+    window.localStorage.setItem('fkst-gh-access', 'ghu_x');
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(() => new Promise<Response>(() => {}))
+    );
+  });
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('selects the session named by initialSelectedKey', () => {
+    renderWorkspace({ initialSelectedKey: beta.session_id! });
+    expect(screen.getByRole('heading', { level: 2, name: 'beta' })).toBeInTheDocument();
+  });
+
+  it('also matches the trigger-<n> alias for a session that has an id', () => {
+    // A chat card can only mint `trigger-<n>` before a session acquires its
+    // session_id; that link must keep working once it does.
+    renderWorkspace({ initialSelectedKey: `trigger-${beta.trigger.number}` });
+    expect(screen.getByRole('heading', { level: 2, name: 'beta' })).toBeInTheDocument();
+  });
+
+  it('selects an id-less session by its trigger key', () => {
+    const pending = session({
+      session_id: null,
+      name: 'pending',
+      trigger: issue({ number: 42, title: 'p-trig' }),
+    });
+    renderWorkspace({
+      data: body([alpha, pending]),
+      initialSelectedKey: 'trigger-42',
+    });
+    expect(screen.getByRole('heading', { level: 2, name: 'pending' })).toBeInTheDocument();
+  });
+
+  it('falls back to the first session for an unknown key', () => {
+    // A stale link must never leave the detail pane blank.
+    renderWorkspace({ initialSelectedKey: 'no-such-session' });
+    expect(screen.getByRole('heading', { level: 2, name: 'alpha' })).toBeInTheDocument();
+  });
+
+  it('notifies the page when the user selects a session', async () => {
+    const onSelectedKeyChange = vi.fn();
+    renderWorkspace({ onSelectedKeyChange });
+    await userEvent.click(screen.getByRole('button', { name: 'Open details for session beta' }));
+    expect(onSelectedKeyChange).toHaveBeenCalledWith(beta.session_id);
+  });
+
+  it('works without the notification callback', async () => {
+    // The props are optional so existing call sites (and the drawer) keep working.
+    renderWorkspace();
+    await userEvent.click(screen.getByRole('button', { name: 'Open details for session beta' }));
+    expect(screen.getByRole('heading', { level: 2, name: 'beta' })).toBeInTheDocument();
   });
 });

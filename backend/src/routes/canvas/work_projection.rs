@@ -4,6 +4,14 @@
 //! the registration's effective package set, including packages supplied by a
 //! `### Manifest`. Canvas reads must use that same set; otherwise a valid manifest-only
 //! session runs work that the dashboard cannot display.
+//!
+//! A label match alone is NOT ownership. Sharing a work label across creators is
+//! intended — the mandatory baseline gives every session in a deployment the same
+//! `workflow-dev` label — and what separates those sessions is the sole-assignee
+//! routing rule the reconciler's wake-gate applies (`reconcile::routing`). Reading by
+//! label alone therefore showed every session every OTHER session's work, inflating
+//! both the issue-count distribution and the timeline. This projection applies the
+//! same predicate, so the dashboard shows exactly the work its session would act on.
 
 use std::collections::{BTreeSet, HashMap, HashSet};
 
@@ -12,7 +20,8 @@ use secrecy::SecretString;
 use crate::error::AppError;
 use crate::reconcile::desired::SessionRegistration;
 use crate::reconcile::effective_packages::resolve_effective_packages;
-use crate::reconcile::work_labels::resolve_work_label_sets;
+use crate::reconcile::routing::{route_work_issue, WorkRouting};
+use crate::reconcile::work_labels::{apply_work_label_namespace, resolve_work_label_sets};
 use crate::routes::dashboard::{DashboardGithub, IssueWithMeta};
 
 /// The work projection for a repo's sessions: each session's issues plus the
@@ -35,8 +44,13 @@ pub(super) async fn work_issues_by_session(
     owner: &str,
     repo: &str,
     regs: &mut [SessionRegistration],
+    work_label_namespace: Option<&str>,
+    mandatory: &[crate::goals::trigger_parse::PackageRef],
 ) -> Result<WorkProjection, AppError> {
-    let effective = resolve_effective_packages(&gh.client, &gh.api_base, token, regs).await;
+    // Same mandatory baseline the reconciler prepends, so this dashboard view cannot
+    // show a different effective package/label set than the wake-gate actually uses.
+    let effective =
+        resolve_effective_packages(&gh.client, &gh.api_base, token, regs, mandatory).await;
     let mut resolved_regs = Vec::with_capacity(regs.len());
     for reg in regs {
         let Some(packages) = effective.by_session.get(&reg.session_id) else {
@@ -58,8 +72,28 @@ pub(super) async fn work_issues_by_session(
         resolved_regs.push(reg.clone());
     }
 
-    let labels_by_session =
+    let logical_labels_by_session =
         resolve_work_label_sets(&gh.client, &gh.api_base, token, &resolved_regs).await;
+    let mut labels_by_session = HashMap::new();
+    let mut effective_regs = Vec::with_capacity(resolved_regs.len());
+    for reg in resolved_regs {
+        let logical = logical_labels_by_session
+            .get(&reg.session_id)
+            .cloned()
+            .unwrap_or_default();
+        match apply_work_label_namespace(&logical, work_label_namespace) {
+            Ok(labels) => {
+                labels_by_session.insert(reg.session_id.clone(), labels.effective);
+                effective_regs.push(reg);
+            }
+            Err(error) => tracing::debug!(
+                session_id = %reg.session_id,
+                trigger_issue = reg.trigger_issue,
+                error = %error,
+                "canvas work projection: effective work-label validation failed"
+            ),
+        }
+    }
 
     // Several sessions can share package configuration, and one issue can carry more
     // than one effective label. Fetch each label once, then deduplicate per session.
@@ -75,16 +109,29 @@ pub(super) async fn work_issues_by_session(
     }
 
     let mut projected = HashMap::new();
-    for reg in resolved_regs {
+    for reg in effective_regs {
         let mut seen = HashSet::new();
         let mut issues = Vec::new();
         if let Some(labels) = labels_by_session.get(&reg.session_id) {
             for label in labels {
                 if let Some(label_issues) = issues_by_label.get(label) {
                     for issue in label_issues {
-                        if seen.insert(issue.summary.number) {
-                            issues.push(issue.clone());
+                        // Deduplicate FIRST: routing is a pure function of the issue's
+                        // metadata, so a second sighting under another of this
+                        // session's labels can only reach the same verdict. This keeps
+                        // the predicate at exactly one evaluation per distinct issue.
+                        if !seen.insert(issue.summary.number) {
+                            continue;
                         }
+                        // Label match is necessary but not sufficient: the issue is
+                        // this session's only when its SOLE assignee is this session's
+                        // creator, matched case-insensitively as GitHub logins are.
+                        if route_work_issue(&issue.summary.metadata(), &reg.creator_login)
+                            != WorkRouting::Routed
+                        {
+                            continue;
+                        }
+                        issues.push(issue.clone());
                     }
                 }
             }
@@ -99,3 +146,7 @@ pub(super) async fn work_issues_by_session(
         labels_by_session,
     })
 }
+
+#[cfg(test)]
+#[path = "work_projection_tests.rs"]
+mod tests;

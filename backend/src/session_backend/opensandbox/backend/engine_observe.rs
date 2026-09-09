@@ -67,6 +67,16 @@ impl OsbBackend {
         let view = self.resolve_one(session_id).await.map_err(|e| match e {
             BackendError::NotFound => ObserveError::SessionNotFound,
             BackendError::Other(other) => ObserveError::Failed(other.to_string()),
+            // Resolving a sandbox writes no metadata, so this cannot arise here;
+            // it maps to the generic 503 rather than being silently absorbed.
+            BackendError::InvalidMetadata => {
+                ObserveError::Failed("session backend metadata value rejected".to_string())
+            }
+            // Resolving ONE sandbox never trips the fleet inventory ceiling; the
+            // arm exists so the taxonomy stays exhaustive, never a silent pass.
+            BackendError::InventoryTooLarge { .. } => {
+                ObserveError::Failed("session backend inventory ceiling reached".to_string())
+            }
         })?;
         let execd = (self.execd_factory)(&view.id, session_id);
 
