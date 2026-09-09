@@ -109,6 +109,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Test verification dispatcher
+        working-directory: .
+        run: bash scripts/tests/run-sh-test.sh
       - name: Install Rust toolchain
         run: rustup show
       - name: Cache cargo

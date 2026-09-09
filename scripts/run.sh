@@ -61,6 +61,7 @@ run_qa_contracts_typescript() {
 }
 
 run_local_qa_runtime() {
+  run_qa_contracts_typescript
   run_local_qa_rust
   run_local_qa_workers
   run_local_qa_scaffold
@@ -75,52 +76,51 @@ run_qa_contracts() {
 run_full_suite() {
   run_backend
   run_frontend
-  run_local_qa_rust
-  run_local_qa_workers
-  run_local_qa_scaffold
-  run_qa_contracts_typescript
+  run_local_qa_runtime
 }
 
 resolve_ref_oid() {
   local ref=$1
+  local local_only=$2
   local oid
   local status
   local fetch_ref
 
-  set +e
-  oid=$(git rev-parse --verify --end-of-options "$ref^{commit}" 2>/dev/null)
-  status=$?
-  set -e
-  if [[ "$status" -eq 0 ]]; then
+  # The selected ref is printed in the summary; control characters cannot be data there.
+  if [[ "$ref" == -* || "$ref" == *[[:cntrl:]]* ]]; then
+    return 1
+  fi
+  if oid=$(git -C "$repository_root" rev-parse --verify --end-of-options "$ref^{commit}" 2>/dev/null); then
     printf '%s\n' "$oid"
     return 0
+  else
+    status=$?
   fi
+  [[ "$local_only" == true ]] && return "$status"
 
-  fetch_ref=$ref
-  if [[ "$fetch_ref" == origin/* ]]; then
-    fetch_ref=${fetch_ref#origin/}
-  fi
-
-  set +e
-  git fetch --no-tags --quiet origin "refs/heads/$fetch_ref:refs/remotes/origin/$fetch_ref" >/dev/null 2>&1
-  status=$?
-  set -e
-  if [[ "$status" -ne 0 ]]; then
+  case "$ref" in
+    refs/heads/*) fetch_ref=${ref#refs/heads/} ;;
+    refs/remotes/origin/*) fetch_ref=${ref#refs/remotes/origin/} ;;
+    origin/*) fetch_ref=${ref#origin/} ;;
+    refs/*) return "$status" ;;
+    *) fetch_ref=$ref ;;
+  esac
+  # Local commit expressions may resolve above, but only branch names may be fetched.
+  if [[ "$fetch_ref" == HEAD || "$fetch_ref" == -* ]] ||
+    ! git -C "$repository_root" check-ref-format "refs/heads/$fetch_ref" >/dev/null 2>&1; then
     return "$status"
   fi
 
-  set +e
-  oid=$(git rev-parse --verify --end-of-options "origin/$fetch_ref^{commit}" 2>/dev/null)
-  status=$?
-  set -e
-  if [[ "$status" -ne 0 ]]; then
-    return "$status"
-  fi
+  git -C "$repository_root" fetch --no-tags --quiet origin \
+    "refs/heads/$fetch_ref:refs/remotes/origin/$fetch_ref" >/dev/null 2>&1 || return $?
+  oid=$(git -C "$repository_root" rev-parse --verify --end-of-options \
+    "refs/remotes/origin/$fetch_ref^{commit}" 2>/dev/null) || return $?
   printf '%s\n' "$oid"
 }
 
 resolve_integration_base() {
   local candidate
+  local local_only=false
   local status
 
   if [[ -n "${FKST_DEVLOOP_INTEGRATION_BRANCH:-}" ]]; then
@@ -129,10 +129,11 @@ resolve_integration_base() {
     candidate=$GITHUB_BASE_REF
   else
     candidate=origin/HEAD
+    local_only=true
   fi
 
   set +e
-  integration_base_oid=$(resolve_ref_oid "$candidate")
+  integration_base_oid=$(resolve_ref_oid "$candidate" "$local_only")
   status=$?
   set -e
   if [[ "$status" -ne 0 ]]; then
@@ -155,7 +156,7 @@ select_affected_mode() {
     return 0
   fi
 
-  while IFS= read -r changed_path; do
+  while IFS= read -r -d '' changed_path; do
     case "$changed_path" in
       backend/*) current_area=backend ;;
       frontend/*) current_area=frontend ;;
@@ -189,7 +190,7 @@ run_affected_suite() {
   resolve_integration_base || return $?
 
   set +e
-  merge_base=$(git merge-base "$integration_base_oid" HEAD 2>/dev/null)
+  merge_base=$(git -C "$repository_root" merge-base "$integration_base_oid" HEAD 2>/dev/null)
   status=$?
   set -e
   if [[ "$status" -ne 0 ]]; then
@@ -197,7 +198,7 @@ run_affected_suite() {
   fi
 
   set +e
-  git diff --name-only --diff-filter=ACDMRTUXB "$merge_base" HEAD -- >"$changed_paths_file" 2>/dev/null
+  git -C "$repository_root" diff --name-only -z --no-renames --diff-filter=ACDMRTUXB "$merge_base" HEAD -- >"$changed_paths_file" 2>/dev/null
   status=$?
   set -e
   if [[ "$status" -ne 0 ]]; then
