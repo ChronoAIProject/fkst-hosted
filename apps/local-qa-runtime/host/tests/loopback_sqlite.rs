@@ -400,6 +400,50 @@ fn owned_startup_reports_initialization_failure_and_releases_listener() {
     }
 }
 
+fn listener_close_probe(address: SocketAddr, context: &str) -> TcpStream {
+    let target = SocketAddr::from(([127, 0, 0, 1], address.port()));
+    let probe = TcpStream::connect_timeout(&target, Duration::from_secs(1))
+        .unwrap_or_else(|error| panic!("{context}; probe connect to {target} failed: {error}"));
+    probe
+        .set_read_timeout(Some(Duration::from_secs(1)))
+        .unwrap_or_else(|error| {
+            panic!("{context}; probe read timeout configuration failed: {error}")
+        });
+    probe
+}
+
+fn assert_listener_probe_closed(probe: &mut TcpStream, context: &str) {
+    let observation = probe.read(&mut [0u8; 1]);
+    assert!(
+        matches!(observation, Ok(0))
+            || matches!(&observation, Err(error) if error.kind() == std::io::ErrorKind::ConnectionReset),
+        "{context}; original listener connection must close: {observation:?}; probe_local={:?}; probe_peer={:?}",
+        probe.local_addr(),
+        probe.peer_addr(),
+    );
+}
+
+#[test]
+fn owned_startup_listener_probe_detects_retained_clone() {
+    let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+    let address = listener.local_addr().unwrap();
+    let context = format!("retained clone control; listener={address}");
+    let retained = listener.try_clone().unwrap();
+    let mut probe = listener_close_probe(address, &context);
+    drop(listener);
+    probe.set_nonblocking(true).unwrap();
+    let observation = probe.read(&mut [0u8; 1]);
+    assert!(
+        matches!(&observation, Err(error) if error.kind() == std::io::ErrorKind::WouldBlock),
+        "{context}; retained listener must keep original connection open: {observation:?}; probe_local={:?}; probe_peer={:?}",
+        probe.local_addr(),
+        probe.peer_addr(),
+    );
+    drop(retained);
+    probe.set_nonblocking(false).unwrap();
+    assert_listener_probe_closed(&mut probe, &context);
+}
+
 #[test]
 fn owned_startup_rejects_listener_mismatch_before_journal_effects() {
     for mode in [FixtureMode::Passive, FixtureMode::FixedClock] {
@@ -421,6 +465,15 @@ fn owned_startup_rejects_listener_mismatch_before_journal_effects() {
                 _ => SocketAddr::from(([127, 0, 0, 1], address.port())),
             };
             let config = fixture_config(&database, configured);
+            let context = format!(
+                "mode={mode:?}; mismatch={mismatch}; config={config:?}; listener={address}"
+            );
+            let mut probe = listener_close_probe(address, &context);
+            let context = format!(
+                "{context}; probe_local={:?}; probe_peer={:?}",
+                probe.local_addr(),
+                probe.peer_addr(),
+            );
             let mut pending = OwnedHost::spawn_config(config, listener, mode, false);
             assert_eq!(
                 pending
@@ -428,25 +481,27 @@ fn owned_startup_rejects_listener_mismatch_before_journal_effects() {
                     .as_ref()
                     .unwrap()
                     .recv_timeout(STARTUP_TIMEOUT)
-                    .unwrap(),
+                    .unwrap_or_else(|error| panic!("{context}; startup receipt failed: {error}")),
                 Err("host initialization failed".to_owned()),
+                "{context}",
             );
             let result = pending.finish();
             assert!(
                 result
                     .as_ref()
                     .is_err_and(|error| error.contains("fixture listener mismatch")),
-                "{result:?}"
+                "{context}; thread result: {result:?}"
             );
             assert!(
                 !database.exists(),
-                "{mismatch} must fail before opening Journal"
+                "{context}; must fail before opening Journal"
             );
             assert_eq!(
                 pending.ready.as_ref().unwrap().try_recv(),
-                Err(mpsc::TryRecvError::Disconnected)
+                Err(mpsc::TryRecvError::Disconnected),
+                "{context}",
             );
-            TcpListener::bind(address).expect("rejected listener must be released");
+            assert_listener_probe_closed(&mut probe, &context);
         }
     }
 }
