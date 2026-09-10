@@ -392,6 +392,47 @@ fn timestamp_boundaries_match_typescript() {
 }
 
 #[test]
+fn validated_timestamp_ordering_matches_typescript() {
+    use fkst_qa_contracts::compare_iso8601_timestamps;
+    use std::cmp::Ordering::{Equal, Less};
+    for (left, right, expected) in [
+        ("2026-09-10T00:00:00Z", "2026-09-10T00:00:00Z", Equal),
+        ("2026-09-10T00:00:00.5Z", "2026-09-10T00:00:00.5Z", Equal),
+        ("2026-09-10T00:00:00Z", "2026-09-10T00:00:00.5Z", Less),
+        ("2026-09-10T00:00:00.05Z", "2026-09-10T00:00:00.5Z", Less),
+        (
+            "2026-09-10T00:00:00.5Z",
+            "2026-09-10T00:00:00.500000000000000000001Z",
+            Less,
+        ),
+        ("2026-09-10T00:00:00.9Z", "2026-09-10T00:00:01Z", Less),
+        ("2024-02-29T23:59:59.9Z", "2024-03-01T00:00:00Z", Less),
+    ] {
+        assert_eq!(compare_iso8601_timestamps(left, right).unwrap(), expected);
+        assert_eq!(
+            compare_iso8601_timestamps(right, left).unwrap(),
+            expected.reverse()
+        );
+    }
+    for invalid in [
+        "",
+        "short",
+        "☃☃☃☃☃☃☃☃",
+        "2026-09-10T00:00:00.☃Z",
+        "2026-02-29T00:00:00Z",
+        "2026-09-10T00:00:00+00:00",
+        "2026-09-10T00:00:00.0Z",
+        "2026-09-10T00:00:00.50Z",
+        "2026-09-10T00:00:00.Z",
+        "2026-09-10T00:00:60Z",
+    ] {
+        // Malformed operands must be rejected in either position, before slicing.
+        assert!(compare_iso8601_timestamps(invalid, "2026-09-10T00:00:00Z").is_err());
+        assert!(compare_iso8601_timestamps("2026-09-10T00:00:00Z", invalid).is_err());
+    }
+}
+
+#[test]
 fn admission_precedence_and_order_match_typescript() {
     let tiny = admit_json(b"1e-9223372036854775808").expect("extreme negative exponent");
     assert_eq!(

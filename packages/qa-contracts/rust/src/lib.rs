@@ -1083,6 +1083,15 @@ pub fn validate_scalar(name: &str, value: &str) -> Result<(), ContractError> {
     }
 }
 
+/// Compare canonical UTC timestamps using the existing ISO8601 scalar grammar.
+/// Both operands are validated before the fraction-aware comparator slices them;
+/// noncanonical encodings (including zero or trailing-zero fractions) are rejected.
+pub fn compare_iso8601_timestamps(left: &str, right: &str) -> Result<Ordering, ContractError> {
+    validate_scalar("ISO8601", left)?;
+    validate_scalar("ISO8601", right)?;
+    Ok(compare_iso8601(left, right))
+}
+
 pub fn canonical_bytes(value: &ValidatedValue) -> Result<Vec<u8>, ContractError> {
     canonicalize(&value.0)
 }

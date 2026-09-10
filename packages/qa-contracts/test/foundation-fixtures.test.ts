@@ -6,6 +6,7 @@ import {
   admitJson,
   canonicalAdmittedBytes,
   canonicalBytes,
+  compareIso8601Timestamps,
   contractContentDigest,
   contractContentProjection,
   contractRegistry,
@@ -86,6 +87,30 @@ const fixtureIds = [
   ...foundationFixture.projection_cases.map((fixtureCase) => fixtureCase.case_id),
   ...foundationFixture.digest_mismatch_cases.map((fixtureCase) => fixtureCase.case_id),
 ];
+
+test("validated timestamp ordering matches Rust", () => {
+  for (const [left, right, expected] of [
+    ["2026-09-10T00:00:00Z", "2026-09-10T00:00:00Z", 0],
+    ["2026-09-10T00:00:00.5Z", "2026-09-10T00:00:00.5Z", 0],
+    ["2026-09-10T00:00:00Z", "2026-09-10T00:00:00.5Z", -1],
+    ["2026-09-10T00:00:00.05Z", "2026-09-10T00:00:00.5Z", -1],
+    ["2026-09-10T00:00:00.5Z", "2026-09-10T00:00:00.500000000000000000001Z", -1],
+    ["2026-09-10T00:00:00.9Z", "2026-09-10T00:00:01Z", -1],
+    ["2024-02-29T23:59:59.9Z", "2024-03-01T00:00:00Z", -1],
+  ] as const) {
+    assert.equal(Math.sign(compareIso8601Timestamps(left, right)), expected);
+    assert.equal(Math.sign(compareIso8601Timestamps(right, left)), expected === 0 ? 0 : 1);
+  }
+  for (const invalid of [
+    "", "short", "☃☃☃☃☃☃☃☃", "2026-09-10T00:00:00.☃Z",
+    "2026-02-29T00:00:00Z", "2026-09-10T00:00:00+00:00",
+    "2026-09-10T00:00:00.0Z", "2026-09-10T00:00:00.50Z",
+    "2026-09-10T00:00:00.Z", "2026-09-10T00:00:60Z",
+  ]) {
+    assert.throws(() => compareIso8601Timestamps(invalid, "2026-09-10T00:00:00Z"), ContractError);
+    assert.throws(() => compareIso8601Timestamps("2026-09-10T00:00:00Z", invalid), ContractError);
+  }
+});
 
 test("contract registry and fixture metadata", () => {
   const registry = contractRegistry();

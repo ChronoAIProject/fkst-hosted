@@ -7,7 +7,9 @@ use std::sync::Arc;
 mod filesystem;
 use filesystem::{Directory, PinnedFile};
 
-use fkst_qa_contracts::{sha256_digest, validate_scalar, DigestBoundReferenceV2};
+use fkst_qa_contracts::{
+    compare_iso8601_timestamps, sha256_digest, validate_scalar, DigestBoundReferenceV2,
+};
 use serde::{Deserialize, Serialize};
 
 pub use crate::journal::workspace::{OwnedWorkspace, WorkspaceIntent, WorkspaceState};
@@ -695,7 +697,11 @@ impl SourceWorkspaceManager {
         };
         let mut record = self.with_journal(|journal| journal.prepare_workspace(&intent))?;
         if record.resource.is_some() {
-            return self.replay_workspace(workspace_provider, &record);
+            let handle = self.replay_workspace(workspace_provider, &record)?;
+            let directory = self.validated_record_directory(&record, &handle)?;
+            ensure_before_deadline(clock, &intent.deadline_utc)?;
+            self.revalidate_record_directory(&record, &handle, directory.as_ref())?;
+            return Ok(handle);
         }
         let root = self.workspace_path(&request.run_id, request.generation)?;
         if record.state == WorkspaceState::Prepared {
@@ -782,6 +788,9 @@ impl SourceWorkspaceManager {
         source.marker.ensure_attached()?;
         let handle = self.handle_from_record(&record)?;
         self.publish_marker(&directory, &handle)?;
+        // Bind and publish obtained ownership before observing the Host clock.
+        // A late return (or clock failure) must retain recover/status/stop authority.
+        ensure_before_deadline(clock, &intent.deadline_utc)?;
         self.revalidate_record_directory(&record, &handle, Some(&directory))?;
         Ok(handle)
     }
@@ -1103,9 +1112,10 @@ fn ensure_before_deadline(clock: &impl Clock, deadline_utc: &str) -> Result<(), 
     validate_scalar("ISO8601", deadline_utc)
         .map_err(|_| RunError::Lifecycle("lifecycle deadline must be ISO8601"))?;
     let now_utc = clock.now_utc()?;
-    validate_scalar("ISO8601", &now_utc)
-        .map_err(|_| RunError::Lifecycle("lifecycle clock must return ISO8601"))?;
-    if now_utc.as_str() >= deadline_utc {
+    if !compare_iso8601_timestamps(&now_utc, deadline_utc)
+        .map_err(|_| RunError::Lifecycle("lifecycle clock must return ISO8601"))?
+        .is_lt()
+    {
         return Err(RunError::Lifecycle("lifecycle deadline expired"));
     }
     Ok(())

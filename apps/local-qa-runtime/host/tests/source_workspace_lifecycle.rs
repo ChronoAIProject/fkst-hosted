@@ -2463,6 +2463,238 @@ fn review_regression_constructor_rejects_replaced_main_database_with_original_wa
     );
 }
 
+#[cfg(unix)]
+#[test]
+fn deadline_regression_source_workspace_fractional_boundaries() {
+    struct RawClock(&'static str);
+    impl fkst_local_qa_host::Clock for RawClock {
+        fn now_utc(&self) -> Result<String, RunError> {
+            Ok(self.0.to_owned())
+        }
+    }
+    for (now, deadline, allowed) in [
+        (NOW, "2026-09-10T00:00:00.5Z", true),
+        ("2026-09-10T00:00:00.5Z", NOW, false),
+        (NOW, NOW, false),
+        ("2026-09-10T00:00:00.5Z", "2026-09-10T00:00:00.5Z", false),
+        ("2026-09-10T00:00:00.05Z", "2026-09-10T00:00:00.5Z", true),
+        ("malformed", DEADLINE, false),
+        (NOW, "malformed", false),
+        (NOW, "2026-09-10T00:00:00.0Z", false),
+    ] {
+        let mut fixture = WorkspaceFixture::new("fractional-deadline");
+        fixture.request.deadline_utc = deadline.to_owned();
+        let result = fixture.manager.prepare(
+            &mut fixture.source,
+            &mut fixture.provider,
+            &fixture.reference,
+            &lease(&fixture.reference, &fixture.request),
+            &fixture.request,
+            &RawClock(now),
+        );
+        assert_eq!(
+            result.is_ok(),
+            allowed,
+            "now={now}, deadline={deadline}: {result:?}"
+        );
+        assert_eq!(fixture.source.acquire_calls, usize::from(allowed));
+        assert_eq!(fixture.provider.materialize_calls, usize::from(allowed));
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn deadline_regression_workspace_late_returns_preserve_recoverable_ownership() {
+    use std::cell::Cell;
+    use std::rc::Rc;
+    struct CallbackClock(Rc<Cell<bool>>, Option<&'static str>);
+    impl fkst_local_qa_host::Clock for CallbackClock {
+        fn now_utc(&self) -> Result<String, RunError> {
+            if !self.0.get() {
+                return Ok(NOW.to_owned());
+            }
+            self.1
+                .map(str::to_owned)
+                .ok_or(RunError::Lifecycle("clock unavailable"))
+        }
+    }
+    struct ReturningWorkspace {
+        inner: FakeWorkspaceProvider,
+        returned: Rc<Cell<bool>>,
+        boundary: &'static str,
+        interrupt: bool,
+    }
+    impl WorkspaceProvider for ReturningWorkspace {
+        fn scope(&self) -> &str {
+            self.inner.scope()
+        }
+        fn discover(&mut self, intent: &WorkspaceIntent) -> Result<WorkspaceDiscovery, RunError> {
+            let receipt = self.inner.discover(intent)?;
+            if self.boundary == "discover" {
+                self.returned.set(true);
+            }
+            Ok(receipt)
+        }
+        fn materialize(
+            &mut self,
+            intent: &WorkspaceIntent,
+            blob: &Path,
+            root: &Path,
+            revision: &ImmutableRevision,
+        ) -> Result<WorkspaceMaterialization, RunError> {
+            let receipt = self.inner.materialize(intent, blob, root, revision)?;
+            if self.interrupt {
+                return Err(RunError::Lifecycle("interrupted create"));
+            }
+            if self.boundary == "create" {
+                self.returned.set(true);
+            }
+            Ok(receipt)
+        }
+        fn status(
+            &mut self,
+            resource: &WorkspaceResource,
+        ) -> Result<WorkspaceProviderStatusReceipt, RunError> {
+            let receipt = self.inner.status(resource)?;
+            if self.boundary == "status" {
+                self.returned.set(true);
+            }
+            Ok(receipt)
+        }
+        fn stop(
+            &mut self,
+            resource: &WorkspaceResource,
+        ) -> Result<WorkspaceProviderStopReceipt, RunError> {
+            self.inner.stop(resource)
+        }
+    }
+    for boundary in ["create", "discover", "status", "absent"] {
+        for returned_at in [
+            Some(DEADLINE),
+            Some("2026-09-11T00:00:00.5Z"),
+            Some("malformed"),
+            None,
+        ] {
+            let mut fixture = WorkspaceFixture::new("workspace-late-return");
+            let returned = Rc::new(Cell::new(false));
+            let clock = CallbackClock(returned.clone(), returned_at);
+            let mut provider = ReturningWorkspace {
+                inner: FakeWorkspaceProvider::default(),
+                returned,
+                boundary: "none",
+                interrupt: boundary == "discover",
+            };
+            if matches!(boundary, "discover" | "status") {
+                let result = fixture.manager.prepare(
+                    &mut fixture.source,
+                    &mut provider,
+                    &fixture.reference,
+                    &lease(&fixture.reference, &fixture.request),
+                    &fixture.request,
+                    &clock,
+                );
+                assert_eq!(result.is_ok(), boundary == "status");
+                fixture.reopen();
+            }
+            provider.boundary = if boundary == "absent" {
+                "discover"
+            } else {
+                boundary
+            };
+            provider.interrupt = false;
+            let result = fixture.manager.prepare(
+                &mut fixture.source,
+                &mut provider,
+                &fixture.reference,
+                &lease(&fixture.reference, &fixture.request),
+                &fixture.request,
+                &clock,
+            );
+            assert!(
+                result.is_err(),
+                "boundary={boundary}, clock={returned_at:?}: {result:?}"
+            );
+            if boundary == "absent" {
+                assert_eq!(provider.inner.materialize_calls, 0);
+                continue;
+            }
+            let key = stable_workspace_key(&fixture.request.run_id, fixture.request.generation);
+            let record = Journal::open(&fixture.database())
+                .unwrap()
+                .workspace(&key)
+                .unwrap()
+                .unwrap();
+            assert_eq!(record.state, WorkspaceState::Bound);
+            assert!(
+                record.resource.is_some(),
+                "bind must precede late or invalid clock rejection"
+            );
+            fixture.reopen();
+            let handle = fixture.manager.recover(&mut provider, &key).unwrap();
+            assert_eq!(
+                fixture.manager.status(&mut provider, &handle).unwrap(),
+                WorkspaceStatus::Active
+            );
+            fixture.manager.stop(&mut provider, &handle).unwrap();
+            assert_eq!(
+                fixture.manager.status(&mut provider, &handle).unwrap(),
+                WorkspaceStatus::Stopped
+            );
+            assert_eq!(provider.inner.materialize_calls, 1);
+            assert_eq!(provider.inner.stop_calls, 1);
+        }
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn deadline_regression_late_source_acquisition_cannot_create_workspace() {
+    use std::cell::Cell;
+    struct SourceClock<'a>(&'a Cell<bool>);
+    impl fkst_local_qa_host::Clock for SourceClock<'_> {
+        fn now_utc(&self) -> Result<String, RunError> {
+            Ok(if self.0.get() { DEADLINE } else { NOW }.to_owned())
+        }
+    }
+    struct LateSource<'a>(&'a Cell<bool>, FakeSourceProvider);
+    impl SourceProvider for LateSource<'_> {
+        fn acquire(&mut self, lease: &SourceObjectLease) -> Result<AcquiredSource, RunError> {
+            let acquired = self.1.acquire(lease)?;
+            self.0.set(true);
+            Ok(acquired)
+        }
+    }
+    let mut fixture = WorkspaceFixture::new("late-source");
+    let returned = Cell::new(false);
+    let mut source = LateSource(
+        &returned,
+        FakeSourceProvider {
+            bytes: fixture.source.bytes.clone(),
+            revision: fixture.source.revision.clone(),
+            acquire_calls: 0,
+        },
+    );
+    assert!(fixture
+        .manager
+        .prepare(
+            &mut source,
+            &mut fixture.provider,
+            &fixture.reference,
+            &lease(&fixture.reference, &fixture.request),
+            &fixture.request,
+            &SourceClock(&returned),
+        )
+        .is_err());
+    assert_eq!(source.1.acquire_calls, 1);
+    assert_eq!(fixture.provider.materialize_calls, 0);
+    assert_eq!(
+        fs::read_dir(fixture.root.join("workspaces"))
+            .unwrap()
+            .count(),
+        0
+    );
+}
+
 struct TestManager {
     inner: SourceWorkspaceManager,
     journal_root: PathBuf,

@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 use std::net::SocketAddr;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use fkst_qa_contracts::validate_scalar;
+use fkst_qa_contracts::{compare_iso8601_timestamps, validate_scalar};
 
 use crate::journal::{Journal, OwnedHandle};
 use crate::RunError;
@@ -134,6 +134,11 @@ pub trait EnvironmentProvider {
     }
 }
 
+/// A trusted Host observation in the contract's canonical UTC grammar. Implementors
+/// must sample at each call (FixedClock deliberately freezes time for tests).
+/// Lifecycle checks observe deadlines before effects and after callbacks return;
+/// they cannot interrupt a hung synchronous provider, bound elapsed durations, or
+/// compensate for wall-clock rollback. No deadline is extended by these checks.
 pub trait Clock {
     fn now_utc(&self) -> Result<String, RunError>;
 }
@@ -143,11 +148,10 @@ pub struct SystemClock;
 
 impl Clock for SystemClock {
     fn now_utc(&self) -> Result<String, RunError> {
-        let seconds = SystemTime::now()
+        let elapsed = SystemTime::now()
             .duration_since(UNIX_EPOCH)
-            .map_err(|_| RunError::InvalidJournal("system clock is before Unix epoch"))?
-            .as_secs();
-        Ok(format_utc_seconds(seconds))
+            .map_err(|_| RunError::InvalidJournal("system clock is before Unix epoch"))?;
+        Ok(format_utc_time(elapsed))
     }
 }
 
@@ -227,7 +231,7 @@ pub fn reconcile_environment<P: EnvironmentProvider>(
     };
     validate_provider_resource(request, &expected_key, &expected_labels, &resource)?;
 
-    journal.record_handle(&OwnedHandle {
+    let handle = journal.record_handle(&OwnedHandle {
         intent_id: request.intent_id.clone(),
         run_id: request.run_id.clone(),
         profile_id: request.profile_id.clone(),
@@ -237,7 +241,11 @@ pub fn reconcile_environment<P: EnvironmentProvider>(
         stable_provider_key: expected_key,
         provider_identity: resource.provider_identity,
         state: "active".to_owned(),
-    })
+    })?;
+    // Preserve the obtained identity even if the callback returned late or the
+    // Host clock now fails. The committed handle remains available for safety work.
+    ensure_before_deadline(clock, &intent.deadline_utc)?;
+    Ok(handle)
 }
 
 pub fn environment_status<P: EnvironmentProvider>(
@@ -300,22 +308,28 @@ pub fn check_environment_readiness<P: EnvironmentProvider>(
 ) -> Result<ReadinessReceipt, RunError> {
     validate_readiness_request(request)?;
     ensure_before_deadline(clock, &request.deadline_utc)?;
-    if request.deadline_utc > handle.deadline_utc {
+    if compare_iso8601_timestamps(&request.deadline_utc, &handle.deadline_utc)
+        .map_err(|_| RunError::Lifecycle("environment deadline must be ISO8601"))?
+        .is_gt()
+    {
         return Err(RunError::Lifecycle(
             "readiness deadline exceeds the environment deadline",
         ));
     }
     let expected = resource_from_handle(handle)?;
     let receipt = provider.readiness(&expected, request)?;
+    ensure_before_deadline(clock, &request.deadline_utc)?;
     validate_receipt_resource(&expected, &receipt.resource)?;
-    validate_scalar("ISO8601", &receipt.observed_at_utc)
-        .map_err(|_| RunError::Lifecycle("readiness observation time must be ISO8601"))?;
+    let observed_before_deadline =
+        compare_iso8601_timestamps(&receipt.observed_at_utc, &request.deadline_utc)
+            .map_err(|_| RunError::Lifecycle("readiness observation time must be ISO8601"))?
+            .is_lt();
     if receipt.service_id != request.service_id
         || receipt.endpoint_class != request.endpoint_class
         || receipt.attempts == 0
         || receipt.attempts > request.max_attempts
         || receipt.elapsed_ms > request.max_duration_ms
-        || receipt.observed_at_utc.as_str() >= request.deadline_utc.as_str()
+        || !observed_before_deadline
     {
         return Err(RunError::Lifecycle(
             "readiness receipt does not match service identity or budget",
@@ -416,9 +430,10 @@ fn validate_provider_resource(
 
 fn ensure_before_deadline(clock: &impl Clock, deadline_utc: &str) -> Result<(), RunError> {
     let now_utc = clock.now_utc()?;
-    validate_scalar("ISO8601", &now_utc)
-        .map_err(|_| RunError::InvalidJournal("now_utc must be ISO8601"))?;
-    if now_utc.as_str() >= deadline_utc {
+    if !compare_iso8601_timestamps(&now_utc, deadline_utc)
+        .map_err(|_| RunError::InvalidJournal("clock and deadline must be ISO8601"))?
+        .is_lt()
+    {
         return Err(RunError::InvalidJournal("resource intent deadline expired"));
     }
     Ok(())
@@ -445,6 +460,17 @@ fn validate_handle_request(
     Ok(())
 }
 
+fn format_utc_time(elapsed: std::time::Duration) -> String {
+    let mut timestamp = format_utc_seconds(elapsed.as_secs());
+    if elapsed.subsec_nanos() != 0 {
+        timestamp.pop();
+        timestamp.push('.');
+        timestamp.push_str(format!("{:09}", elapsed.subsec_nanos()).trim_end_matches('0'));
+        timestamp.push('Z');
+    }
+    timestamp
+}
+
 fn format_utc_seconds(seconds: u64) -> String {
     let days = seconds / 86_400;
     let day_seconds = seconds % 86_400;
@@ -469,4 +495,28 @@ fn civil_from_days(days_since_epoch: i64) -> (i64, i64, i64) {
     let day = day_of_year - (153 * month_part + 2) / 5 + 1;
     let month = month_part + if month_part < 10 { 3 } else { -9 };
     (year + if month <= 2 { 1 } else { 0 }, month, day)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn system_clock_preserves_canonical_fractional_precision() {
+        for (nanos, expected) in [
+            (0, "1970-01-01T00:00:00Z"),
+            (1, "1970-01-01T00:00:00.000000001Z"),
+            (50_000_000, "1970-01-01T00:00:00.05Z"),
+            (500_000_000, "1970-01-01T00:00:00.5Z"),
+            (999_999_999, "1970-01-01T00:00:00.999999999Z"),
+        ] {
+            let timestamp = format_utc_time(std::time::Duration::new(0, nanos));
+            assert_eq!(timestamp, expected);
+            validate_scalar("ISO8601", &timestamp).unwrap();
+        }
+        assert_eq!(
+            format_utc_time(std::time::Duration::new(1, 0)),
+            "1970-01-01T00:00:01Z"
+        );
+    }
 }
