@@ -6,8 +6,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use fkst_local_qa_host::source_workspace::{
     lifecycle_authority_blockers, validate_controlled_relative_path, AcquiredSource,
     ImmutableRevision, LifecycleAuthorityBlocker, SourceObjectLease, SourceProvider,
-    SourceWorkspaceManager, WorkspaceMaterialization, WorkspaceProvider,
-    WorkspaceProviderStatus, WorkspaceProviderStopReceipt, WorkspaceRequest, WorkspaceStatus,
+    SourceWorkspaceManager, WorkspaceMaterialization, WorkspaceProvider, WorkspaceProviderStatus,
+    WorkspaceProviderStopReceipt, WorkspaceRequest, WorkspaceStatus,
 };
 use fkst_local_qa_host::{FixedClock, RunError};
 use fkst_qa_contracts::{sha256_digest, DigestBoundReferenceV2};
@@ -57,10 +57,7 @@ impl WorkspaceProvider for FakeWorkspaceProvider {
         Ok(WorkspaceMaterialization { provider_identity })
     }
 
-    fn status(
-        &mut self,
-        provider_identity: &str,
-    ) -> Result<WorkspaceProviderStatus, RunError> {
+    fn status(&mut self, provider_identity: &str) -> Result<WorkspaceProviderStatus, RunError> {
         Ok(match self.active.get(provider_identity) {
             Some(true) => WorkspaceProviderStatus::Active,
             Some(false) => WorkspaceProviderStatus::Stopped,
@@ -68,10 +65,7 @@ impl WorkspaceProvider for FakeWorkspaceProvider {
         })
     }
 
-    fn stop(
-        &mut self,
-        provider_identity: &str,
-    ) -> Result<WorkspaceProviderStopReceipt, RunError> {
+    fn stop(&mut self, provider_identity: &str) -> Result<WorkspaceProviderStopReceipt, RunError> {
         let Some(active) = self.active.get_mut(provider_identity) else {
             return Ok(WorkspaceProviderStopReceipt {
                 provider_identity: provider_identity.to_owned(),
@@ -145,21 +139,32 @@ fn exact_source_cache_and_run_scoped_workspaces_replay_without_duplicate_effects
     assert_ne!(first.root, second.root);
     assert_eq!(source_provider.acquire_calls, 1);
     assert_eq!(workspace_provider.materialize_calls, 2);
-    assert_eq!(manager.status(&mut workspace_provider, &first).unwrap(), WorkspaceStatus::Active);
+    assert_eq!(
+        manager.status(&mut workspace_provider, &first).unwrap(),
+        WorkspaceStatus::Active
+    );
 
     fs::write(workspace_root.join("unrelated-resource"), b"preserve").unwrap();
     let stopped = manager.stop(&mut workspace_provider, &first).unwrap();
     assert!(!stopped.already_stopped);
-    assert_eq!(manager.status(&mut workspace_provider, &first).unwrap(), WorkspaceStatus::Stopped);
-    assert!(manager
-        .stop(&mut workspace_provider, &first)
-        .unwrap()
-        .already_stopped);
+    assert_eq!(
+        manager.status(&mut workspace_provider, &first).unwrap(),
+        WorkspaceStatus::Stopped
+    );
+    assert!(
+        manager
+            .stop(&mut workspace_provider, &first)
+            .unwrap()
+            .already_stopped
+    );
     assert_eq!(
         fs::read(workspace_root.join("unrelated-resource")).unwrap(),
         b"preserve"
     );
-    assert_eq!(manager.status(&mut workspace_provider, &second).unwrap(), WorkspaceStatus::Active);
+    assert_eq!(
+        manager.status(&mut workspace_provider, &second).unwrap(),
+        WorkspaceStatus::Active
+    );
     fs::remove_dir_all(root).unwrap();
 }
 

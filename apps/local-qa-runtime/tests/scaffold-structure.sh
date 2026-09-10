@@ -46,12 +46,15 @@ expected=$(printf '%s\n' \
   apps/local-qa-runtime/host/src/lib.rs \
   apps/local-qa-runtime/host/src/main.rs \
   apps/local-qa-runtime/host/src/ownership.rs \
+  apps/local-qa-runtime/host/src/source_workspace.rs \
   apps/local-qa-runtime/host/src/transport.rs \
   apps/local-qa-runtime/host/src/worker_process.rs \
   apps/local-qa-runtime/host/tests/admission_v2.rs \
   apps/local-qa-runtime/host/tests/environment_ownership.rs \
+  apps/local-qa-runtime/host/tests/environment_resource_lifecycle.rs \
   apps/local-qa-runtime/host/tests/fail_closed.rs \
   apps/local-qa-runtime/host/tests/loopback_sqlite.rs \
+  apps/local-qa-runtime/host/tests/source_workspace_lifecycle.rs \
   apps/local-qa-runtime/launcher/src/main.rs \
   apps/local-qa-runtime/secret-broker/src/main.rs \
   apps/local-qa-runtime/supervisor/src/main.rs \

@@ -111,19 +111,13 @@ pub trait EnvironmentProvider {
         -> Result<Option<ProviderResource>, RunError>;
     fn create(&mut self, request: CreateRequest) -> Result<ProviderResource, RunError>;
 
-    fn status(
-        &mut self,
-        _resource: &ProviderResource,
-    ) -> Result<ProviderStatusReceipt, RunError> {
+    fn status(&mut self, _resource: &ProviderResource) -> Result<ProviderStatusReceipt, RunError> {
         Err(RunError::Lifecycle(
             "environment provider status is unavailable",
         ))
     }
 
-    fn stop(
-        &mut self,
-        _resource: &ProviderResource,
-    ) -> Result<ProviderStopReceipt, RunError> {
+    fn stop(&mut self, _resource: &ProviderResource) -> Result<ProviderStopReceipt, RunError> {
         Err(RunError::Lifecycle(
             "environment provider stop is unavailable",
         ))
@@ -321,7 +315,7 @@ pub fn check_environment_readiness<P: EnvironmentProvider>(
         || receipt.attempts == 0
         || receipt.attempts > request.max_attempts
         || receipt.elapsed_ms > request.max_duration_ms
-        || receipt.observed_at_utc.as_str() >= request.deadline_utc
+        || receipt.observed_at_utc.as_str() >= request.deadline_utc.as_str()
     {
         return Err(RunError::Lifecycle(
             "readiness receipt does not match service identity or budget",

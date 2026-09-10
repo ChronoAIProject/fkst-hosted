@@ -31,20 +31,14 @@ impl EnvironmentProvider for LifecycleProvider {
         panic!("lifecycle hook tests must not create resources")
     }
 
-    fn status(
-        &mut self,
-        _resource: &ProviderResource,
-    ) -> Result<ProviderStatusReceipt, RunError> {
+    fn status(&mut self, _resource: &ProviderResource) -> Result<ProviderStatusReceipt, RunError> {
         Ok(ProviderStatusReceipt {
             resource: self.resource.clone(),
             state: self.state,
         })
     }
 
-    fn stop(
-        &mut self,
-        _resource: &ProviderResource,
-    ) -> Result<ProviderStopReceipt, RunError> {
+    fn stop(&mut self, _resource: &ProviderResource) -> Result<ProviderStopReceipt, RunError> {
         self.stop_calls += 1;
         self.state = ProviderResourceState::Stopped;
         Ok(ProviderStopReceipt {
@@ -106,9 +100,11 @@ fn typed_readiness_and_repeated_status_stop_preserve_exact_identity() {
         environment_status(&mut provider, &handle).unwrap(),
         EnvironmentStatus::Stopped
     );
-    assert!(stop_environment(&mut provider, &handle)
-        .unwrap()
-        .already_stopped);
+    assert!(
+        stop_environment(&mut provider, &handle)
+            .unwrap()
+            .already_stopped
+    );
     assert_eq!(provider.stop_calls, 1);
 }
 

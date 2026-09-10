@@ -95,15 +95,9 @@ pub trait WorkspaceProvider {
         immutable_revision: &ImmutableRevision,
     ) -> Result<WorkspaceMaterialization, RunError>;
 
-    fn status(
-        &mut self,
-        provider_identity: &str,
-    ) -> Result<WorkspaceProviderStatus, RunError>;
+    fn status(&mut self, provider_identity: &str) -> Result<WorkspaceProviderStatus, RunError>;
 
-    fn stop(
-        &mut self,
-        provider_identity: &str,
-    ) -> Result<WorkspaceProviderStopReceipt, RunError>;
+    fn stop(&mut self, provider_identity: &str) -> Result<WorkspaceProviderStopReceipt, RunError>;
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -246,27 +240,26 @@ impl SourceWorkspaceManager {
             let marker = read_marker(&handle.root)?;
             validate_marker(handle, &marker)?;
         }
-        let already_stopped = match workspace_provider
-            .status(&handle.workspace_provider_identity)?
-        {
-            WorkspaceProviderStatus::Active => {
-                let receipt = workspace_provider.stop(&handle.workspace_provider_identity)?;
-                if receipt.provider_identity != handle.workspace_provider_identity
-                    || !receipt.stopped
-                {
+        let already_stopped =
+            match workspace_provider.status(&handle.workspace_provider_identity)? {
+                WorkspaceProviderStatus::Active => {
+                    let receipt = workspace_provider.stop(&handle.workspace_provider_identity)?;
+                    if receipt.provider_identity != handle.workspace_provider_identity
+                        || !receipt.stopped
+                    {
+                        return Err(RunError::Lifecycle(
+                            "workspace stop receipt does not match owned identity",
+                        ));
+                    }
+                    false
+                }
+                WorkspaceProviderStatus::Stopped => true,
+                WorkspaceProviderStatus::Unknown => {
                     return Err(RunError::Lifecycle(
-                        "workspace stop receipt does not match owned identity",
+                        "workspace provider ownership is unknown",
                     ));
                 }
-                false
-            }
-            WorkspaceProviderStatus::Stopped => true,
-            WorkspaceProviderStatus::Unknown => {
-                return Err(RunError::Lifecycle(
-                    "workspace provider ownership is unknown",
-                ));
-            }
-        };
+            };
         if workspace_exists {
             fs::remove_dir_all(&handle.root)?;
         }
@@ -331,9 +324,7 @@ impl SourceWorkspaceManager {
                     cache_path,
                 }))
             }
-            _ => Err(RunError::Lifecycle(
-                "verified source cache is incomplete",
-            )),
+            _ => Err(RunError::Lifecycle("verified source cache is incomplete")),
         }
     }
 
@@ -411,9 +402,7 @@ impl SourceWorkspaceManager {
         validate_scalar("UUID", run_id)
             .map_err(|_| RunError::Lifecycle("workspace Run ID must be a canonical UUID"))?;
         if generation <= 0 {
-            return Err(RunError::Lifecycle(
-                "workspace generation must be positive",
-            ));
+            return Err(RunError::Lifecycle("workspace generation must be positive"));
         }
         Ok(self
             .workspace_root
@@ -534,8 +523,8 @@ fn validate_acquired(
     acquired: &AcquiredSource,
 ) -> Result<(), RunError> {
     acquired.immutable_revision.validate()?;
-    if acquired.source_object_id != lease.source_object_id
-        || acquired.provider_identity.is_empty()
+    if acquired.source_object_id != lease.source_object_id || acquired.provider_identity.is_empty()
+    {
         return Err(RunError::Lifecycle(
             "acquired SourceObject identity does not match the lease",
         ));
@@ -751,9 +740,9 @@ fn parse_marker_revision(value: &str) -> ImmutableRevision {
 
 fn path_is_relative_and_confined(path: &Path) -> bool {
     path.is_relative()
-        && path.components().all(|component| {
-            matches!(component, Component::Normal(_) | Component::CurDir)
-        })
+        && path
+            .components()
+            .all(|component| matches!(component, Component::Normal(_) | Component::CurDir))
 }
 
 pub fn validate_controlled_relative_path(path: &Path) -> Result<(), RunError> {
