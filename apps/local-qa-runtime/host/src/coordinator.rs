@@ -1178,16 +1178,68 @@ mod tests {
             .expect("row count must be readable")
     }
 
+    #[test]
+    fn temporary_directories_are_distinct_for_concurrent_identical_timestamps() {
+        let timestamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let barrier = std::sync::Barrier::new(2);
+        let results = thread::scope(|scope| {
+            let workers: Vec<_> = (0..2)
+                .map(|_| {
+                    scope.spawn(|| {
+                        barrier.wait();
+                        temporary_directory_with_timestamp("same-timestamp", timestamp)
+                    })
+                })
+                .collect();
+            workers
+                .into_iter()
+                .map(|worker| worker.join())
+                .collect::<Vec<_>>()
+        });
+        let directories: Vec<_> = results
+            .iter()
+            .filter_map(|result| result.as_ref().ok())
+            .collect();
+        let distinct = directories
+            .iter()
+            .collect::<std::collections::HashSet<_>>()
+            .len();
+        for directory in &directories {
+            fs::remove_dir_all(directory).expect("owned directory must be removed");
+        }
+        assert!(
+            results.iter().all(Result::is_ok),
+            "both concurrent allocations must succeed"
+        );
+        assert_eq!(
+            distinct, 2,
+            "each caller must reserve a different directory"
+        );
+    }
+
     fn temporary_directory(label: &str) -> std::path::PathBuf {
         let timestamp = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .expect("system clock must be after the Unix epoch")
             .as_nanos();
-        let directory = std::env::temp_dir().join(format!(
-            "fkst-local-qa-host-{label}-{}-{timestamp}",
-            std::process::id()
-        ));
-        fs::create_dir(&directory).expect("temporary directory must be created");
-        directory
+        temporary_directory_with_timestamp(label, timestamp)
+    }
+
+    fn temporary_directory_with_timestamp(label: &str, timestamp: u128) -> std::path::PathBuf {
+        for attempt in 0..128 {
+            let directory = std::env::temp_dir().join(format!(
+                "fkst-local-qa-host-{label}-{}-{timestamp}-{attempt}",
+                std::process::id()
+            ));
+            match fs::create_dir(&directory) {
+                Ok(()) => return directory,
+                Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
+                Err(error) => panic!("temporary directory must be created: {error}"),
+            }
+        }
+        panic!("temporary directory allocation exhausted");
     }
 }
