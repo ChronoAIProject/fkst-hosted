@@ -3280,6 +3280,9 @@ fn source_binding_v8_legacy_lifecycle_preserves_saved_bytes_and_denies_prepare()
         if state == "create_attempted" {
             connection.execute("UPDATE workspace_ownership SET resource_json=NULL, provider_identity=NULL WHERE stable_key=?1", [&key]).unwrap();
         }
+        connection
+            .execute_batch("ALTER TABLE admission_v2_records DROP COLUMN request_json")
+            .unwrap();
         connection.pragma_update(None, "user_version", 8).unwrap();
         let saved = || {
             connection.query_row("SELECT intent_json, resource_json FROM workspace_ownership WHERE stable_key=?1", [&key],
@@ -3291,7 +3294,7 @@ fn source_binding_v8_legacy_lifecycle_preserves_saved_bytes_and_denies_prepare()
             connection
                 .pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))
                 .unwrap(),
-            9
+            10
         );
         assert_eq!(saved(), before);
         let acquisitions = fixture.source.acquire_calls;

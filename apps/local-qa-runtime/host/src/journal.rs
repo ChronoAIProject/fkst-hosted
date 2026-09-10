@@ -60,6 +60,7 @@ pub(crate) struct V2AdmissionRecord<'a> {
     pub(crate) acceptance_bytes: &'a [u8],
     pub(crate) binding_json: &'a [u8],
     pub(crate) selection_json: &'a [u8],
+    pub(crate) request_json: &'a [u8],
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -225,9 +226,22 @@ impl Journal {
             6 => self.migrate_v7(),
             7 => self.migrate_v8(),
             8 => self.migrate_v9(),
-            9 => Ok(()),
+            9 => self.migrate_v10(),
+            10 => Ok(()),
             other => Err(RunError::UnsupportedDatabaseVersion(other)),
         }
+    }
+
+    fn migrate_v10(&mut self) -> Result<(), RunError> {
+        let transaction = self
+            .connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        transaction.execute_batch(
+            "ALTER TABLE admission_v2_records ADD COLUMN request_json BLOB;
+             PRAGMA user_version = 10;",
+        )?;
+        transaction.commit()?;
+        Ok(())
     }
 
     fn migrate_v2(&mut self) -> Result<(), RunError> {
@@ -788,9 +802,14 @@ impl Journal {
             params![record.run_id, event_json],
         )?;
         transaction.execute(
-            "INSERT INTO admission_v2_records (run_id, binding_json, selection_json)
-             VALUES (?1, ?2, ?3)",
-            params![record.run_id, record.binding_json, record.selection_json],
+            "INSERT INTO admission_v2_records (run_id, binding_json, selection_json, request_json)
+             VALUES (?1, ?2, ?3, ?4)",
+            params![
+                record.run_id,
+                record.binding_json,
+                record.selection_json,
+                record.request_json
+            ],
         )?;
         transaction.execute(
             "INSERT INTO active_run_slot (slot, run_id) VALUES (1, ?1)",
@@ -1726,6 +1745,7 @@ mod tests {
             acceptance_bytes: b"{}",
             binding_json: TEST_BINDING_JSON,
             selection_json: TEST_SELECTION_JSON,
+            request_json: b"{}",
         })
     }
 
@@ -2021,7 +2041,7 @@ mod tests {
 
     #[test]
     fn v8_workspace_migration_preserves_all_existing_bytes_and_does_not_claim_v2() {
-        for from_version in [7, 8] {
+        for from_version in [7, 8, 9] {
             let (directory, database) = temporary_database("v8-workspaces");
             let run_id = "00000000-0000-0000-0000-000000000014";
             let mut journal = Journal::open(&database).unwrap();
@@ -2052,6 +2072,10 @@ mod tests {
                     state: "active".to_owned(),
                 })
                 .unwrap();
+            journal
+                .connection
+                .execute_batch("ALTER TABLE admission_v2_records DROP COLUMN request_json;")
+                .unwrap();
             if from_version == 7 {
                 journal
                     .connection
@@ -2078,9 +2102,14 @@ mod tests {
                 ]
                 .iter()
                 .map(|table| {
+                    let columns = if *table == "admission_v2_records" {
+                        "run_id, binding_json, selection_json"
+                    } else {
+                        "*"
+                    };
                     let mut statement = journal
                         .connection
-                        .prepare(&format!("SELECT * FROM {table} ORDER BY rowid"))
+                        .prepare(&format!("SELECT {columns} FROM {table} ORDER BY rowid"))
                         .unwrap();
                     let columns = statement.column_count();
                     statement
@@ -2104,8 +2133,9 @@ mod tests {
                     .connection
                     .pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))
                     .unwrap(),
-                9
+                10
             );
+            assert!(migrated.reconstruct_v2_request(run_id).unwrap().is_none());
             assert!(migrated.workspaces().unwrap().is_empty());
             assert_eq!(snapshot(&migrated), before);
             assert_eq!(
@@ -2180,7 +2210,8 @@ mod tests {
         journal
             .connection
             .execute_batch(
-                "DROP TABLE workspace_ownership;
+                "ALTER TABLE admission_v2_records DROP COLUMN request_json;
+                 DROP TABLE workspace_ownership;
                  DROP TABLE effect_admissions;
                  DROP TABLE cancellation_controls;
                  PRAGMA user_version = 6;",

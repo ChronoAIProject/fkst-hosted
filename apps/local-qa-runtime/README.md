@@ -26,11 +26,34 @@ rejects every new v2 admission before executor resolution or Journal mutation.
 The MVP-0 deterministic verifier is available only through the explicit hidden
 test serving entry point. Those tests resolve the exact
 `qa.local-executor/v1` selection without invoking it and atomically persist the
-immutable acceptance bytes, binding, selection, ordered `run.accepted` Event,
-and singleton active slot in SQLite journal v6. Exact durable replay does not
+immutable acceptance bytes, canonical validated request, binding, selection,
+ordered `run.accepted` Event, and singleton active slot in SQLite journal v10. Exact durable replay does not
 re-contact current-claim authority, including after restart; changed keys or
 canonical request digests return a mutation-free conflict. `POST` is not an
 admission alias, and the former `{"kind":"inert"}` body is rejected.
+
+Journal v10 adds a nullable `request_json` BLOB without rewriting any prior row.
+New admissions retain only the canonical body produced by the existing strict
+request validator, including all digest-bound references, policy, budget, nonce,
+and producer version. HTTP headers, bearer/lease credentials, provider responses,
+and original transport bytes are never inputs to this storage path. This is not
+an Evidence sanitized export and is not automatically emitted to logs, Events,
+or errors. Callers must use non-credential fields for their documented purposes:
+strict schema validation cannot detect secrets hidden inside legal strings.
+
+`Journal::reconstruct_v2_request` returns the complete typed request after strict
+validation, canonical-byte and digest checks, and comparison with the original
+run, idempotency key, acceptance, attempt binding, and Executor selection in one
+SQLite snapshot. It checks the original acceptance window, so already accepted
+history remains readable after its deadline. Noncanonical, malformed, oversized,
+or inconsistent stored input returns a fixed `InvalidJournal` error without
+stored content. Missing runs and legacy null input return `None`; existing input
+with missing associated rows fails closed. The older `stored_v2_admission` read
+interface and exact response replay remain compatible, including legacy rows
+without reconstructable input. Reading historical input does not check or grant
+a current claim, invoke an executor, or make v2 eligible for `claim_next`.
+References alone do not supply production Source lease or environment-profile
+authority; the existing trusted-local Source binding and cache schema are unchanged.
 
 The snapshot route reads the current durable Run state and latest Event
 sequence. The Events route reads Events after the required cursor in ascending

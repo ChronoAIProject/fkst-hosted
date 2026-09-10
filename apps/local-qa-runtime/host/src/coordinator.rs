@@ -488,6 +488,7 @@ mod tests {
             acceptance_bytes: b"{}",
             binding_json: TEST_BINDING_JSON,
             selection_json: TEST_SELECTION_JSON,
+            request_json: b"{}",
         })
     }
 

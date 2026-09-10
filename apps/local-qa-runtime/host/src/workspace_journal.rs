@@ -84,7 +84,7 @@ impl Journal {
         // Serialization compatibility fence: v8 readers reject new binding fields.
         // Existing rows retain their exact bytes and no missing facts are inferred.
         self.connection.pragma_update(None, "user_version", 9)?;
-        Ok(())
+        self.migrate_v10()
     }
 
     pub fn workspace(&self, stable_key: &str) -> Result<Option<OwnedWorkspace>, RunError> {
