@@ -47,6 +47,7 @@ expected=$(printf '%s\n' \
   apps/local-qa-runtime/host/src/main.rs \
   apps/local-qa-runtime/host/src/ownership.rs \
   apps/local-qa-runtime/host/src/source_workspace.rs \
+  apps/local-qa-runtime/host/src/source_workspace_fs.rs \
   apps/local-qa-runtime/host/src/transport.rs \
   apps/local-qa-runtime/host/src/worker_process.rs \
   apps/local-qa-runtime/host/tests/admission_v2.rs \
@@ -145,10 +146,30 @@ grep -Eq '^fkst-local-qa-evidence-stager = \{ path = "\.\./evidence-stager", opt
   echo 'Local QA Host Evidence stager dependency must remain optional' >&2
   exit 1
 }
-grep -Eq '^nix = \{ version = "=0\.30\.1", features = \["signal"\], optional = true \}$' "$host_manifest" || {
-  echo 'Local QA Host process-group dependency must remain optional and pinned' >&2
-  exit 1
+node - "$host_manifest" <<'NODE'
+const assert = require('node:assert/strict');
+const manifest = require('node:fs').readFileSync(process.argv[2], 'utf8');
+let section = '';
+let nixDeclarations = 0;
+for (const line of manifest.split('\n')) {
+  if (/^\[.*\]$/.test(line)) section = line;
+  if (/^nix\s*=/.test(line)) {
+    nixDeclarations++;
+    assert.equal(section, "[target.'cfg(unix)'.dependencies]", 'Host nix must be Unix-scoped');
+    assert.equal(line, 'nix = { version = "=0.30.1", features = ["fs", "dir"] }',
+      'Host descriptor operations require exactly pinned Unix fs/dir support');
+  }
 }
+assert.equal(nixDeclarations, 1, 'Host must declare exactly one Unix nix dependency');
+const browserFeature = manifest.match(/^mvp0-browser-test = \[\n([\s\S]*?)^\]/m);
+assert.ok(browserFeature, 'Host Browser feature must be declared');
+assert.deepEqual(browserFeature[1].trim().split('\n').map(line => line.trim()), [
+  '"dep:fkst-local-qa-browser-adapter",',
+  '"fkst-local-qa-browser-adapter/mvp0-test-support",',
+  '"dep:fkst-local-qa-evidence-stager",',
+  '"nix/signal",',
+], 'Host signal support must stay behind the Browser feature');
+NODE
 grep -Eq '^fkst-qa-contracts = \{ path = "\.\./\.\./\.\./packages/qa-contracts/rust" \}$' "$host_manifest" || {
   echo 'Local QA Host must consume the checked-in QA contracts API' >&2
   exit 1

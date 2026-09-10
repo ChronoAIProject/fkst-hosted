@@ -1,7 +1,10 @@
-use std::fs::{self, File, OpenOptions};
-use std::io::{Read, Write};
 use std::net::SocketAddr;
 use std::path::{Component, Path, PathBuf};
+use std::sync::Arc;
+
+#[path = "source_workspace_fs.rs"]
+mod filesystem;
+use filesystem::{Directory, PinnedFile};
 
 use fkst_qa_contracts::{sha256_digest, validate_scalar, DigestBoundReferenceV2};
 use serde::{Deserialize, Serialize};
@@ -107,13 +110,14 @@ pub struct WorkspaceRequest {
     pub deadline_utc: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
 struct VerifiedSource {
     source_object_id: String,
     content_digest: String,
     immutable_revision: ImmutableRevision,
     provider_identity: String,
     cache_path: PathBuf,
+    blob: PinnedFile,
+    marker: PinnedFile,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -158,8 +162,8 @@ pub fn lifecycle_authority_blockers() -> [LifecycleAuthorityBlocker; 3] {
 }
 
 pub struct SourceWorkspaceManager {
-    cache_root: PathBuf,
-    workspace_root: PathBuf,
+    cache_root: Arc<Directory>,
+    workspace_root: Arc<Directory>,
 }
 
 impl SourceWorkspaceManager {
@@ -167,19 +171,19 @@ impl SourceWorkspaceManager {
         cache_root: impl AsRef<Path>,
         workspace_root: impl AsRef<Path>,
     ) -> Result<Self, RunError> {
-        let cache_root = prepare_owned_root(cache_root.as_ref())?;
-        let workspace_root = prepare_owned_root(workspace_root.as_ref())?;
+        let cache_root = cache_root.as_ref();
+        let workspace_root = workspace_root.as_ref();
         if cache_root == workspace_root
-            || cache_root.starts_with(&workspace_root)
-            || workspace_root.starts_with(&cache_root)
+            || cache_root.starts_with(workspace_root)
+            || workspace_root.starts_with(cache_root)
         {
             return Err(RunError::Lifecycle(
                 "source cache and workspace roots must be disjoint",
             ));
         }
         Ok(Self {
-            cache_root,
-            workspace_root,
+            cache_root: Directory::prepare(cache_root)?,
+            workspace_root: Directory::prepare(workspace_root)?,
         })
     }
 
@@ -193,6 +197,7 @@ impl SourceWorkspaceManager {
         clock: &impl Clock,
     ) -> Result<WorkspaceHandle, RunError> {
         validate_binding(source_reference, lease, request, clock)?;
+        self.workspace_directory(&request.run_id, request.generation, false)?;
         let verified = match self.load_cached_source(source_reference, lease)? {
             Some(verified) => verified,
             None => {
@@ -209,14 +214,11 @@ impl SourceWorkspaceManager {
         workspace_provider: &mut W,
         handle: &WorkspaceHandle,
     ) -> Result<WorkspaceStatus, RunError> {
-        self.validate_handle_path(handle)?;
-        let workspace_exists = handle.root.exists();
-        if workspace_exists {
-            validate_workspace_tree(&handle.root)?;
-            let marker = read_marker(&handle.root)?;
-            validate_marker(handle, &marker)?;
-        }
-        match workspace_provider.status(&handle.workspace_provider_identity)? {
+        let directory = self.validated_workspace(handle)?;
+        let workspace_exists = directory.is_some();
+        let status = workspace_provider.status(&handle.workspace_provider_identity)?;
+        self.revalidate_workspace(handle, directory.as_ref())?;
+        match status {
             WorkspaceProviderStatus::Active if workspace_exists => Ok(WorkspaceStatus::Active),
             WorkspaceProviderStatus::Stopped if !workspace_exists => Ok(WorkspaceStatus::Stopped),
             WorkspaceProviderStatus::Active | WorkspaceProviderStatus::Stopped => Err(
@@ -233,35 +235,36 @@ impl SourceWorkspaceManager {
         workspace_provider: &mut W,
         handle: &WorkspaceHandle,
     ) -> Result<WorkspaceStopReceipt, RunError> {
-        self.validate_handle_path(handle)?;
-        let workspace_exists = handle.root.exists();
-        if workspace_exists {
-            validate_workspace_tree(&handle.root)?;
-            let marker = read_marker(&handle.root)?;
-            validate_marker(handle, &marker)?;
-        }
-        let already_stopped =
-            match workspace_provider.status(&handle.workspace_provider_identity)? {
-                WorkspaceProviderStatus::Active => {
-                    let receipt = workspace_provider.stop(&handle.workspace_provider_identity)?;
-                    if receipt.provider_identity != handle.workspace_provider_identity
-                        || !receipt.stopped
-                    {
-                        return Err(RunError::Lifecycle(
-                            "workspace stop receipt does not match owned identity",
-                        ));
-                    }
-                    false
-                }
-                WorkspaceProviderStatus::Stopped => true,
-                WorkspaceProviderStatus::Unknown => {
+        let directory = self.validated_workspace(handle)?;
+        let status = workspace_provider.status(&handle.workspace_provider_identity)?;
+        self.revalidate_workspace(handle, directory.as_ref())?;
+        let already_stopped = match status {
+            WorkspaceProviderStatus::Active => {
+                if directory.is_none() {
                     return Err(RunError::Lifecycle(
-                        "workspace provider ownership is unknown",
+                        "active workspace has no owned filesystem marker",
                     ));
                 }
-            };
-        if workspace_exists {
-            fs::remove_dir_all(&handle.root)?;
+                let receipt = workspace_provider.stop(&handle.workspace_provider_identity)?;
+                if receipt.provider_identity != handle.workspace_provider_identity
+                    || !receipt.stopped
+                {
+                    return Err(RunError::Lifecycle(
+                        "workspace stop receipt does not match owned identity",
+                    ));
+                }
+                false
+            }
+            WorkspaceProviderStatus::Stopped => true,
+            WorkspaceProviderStatus::Unknown => {
+                return Err(RunError::Lifecycle(
+                    "workspace provider ownership is unknown",
+                ));
+            }
+        };
+        self.revalidate_workspace(handle, directory.as_ref())?;
+        if let Some(directory) = directory {
+            directory.tree()?.remove(WORKSPACE_MARKER.as_ref())?;
         }
         Ok(WorkspaceStopReceipt {
             run_id: handle.run_id.clone(),
@@ -277,21 +280,38 @@ impl SourceWorkspaceManager {
         acquired: AcquiredSource,
     ) -> Result<VerifiedSource, RunError> {
         let cache_path = self.cache_path(&source_reference.content_digest)?;
-        if cache_path.exists() {
-            verify_file_digest(&cache_path, &source_reference.content_digest)?;
-        } else {
-            write_cache_blob(&cache_path, &acquired.bytes)?;
-            verify_file_digest(&cache_path, &source_reference.content_digest)?;
-        }
-        let verified = VerifiedSource {
+        self.cache_root
+            .write_new(file_name(&cache_path)?, &acquired.bytes, true)?;
+        let blob = self
+            .cache_root
+            .open_file(file_name(&cache_path)?)?
+            .ok_or(RunError::Lifecycle("verified source cache is incomplete"))?;
+        verify_file_digest(&blob, &source_reference.content_digest)?;
+        let marker = SourceCacheMarker {
+            schema_version: "fkst.local-qa-source-cache/v1".to_owned(),
+            source_object_id: acquired.source_object_id.clone(),
+            content_digest: source_reference.content_digest.clone(),
+            immutable_revision: acquired.immutable_revision.marker_value(),
+            provider_identity: acquired.provider_identity.clone(),
+        };
+        let marker_path = cache_marker_path(&cache_path);
+        let bytes = serde_json::to_vec(&marker)
+            .map_err(|_| RunError::Lifecycle("source cache marker serialization failed"))?;
+        self.cache_root
+            .write_new(file_name(&marker_path)?, &bytes, false)?;
+        let marker = self
+            .cache_root
+            .open_file(file_name(&marker_path)?)?
+            .ok_or(RunError::Lifecycle("verified source cache is incomplete"))?;
+        Ok(VerifiedSource {
             source_object_id: acquired.source_object_id,
             content_digest: source_reference.content_digest.clone(),
             immutable_revision: acquired.immutable_revision,
             provider_identity: acquired.provider_identity,
             cache_path,
-        };
-        write_cache_marker(&verified)?;
-        Ok(verified)
+            blob,
+            marker,
+        })
     }
 
     fn load_cached_source(
@@ -301,11 +321,14 @@ impl SourceWorkspaceManager {
     ) -> Result<Option<VerifiedSource>, RunError> {
         let cache_path = self.cache_path(&source_reference.content_digest)?;
         let marker_path = cache_marker_path(&cache_path);
-        match (cache_path.exists(), marker_path.exists()) {
-            (false, false) => Ok(None),
-            (true, true) => {
-                verify_file_digest(&cache_path, &source_reference.content_digest)?;
-                let marker = read_cache_marker(&marker_path)?;
+        match (
+            self.cache_root.open_file(file_name(&cache_path)?)?,
+            self.cache_root.open_file(file_name(&marker_path)?)?,
+        ) {
+            (None, None) => Ok(None),
+            (Some(blob), Some(marker_file)) => {
+                verify_file_digest(&blob, &source_reference.content_digest)?;
+                let marker = read_cache_marker(&marker_file)?;
                 let immutable_revision = parse_marker_revision(&marker.immutable_revision);
                 immutable_revision.validate()?;
                 if marker.source_object_id != lease.source_object_id
@@ -322,6 +345,8 @@ impl SourceWorkspaceManager {
                     immutable_revision,
                     provider_identity: marker.provider_identity,
                     cache_path,
+                    blob,
+                    marker: marker_file,
                 }))
             }
             _ => Err(RunError::Lifecycle("verified source cache is incomplete")),
@@ -336,42 +361,46 @@ impl SourceWorkspaceManager {
         clock: &impl Clock,
     ) -> Result<WorkspaceHandle, RunError> {
         ensure_before_deadline(clock, &request.deadline_utc)?;
+        source.blob.ensure_attached()?;
+        source.marker.ensure_attached()?;
+        verify_file_digest(&source.blob, &source.content_digest)?;
         let root = self.workspace_path(&request.run_id, request.generation)?;
-        if root.exists() {
-            let marker = read_marker(&root)?;
+        if let Some(directory) =
+            self.workspace_directory(&request.run_id, request.generation, false)?
+        {
+            directory.tree()?.ensure_attached()?;
+            let marker = read_marker(&directory)?;
             let handle = marker.to_handle(root);
             validate_replay(request, source, &handle)?;
             return Ok(handle);
         }
 
-        let run_root = root
-            .parent()
-            .ok_or(RunError::Lifecycle("workspace path has no parent"))?;
-        if !run_root.exists() {
-            fs::create_dir(run_root)?;
-        }
-        fs::create_dir(&root)?;
-        let materialization = match workspace_provider.materialize(
+        let run_root = self
+            .workspace_root
+            .child(request.run_id.as_ref(), true)?
+            .ok_or(RunError::Lifecycle("workspace Run directory is missing"))?;
+        let directory = run_root.create_child(file_name(&root)?)?;
+        source.blob.ensure_attached()?;
+        source.marker.ensure_attached()?;
+        verify_file_digest(&source.blob, &source.content_digest)?;
+        directory.ensure_attached()?;
+        // The provider receives paths, not descriptors. It must protect its own
+        // filesystem accesses; these checks only bracket that external boundary.
+        let materialization = workspace_provider.materialize(
             &source.cache_path,
             &root,
             &source.immutable_revision,
-        ) {
-            Ok(materialization) => materialization,
-            Err(error) => {
-                let _ = fs::remove_dir_all(&root);
-                return Err(error);
-            }
-        };
+        )?;
+        directory.ensure_attached()?;
+        source.blob.ensure_attached()?;
+        source.marker.ensure_attached()?;
         if materialization.provider_identity.is_empty() {
-            let _ = fs::remove_dir_all(&root);
             return Err(RunError::Lifecycle(
                 "workspace provider identity must not be empty",
             ));
         }
-        if let Err(error) = validate_workspace_tree(&root) {
-            let _ = fs::remove_dir_all(&root);
-            return Err(error);
-        }
+        // The ownership marker written below consumes one entry in the final tree.
+        directory.tree_with_reserved_entries(1)?.ensure_attached()?;
         let handle = WorkspaceHandle {
             run_id: request.run_id.clone(),
             generation: request.generation,
@@ -382,10 +411,7 @@ impl SourceWorkspaceManager {
             workspace_provider_identity: materialization.provider_identity,
             root,
         };
-        if let Err(error) = write_marker(&handle) {
-            let _ = fs::remove_dir_all(&handle.root);
-            return Err(error);
-        }
+        write_marker(&directory, &handle)?;
         Ok(handle)
     }
 
@@ -395,7 +421,10 @@ impl SourceWorkspaceManager {
         let digest_value = digest
             .strip_prefix("sha256:")
             .ok_or(RunError::Lifecycle("source digest must be SHA-256"))?;
-        Ok(self.cache_root.join(format!("{digest_value}.source")))
+        Ok(self
+            .cache_root
+            .path()
+            .join(format!("{digest_value}.source")))
     }
 
     fn workspace_path(&self, run_id: &str, generation: i64) -> Result<PathBuf, RunError> {
@@ -406,8 +435,55 @@ impl SourceWorkspaceManager {
         }
         Ok(self
             .workspace_root
+            .path()
             .join(run_id)
             .join(format!("generation-{generation}")))
+    }
+
+    fn workspace_directory(
+        &self,
+        run_id: &str,
+        generation: i64,
+        create: bool,
+    ) -> Result<Option<Arc<Directory>>, RunError> {
+        let path = self.workspace_path(run_id, generation)?;
+        let Some(run_root) = self.workspace_root.child(run_id.as_ref(), create)? else {
+            return Ok(None);
+        };
+        run_root.child(file_name(&path)?, create)
+    }
+
+    fn validated_workspace(
+        &self,
+        handle: &WorkspaceHandle,
+    ) -> Result<Option<Arc<Directory>>, RunError> {
+        self.validate_handle_path(handle)?;
+        let directory = self.workspace_directory(&handle.run_id, handle.generation, false)?;
+        if let Some(directory) = &directory {
+            directory.tree()?.ensure_attached()?;
+            validate_marker(handle, &read_marker(directory)?)?;
+        }
+        Ok(directory)
+    }
+
+    fn revalidate_workspace(
+        &self,
+        handle: &WorkspaceHandle,
+        directory: Option<&Arc<Directory>>,
+    ) -> Result<(), RunError> {
+        if let Some(directory) = directory {
+            directory.ensure_attached()?;
+            directory.tree()?.ensure_attached()?;
+            validate_marker(handle, &read_marker(directory)?)?;
+        } else if self
+            .workspace_directory(&handle.run_id, handle.generation, false)?
+            .is_some()
+        {
+            return Err(RunError::Lifecycle(
+                "workspace appeared across provider boundary",
+            ));
+        }
+        Ok(())
     }
 
     fn validate_handle_path(&self, handle: &WorkspaceHandle) -> Result<(), RunError> {
@@ -469,18 +545,9 @@ impl WorkspaceMarker {
     }
 }
 
-fn prepare_owned_root(path: &Path) -> Result<PathBuf, RunError> {
-    if !path.is_absolute() {
-        return Err(RunError::Lifecycle("lifecycle roots must be absolute"));
-    }
-    fs::create_dir_all(path)?;
-    let metadata = fs::symlink_metadata(path)?;
-    if metadata.file_type().is_symlink() || !metadata.is_dir() {
-        return Err(RunError::Lifecycle(
-            "lifecycle root must be a real directory",
-        ));
-    }
-    Ok(fs::canonicalize(path)?)
+fn file_name(path: &Path) -> Result<&std::ffi::OsStr, RunError> {
+    path.file_name()
+        .ok_or(RunError::Lifecycle("lifecycle file name is missing"))
 }
 
 fn validate_binding(
@@ -549,75 +616,12 @@ fn ensure_before_deadline(clock: &impl Clock, deadline_utc: &str) -> Result<(), 
     Ok(())
 }
 
-fn write_cache_blob(path: &Path, bytes: &[u8]) -> Result<(), RunError> {
-    let temporary_path = path.with_extension("source.partial");
-    let mut file = OpenOptions::new()
-        .create_new(true)
-        .write(true)
-        .open(&temporary_path)?;
-    if let Err(error) = (|| -> Result<(), std::io::Error> {
-        file.write_all(bytes)?;
-        file.sync_all()?;
-        fs::rename(&temporary_path, path)?;
-        Ok(())
-    })() {
-        let _ = fs::remove_file(&temporary_path);
-        if path.exists() {
-            return verify_file_digest(path, &sha256_digest(bytes));
-        }
-        return Err(error.into());
-    }
-    let mut permissions = fs::metadata(path)?.permissions();
-    permissions.set_readonly(true);
-    fs::set_permissions(path, permissions)?;
-    Ok(())
-}
-
 fn cache_marker_path(cache_path: &Path) -> PathBuf {
     cache_path.with_extension("source.json")
 }
 
-fn write_cache_marker(source: &VerifiedSource) -> Result<(), RunError> {
-    let marker_path = cache_marker_path(&source.cache_path);
-    if marker_path.exists() {
-        let marker = read_cache_marker(&marker_path)?;
-        if marker.source_object_id != source.source_object_id
-            || marker.content_digest != source.content_digest
-            || marker.immutable_revision != source.immutable_revision.marker_value()
-            || marker.provider_identity != source.provider_identity
-        {
-            return Err(RunError::Lifecycle(
-                "conflicting verified source cache metadata",
-            ));
-        }
-        return Ok(());
-    }
-    let marker = SourceCacheMarker {
-        schema_version: "fkst.local-qa-source-cache/v1".to_owned(),
-        source_object_id: source.source_object_id.clone(),
-        content_digest: source.content_digest.clone(),
-        immutable_revision: source.immutable_revision.marker_value(),
-        provider_identity: source.provider_identity.clone(),
-    };
-    let bytes = serde_json::to_vec(&marker)
-        .map_err(|_| RunError::Lifecycle("source cache marker serialization failed"))?;
-    let mut file = OpenOptions::new()
-        .create_new(true)
-        .write(true)
-        .open(marker_path)?;
-    file.write_all(&bytes)?;
-    file.sync_all()?;
-    Ok(())
-}
-
-fn read_cache_marker(path: &Path) -> Result<SourceCacheMarker, RunError> {
-    let metadata = fs::symlink_metadata(path)?;
-    if metadata.file_type().is_symlink() || !metadata.is_file() {
-        return Err(RunError::Lifecycle(
-            "source cache marker is not a real file",
-        ));
-    }
-    let marker = serde_json::from_slice::<SourceCacheMarker>(&fs::read(path)?)
+fn read_cache_marker(file: &PinnedFile) -> Result<SourceCacheMarker, RunError> {
+    let marker = serde_json::from_slice::<SourceCacheMarker>(&file.bytes()?)
         .map_err(|_| RunError::Lifecycle("source cache marker is invalid"))?;
     if marker.schema_version != "fkst.local-qa-source-cache/v1" {
         return Err(RunError::Lifecycle(
@@ -627,62 +631,25 @@ fn read_cache_marker(path: &Path) -> Result<SourceCacheMarker, RunError> {
     Ok(marker)
 }
 
-fn verify_file_digest(path: &Path, expected_digest: &str) -> Result<(), RunError> {
-    let mut bytes = Vec::new();
-    File::open(path)?.read_to_end(&mut bytes)?;
+fn verify_file_digest(file: &PinnedFile, expected_digest: &str) -> Result<(), RunError> {
+    let bytes = file.bytes()?;
     if sha256_digest(&bytes) != expected_digest {
         return Err(RunError::Lifecycle("verified source cache is corrupt"));
     }
     Ok(())
 }
 
-fn validate_workspace_tree(root: &Path) -> Result<(), RunError> {
-    let metadata = fs::symlink_metadata(root)?;
-    if metadata.file_type().is_symlink() || !metadata.is_dir() {
-        return Err(RunError::Lifecycle(
-            "workspace root must be a real directory",
-        ));
-    }
-    let mut pending = vec![root.to_path_buf()];
-    while let Some(directory) = pending.pop() {
-        for entry in fs::read_dir(directory)? {
-            let entry = entry?;
-            let metadata = fs::symlink_metadata(entry.path())?;
-            if metadata.file_type().is_symlink() {
-                return Err(RunError::Lifecycle("workspace contains a symlink"));
-            }
-            if metadata.is_dir() {
-                pending.push(entry.path());
-            } else if !metadata.is_file() {
-                return Err(RunError::Lifecycle(
-                    "workspace contains an unsupported filesystem object",
-                ));
-            }
-        }
-    }
-    Ok(())
-}
-
-fn write_marker(handle: &WorkspaceHandle) -> Result<(), RunError> {
-    let marker_path = handle.root.join(WORKSPACE_MARKER);
+fn write_marker(directory: &Arc<Directory>, handle: &WorkspaceHandle) -> Result<(), RunError> {
     let bytes = serde_json::to_vec(&WorkspaceMarker::from_handle(handle))
         .map_err(|_| RunError::Lifecycle("workspace marker serialization failed"))?;
-    let mut marker = OpenOptions::new()
-        .create_new(true)
-        .write(true)
-        .open(marker_path)?;
-    marker.write_all(&bytes)?;
-    marker.sync_all()?;
-    Ok(())
+    directory.write_new(WORKSPACE_MARKER.as_ref(), &bytes, false)
 }
 
-fn read_marker(root: &Path) -> Result<WorkspaceMarker, RunError> {
-    let marker_path = root.join(WORKSPACE_MARKER);
-    let metadata = fs::symlink_metadata(&marker_path)?;
-    if metadata.file_type().is_symlink() || !metadata.is_file() {
-        return Err(RunError::Lifecycle("workspace marker is not a real file"));
-    }
-    let bytes = fs::read(marker_path)?;
+fn read_marker(directory: &Arc<Directory>) -> Result<WorkspaceMarker, RunError> {
+    let file = directory
+        .open_file(WORKSPACE_MARKER.as_ref())?
+        .ok_or(RunError::Lifecycle("workspace marker is missing"))?;
+    let bytes = file.bytes()?;
     let marker = serde_json::from_slice::<WorkspaceMarker>(&bytes)
         .map_err(|_| RunError::Lifecycle("workspace marker is invalid"))?;
     if marker.schema_version != "fkst.local-qa-workspace/v1" {
@@ -725,7 +692,13 @@ fn validate_replay(
             "existing workspace does not match the same-Run source intent",
         ));
     }
-    validate_workspace_tree(&handle.root)
+    handle.immutable_revision.validate()?;
+    if handle.workspace_provider_identity.is_empty() {
+        return Err(RunError::Lifecycle(
+            "workspace provider identity must not be empty",
+        ));
+    }
+    Ok(())
 }
 
 fn parse_marker_revision(value: &str) -> ImmutableRevision {
