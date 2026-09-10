@@ -145,16 +145,42 @@ repeated. This is infrastructure execution only: it is not enabled in default
 production, does not make v2 rows claimable, and does not claim Testing Packages
 `CaseResultSet` authority.
 
-The Host now contains reusable lifecycle drivers for an authority-bound immutable
-Source payload, a revalidated read-only Source cache, fresh Runtime-derived
-per-Run workspaces, exact Environment ownership status/stop receipts, and typed
-bounded loopback readiness receipts. The Source driver verifies payload bytes
-before cache or workspace effects, rejects floating revisions and unsafe paths,
-reuses the same verified cache without re-contacting the provider, and confines
-idempotent workspace removal to the exact owned Run/generation path.
+The Host contains reusable local lifecycle drivers for an immutable Source payload,
+a revalidated read-only Source cache, fresh Runtime-derived per-Run workspaces,
+exact Environment ownership status/stop receipts, and bounded loopback readiness
+receipts. Source acquisition requires an explicit `TrustedLocalSourceBinding`
+supplied by the trusted local embedding independently of the incoming reference.
+It binds the complete reference kind/id/schema/digest, a separate source object ID,
+the expected raw-byte SHA-256, expected immutable revision, and mandatory nonempty
+source provider scope and identity. Every incoming reference must match that binding
+and the pinned generic reference shape. A schema string such as `qa.source/v1`
+does not establish a registered executable Source schema or grant authority.
 
-The bounded workspace ownership driver uses the existing Host Journal's v8
-workspace records. `SourceWorkspaceManager::new` takes an open persistent
+The driver hashes actual raw bytes and compares the provider's declared object,
+revision, scope and identity with those expectations. Reference digests and
+`ObjectDigest` revision labels remain distinct from raw-byte digests. Matching
+Git commit or snapshot/tree labels is local consistency, not proof of Git contents,
+a reconstructed tree, or authenticated provenance. No signature, issuer, transport,
+production Source lease, or new contract schema is implemented here.
+
+Byte storage remains addressed by raw digest, with explicit v2 byte metadata and
+separate receipts for complete source bindings. Exact binding replay revalidates
+both metadata and raw bytes without re-contacting the provider. A different binding
+must freshly acquire and match all expected facts before sharing the same bytes.
+Existing v1 metadata, corrupt or partial records, and an existing workspace's missing
+source receipt are unavailable; the manager does not delete, reconstruct or silently
+upgrade them. A missing receipt for a new binding never suffices to authorize reuse.
+General cache publication/recovery and garbage collection remain a separate unit.
+
+The bounded workspace ownership driver uses the Host Journal's v9 serialization
+compatibility fence, so older v8 readers reject databases containing the new format.
+Migration advances only the version; it preserves existing v8 rows byte-for-byte
+without inventing source bindings. Missing `source_binding` deserializes as `None`
+and is omitted on serialization. State transitions retain existing intent/resource
+JSON bytes, including legacy formatting. Legacy prepare is denied before acquisition;
+independent recorded workspace ownership still permits safe recover/status/stop.
+New workspace intent includes the full binding and rejects changes within the same
+Run/generation before acquisition or workspace effects. `SourceWorkspaceManager::new` takes an open persistent
 Journal and an explicit local provider scope with its additional writable roots.
 Its database parent must be disjoint from cache, workspace and declared provider
 writable trees. On Unix, `Journal::open` optionally observes the main file and parent

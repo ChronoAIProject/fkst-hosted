@@ -17,8 +17,6 @@ use crate::journal::Journal;
 use crate::ownership::Clock;
 use crate::RunError;
 
-const SOURCE_KIND: &str = "source";
-const SOURCE_SCHEMA_VERSION: &str = "qa.source/v1";
 const WORKSPACE_MARKER: &str = ".fkst-workspace.json";
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -55,13 +53,27 @@ impl ImmutableRevision {
     }
 }
 
+/// Expectations supplied by the trusted local embedding, independently of the
+/// incoming reference. This is not a production lease or authenticated authority.
+/// Revision and provider labels are declared facts; only raw bytes are hashed here.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct TrustedLocalSourceBinding {
+    pub reference: DigestBoundReferenceV2,
+    pub source_object_id: String,
+    pub expected_raw_digest: String,
+    pub expected_revision: ImmutableRevision,
+    pub expected_provider_scope: String,
+    pub expected_provider_identity: String,
+}
+
+/// Local acquisition envelope; no signed SourceObjectLease contract is implemented.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SourceObjectLease {
     pub lease_id: String,
-    pub source_object_id: String,
+    pub binding: TrustedLocalSourceBinding,
     pub run_id: String,
     pub generation: i64,
-    pub content_digest: String,
     pub deadline_utc: String,
 }
 
@@ -69,6 +81,7 @@ pub struct SourceObjectLease {
 pub struct AcquiredSource {
     pub source_object_id: String,
     pub immutable_revision: ImmutableRevision,
+    pub provider_scope: String,
     pub provider_identity: String,
     pub bytes: Vec<u8>,
 }
@@ -160,10 +173,24 @@ struct VerifiedSource {
     cache_path: PathBuf,
     blob: PinnedFile,
     marker: PinnedFile,
+    binding_receipt: PinnedFile,
+    binding: TrustedLocalSourceBinding,
+}
+
+impl VerifiedSource {
+    fn validate(&self) -> Result<(), RunError> {
+        verify_file_digest(&self.blob, &self.binding.expected_raw_digest)?;
+        let marker = read_cache_marker(&self.marker)?;
+        if marker.content_digest != self.binding.expected_raw_digest {
+            return Err(RunError::Lifecycle("source cache byte metadata mismatch"));
+        }
+        validate_binding_receipt(&self.binding_receipt, &self.binding)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WorkspaceHandle {
+    source_binding: Option<TrustedLocalSourceBinding>,
     run_id: String,
     generation: i64,
     source_object_id: String,
@@ -427,13 +454,32 @@ impl SourceWorkspaceManager {
         self.check_provider(workspace_provider)?;
         self.with_journal(|_| Ok(()))?;
         validate_binding(source_reference, lease, request, clock)?;
+        let existing_record = self.with_journal(|journal| {
+            journal.workspace(&stable_workspace_key(&request.run_id, request.generation))
+        })?;
+        if let Some(record) = &existing_record {
+            if record.intent.source_binding.as_ref() != Some(&lease.binding)
+                || record.intent.source_lease_id != lease.lease_id
+                || record.intent.deadline_utc != request.deadline_utc
+            {
+                return Err(RunError::Lifecycle(
+                    "missing or conflicting durable source binding",
+                ));
+            }
+        }
         self.workspace_directory(&request.run_id, request.generation, false)?;
-        let verified = match self.load_cached_source(source_reference, lease)? {
+        let verified = match self.load_cached_source(&lease.binding)? {
             Some(verified) => verified,
+            None if existing_record.is_some() => {
+                return Err(RunError::Lifecycle(
+                    "existing workspace source receipt is unavailable",
+                ));
+            }
             None => {
                 let acquired = source_provider.acquire(lease)?;
-                validate_acquired(source_reference, lease, &acquired)?;
-                self.cache_verified_source(source_reference, acquired)?
+                validate_acquired(&lease.binding, &acquired)?;
+                ensure_before_deadline(clock, &request.deadline_utc)?;
+                self.cache_verified_source(&lease.binding, acquired)?
             }
         };
         self.materialize_workspace(workspace_provider, lease, request, &verified, clock)
@@ -592,77 +638,102 @@ impl SourceWorkspaceManager {
 
     fn cache_verified_source(
         &self,
-        source_reference: &DigestBoundReferenceV2,
+        binding: &TrustedLocalSourceBinding,
         acquired: AcquiredSource,
     ) -> Result<VerifiedSource, RunError> {
-        let cache_path = self.cache_path(&source_reference.content_digest)?;
-        self.cache_root
-            .write_new(file_name(&cache_path)?, &acquired.bytes, true)?;
-        let blob = self
+        // Recheck after the provider callback. Existing partial/corrupt storage is
+        // never deleted or completed by this acquisition path.
+        if let Some(source) = self.load_cached_source(binding)? {
+            return Ok(source);
+        }
+        let cache_path = self.cache_path(&binding.expected_raw_digest)?;
+        let new_blob = self
             .cache_root
             .open_file(file_name(&cache_path)?)?
-            .ok_or(RunError::Lifecycle("verified source cache is incomplete"))?;
-        verify_file_digest(&blob, &source_reference.content_digest)?;
-        let marker = SourceCacheMarker {
-            schema_version: "fkst.local-qa-source-cache/v1".to_owned(),
-            source_object_id: acquired.source_object_id.clone(),
-            content_digest: source_reference.content_digest.clone(),
-            immutable_revision: acquired.immutable_revision.marker_value(),
-            provider_identity: acquired.provider_identity.clone(),
-        };
-        let marker_path = cache_marker_path(&cache_path);
-        let bytes = serde_json::to_vec(&marker)
-            .map_err(|_| RunError::Lifecycle("source cache marker serialization failed"))?;
-        self.cache_root
-            .write_new(file_name(&marker_path)?, &bytes, false)?;
-        let marker = self
-            .cache_root
-            .open_file(file_name(&marker_path)?)?
-            .ok_or(RunError::Lifecycle("verified source cache is incomplete"))?;
-        Ok(VerifiedSource {
+            .is_none();
+        if new_blob {
+            self.cache_root
+                .write_new(file_name(&cache_path)?, &acquired.bytes, true)?;
+        }
+        let receipt = SourceBindingReceipt {
+            schema_version: "fkst.local-qa-source-binding/v1".to_owned(),
+            binding: binding.clone(),
             source_object_id: acquired.source_object_id,
-            content_digest: source_reference.content_digest.clone(),
+            raw_digest: sha256_digest(&acquired.bytes),
             immutable_revision: acquired.immutable_revision,
+            provider_scope: acquired.provider_scope,
             provider_identity: acquired.provider_identity,
-            cache_path,
-            blob,
-            marker,
-        })
+        };
+        self.cache_root.write_new(
+            file_name(&self.binding_receipt_path(binding)?)?,
+            &encode_cache(&receipt)?,
+            false,
+        )?;
+        if new_blob {
+            // Initial completion follows the receipt: interrupted creation remains
+            // partial, rather than appearing to be reusable byte-only storage.
+            let marker = SourceCacheMarker {
+                schema_version: "fkst.local-qa-source-cache/v2".to_owned(),
+                content_digest: binding.expected_raw_digest.clone(),
+            };
+            self.cache_root.write_new(
+                file_name(&cache_marker_path(&cache_path))?,
+                &encode_cache(&marker)?,
+                false,
+            )?;
+        }
+        self.load_cached_source(binding)?.ok_or(RunError::Lifecycle(
+            "source binding receipt publication is incomplete",
+        ))
+    }
+
+    fn binding_receipt_path(
+        &self,
+        binding: &TrustedLocalSourceBinding,
+    ) -> Result<PathBuf, RunError> {
+        let digest = sha256_digest(&encode_cache(binding)?);
+        Ok(self.cache_root.path().join(format!(
+            "{}.binding.json",
+            digest.strip_prefix("sha256:").expect("SHA-256 prefix")
+        )))
     }
 
     fn load_cached_source(
         &self,
-        source_reference: &DigestBoundReferenceV2,
-        lease: &SourceObjectLease,
+        binding: &TrustedLocalSourceBinding,
     ) -> Result<Option<VerifiedSource>, RunError> {
-        let cache_path = self.cache_path(&source_reference.content_digest)?;
+        let cache_path = self.cache_path(&binding.expected_raw_digest)?;
         let marker_path = cache_marker_path(&cache_path);
+        let binding_receipt = self
+            .cache_root
+            .open_file(file_name(&self.binding_receipt_path(binding)?)?)?;
         match (
             self.cache_root.open_file(file_name(&cache_path)?)?,
             self.cache_root.open_file(file_name(&marker_path)?)?,
         ) {
-            (None, None) => Ok(None),
+            (None, None) if binding_receipt.is_none() => Ok(None),
             (Some(blob), Some(marker_file)) => {
-                verify_file_digest(&blob, &source_reference.content_digest)?;
+                verify_file_digest(&blob, &binding.expected_raw_digest)?;
                 let marker = read_cache_marker(&marker_file)?;
-                let immutable_revision = parse_marker_revision(&marker.immutable_revision);
-                immutable_revision.validate()?;
-                if marker.source_object_id != lease.source_object_id
-                    || marker.content_digest != source_reference.content_digest
-                    || marker.provider_identity.is_empty()
-                {
-                    return Err(RunError::Lifecycle(
-                        "verified source cache metadata does not match the lease",
-                    ));
+                if marker.content_digest != binding.expected_raw_digest {
+                    return Err(RunError::Lifecycle("source cache byte metadata mismatch"));
                 }
+                let Some(binding_receipt) = binding_receipt else {
+                    // Verified byte storage is reusable, but is not a source binding.
+                    // Each distinct binding must freshly acquire and check its facts.
+                    return Ok(None);
+                };
+                validate_binding_receipt(&binding_receipt, binding)?;
                 Ok(Some(VerifiedSource {
-                    source_object_id: marker.source_object_id,
-                    content_digest: marker.content_digest,
-                    immutable_revision,
-                    provider_identity: marker.provider_identity,
+                    source_object_id: binding.source_object_id.clone(),
+                    content_digest: binding.expected_raw_digest.clone(),
+                    immutable_revision: binding.expected_revision.clone(),
+                    provider_identity: binding.expected_provider_identity.clone(),
                     cache_path,
                     blob,
                     marker: marker_file,
+                    binding_receipt,
+                    binding: binding.clone(),
                 }))
             }
             _ => Err(RunError::Lifecycle("verified source cache is incomplete")),
@@ -678,10 +749,9 @@ impl SourceWorkspaceManager {
         clock: &impl Clock,
     ) -> Result<WorkspaceHandle, RunError> {
         ensure_before_deadline(clock, &request.deadline_utc)?;
-        source.blob.ensure_attached()?;
-        source.marker.ensure_attached()?;
-        verify_file_digest(&source.blob, &source.content_digest)?;
+        source.validate()?;
         let intent = WorkspaceIntent {
+            source_binding: Some(lease.binding.clone()),
             stable_key: stable_workspace_key(&request.run_id, request.generation),
             run_id: request.run_id.clone(),
             generation: request.generation,
@@ -700,6 +770,7 @@ impl SourceWorkspaceManager {
             let handle = self.replay_workspace(workspace_provider, &record)?;
             let directory = self.validated_record_directory(&record, &handle)?;
             ensure_before_deadline(clock, &intent.deadline_utc)?;
+            source.validate()?;
             self.revalidate_record_directory(&record, &handle, directory.as_ref())?;
             return Ok(handle);
         }
@@ -758,9 +829,7 @@ impl SourceWorkspaceManager {
                 if record.state == WorkspaceState::DirectoryReady && record.blocker.is_none() =>
             {
                 ensure_before_deadline(clock, &intent.deadline_utc)?;
-                source.blob.ensure_attached()?;
-                source.marker.ensure_attached()?;
-                verify_file_digest(&source.blob, &source.content_digest)?;
+                source.validate()?;
                 directory.ensure_attached()?;
                 record = self.transition(&record, WorkspaceState::CreateAttempted)?;
                 // Providers receive paths and must protect their own accesses. No
@@ -784,13 +853,13 @@ impl SourceWorkspaceManager {
             _ => return self.block(&record, "workspace discovery does not authorize creation"),
         }
         directory.ensure_attached()?;
-        source.blob.ensure_attached()?;
-        source.marker.ensure_attached()?;
+        source.validate()?;
         let handle = self.handle_from_record(&record)?;
         self.publish_marker(&directory, &handle)?;
         // Bind and publish obtained ownership before observing the Host clock.
         // A late return (or clock failure) must retain recover/status/stop authority.
         ensure_before_deadline(clock, &intent.deadline_utc)?;
+        source.validate()?;
         self.revalidate_record_directory(&record, &handle, Some(&directory))?;
         Ok(handle)
     }
@@ -889,6 +958,7 @@ impl SourceWorkspaceManager {
             ));
         }
         Ok(WorkspaceHandle {
+            source_binding: intent.source_binding.clone(),
             run_id: intent.run_id.clone(),
             generation: intent.generation,
             source_object_id: intent.source_object_id.clone(),
@@ -1026,11 +1096,21 @@ struct WorkspaceMarker {
 }
 
 #[derive(Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
 struct SourceCacheMarker {
     schema_version: String,
-    source_object_id: String,
     content_digest: String,
-    immutable_revision: String,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+struct SourceBindingReceipt {
+    schema_version: String,
+    binding: TrustedLocalSourceBinding,
+    source_object_id: String,
+    raw_digest: String,
+    immutable_revision: ImmutableRevision,
+    provider_scope: String,
     provider_identity: String,
 }
 
@@ -1060,25 +1140,19 @@ fn validate_binding(
     request: &WorkspaceRequest,
     clock: &impl Clock,
 ) -> Result<(), RunError> {
-    if source_reference.kind != SOURCE_KIND
-        || source_reference.schema_version != SOURCE_SCHEMA_VERSION
-    {
+    validate_source_expectations(&lease.binding)?;
+    if source_reference != &lease.binding.reference {
         return Err(RunError::Lifecycle(
-            "source reference is not the approved immutable source type",
+            "source reference does not match trusted local binding",
         ));
     }
-    validate_scalar("Sha256", &source_reference.content_digest)
-        .map_err(|_| RunError::Lifecycle("source reference digest must be SHA-256"))?;
     validate_scalar("UUID", &request.run_id)
         .map_err(|_| RunError::Lifecycle("workspace Run ID must be a canonical UUID"))?;
     if lease.lease_id.is_empty()
-        || lease.source_object_id.is_empty()
         || lease.generation <= 0
         || request.generation <= 0
-        || lease.source_object_id != source_reference.id
         || lease.run_id != request.run_id
         || lease.generation != request.generation
-        || lease.content_digest != source_reference.content_digest
         || lease.deadline_utc != request.deadline_utc
     {
         return Err(RunError::Lifecycle(
@@ -1088,24 +1162,99 @@ fn validate_binding(
     ensure_before_deadline(clock, &request.deadline_utc)
 }
 
-fn validate_acquired(
-    source_reference: &DigestBoundReferenceV2,
-    lease: &SourceObjectLease,
-    acquired: &AcquiredSource,
-) -> Result<(), RunError> {
-    acquired.immutable_revision.validate()?;
-    if acquired.source_object_id != lease.source_object_id || acquired.provider_identity.is_empty()
+// The pinned admission-v2 DigestBoundReference shape; this does not resolve the
+// referenced schema or grant execution authority to an unregistered schema name.
+fn valid_reference_atom(value: &str, punctuation: &[u8]) -> bool {
+    value.len() <= 128
+        && value
+            .as_bytes()
+            .first()
+            .is_some_and(u8::is_ascii_alphanumeric)
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || punctuation.contains(&byte))
+}
+
+fn validate_source_expectations(binding: &TrustedLocalSourceBinding) -> Result<(), RunError> {
+    let reference = &binding.reference;
+    if reference.kind != "source"
+        || !valid_reference_atom(&reference.id, b"._:-")
+        || !valid_reference_atom(&reference.schema_version, b"._/-")
+        || binding.source_object_id.trim().is_empty()
+        || binding.expected_provider_scope.trim().is_empty()
+        || binding.expected_provider_identity.trim().is_empty()
     {
         return Err(RunError::Lifecycle(
-            "acquired SourceObject identity does not match the lease",
+            "trusted local source binding is incomplete",
         ));
     }
-    if sha256_digest(&acquired.bytes) != source_reference.content_digest {
+    for digest in [&reference.content_digest, &binding.expected_raw_digest] {
+        validate_scalar("Sha256", digest)
+            .map_err(|_| RunError::Lifecycle("source binding digests must be SHA-256"))?;
+    }
+    binding.expected_revision.validate()
+}
+
+fn validate_declared_source(
+    binding: &TrustedLocalSourceBinding,
+    object_id: &str,
+    revision: &ImmutableRevision,
+    provider_scope: &str,
+    provider_identity: &str,
+    raw_digest: &str,
+) -> Result<(), RunError> {
+    validate_source_expectations(binding)?;
+    revision.validate()?;
+    if object_id != binding.source_object_id
+        || revision != &binding.expected_revision
+        || provider_scope != binding.expected_provider_scope
+        || provider_identity != binding.expected_provider_identity
+        || raw_digest != binding.expected_raw_digest
+    {
         return Err(RunError::Lifecycle(
-            "acquired SourceObject digest does not match the admitted source",
+            "source facts do not match trusted local binding",
         ));
     }
     Ok(())
+}
+
+fn validate_acquired(
+    binding: &TrustedLocalSourceBinding,
+    acquired: &AcquiredSource,
+) -> Result<(), RunError> {
+    validate_declared_source(
+        binding,
+        &acquired.source_object_id,
+        &acquired.immutable_revision,
+        &acquired.provider_scope,
+        &acquired.provider_identity,
+        &sha256_digest(&acquired.bytes),
+    )
+}
+
+fn validate_binding_receipt(
+    file: &PinnedFile,
+    binding: &TrustedLocalSourceBinding,
+) -> Result<(), RunError> {
+    let receipt: SourceBindingReceipt = serde_json::from_slice(&file.bytes()?)
+        .map_err(|_| RunError::Lifecycle("source binding receipt is invalid"))?;
+    if receipt.schema_version != "fkst.local-qa-source-binding/v1" || receipt.binding != *binding {
+        return Err(RunError::Lifecycle(
+            "source binding receipt ownership mismatch",
+        ));
+    }
+    validate_declared_source(
+        binding,
+        &receipt.source_object_id,
+        &receipt.immutable_revision,
+        &receipt.provider_scope,
+        &receipt.provider_identity,
+        &receipt.raw_digest,
+    )
+}
+
+fn encode_cache(value: &impl Serialize) -> Result<Vec<u8>, RunError> {
+    serde_json::to_vec(value).map_err(|_| RunError::Lifecycle("source cache serialization failed"))
 }
 
 fn ensure_before_deadline(clock: &impl Clock, deadline_utc: &str) -> Result<(), RunError> {
@@ -1128,7 +1277,7 @@ fn cache_marker_path(cache_path: &Path) -> PathBuf {
 fn read_cache_marker(file: &PinnedFile) -> Result<SourceCacheMarker, RunError> {
     let marker = serde_json::from_slice::<SourceCacheMarker>(&file.bytes()?)
         .map_err(|_| RunError::Lifecycle("source cache marker is invalid"))?;
-    if marker.schema_version != "fkst.local-qa-source-cache/v1" {
+    if marker.schema_version != "fkst.local-qa-source-cache/v2" {
         return Err(RunError::Lifecycle(
             "source cache marker schema is unsupported",
         ));
@@ -1193,16 +1342,6 @@ fn validate_receipt(
         return Err(RunError::Lifecycle("workspace receipt ownership mismatch"));
     }
     Ok(())
-}
-
-fn parse_marker_revision(value: &str) -> ImmutableRevision {
-    if let Some(commit) = value.strip_prefix("git:") {
-        ImmutableRevision::GitCommit(commit.to_owned())
-    } else if let Some(digest) = value.strip_prefix("object:") {
-        ImmutableRevision::ObjectDigest(digest.to_owned())
-    } else {
-        ImmutableRevision::ObjectDigest(String::new())
-    }
 }
 
 fn path_is_relative_and_confined(path: &Path) -> bool {

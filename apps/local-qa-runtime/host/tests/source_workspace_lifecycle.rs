@@ -6,8 +6,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use fkst_local_qa_host::source_workspace::{
     lifecycle_authority_blockers, validate_controlled_relative_path, AcquiredSource,
     ImmutableRevision, LifecycleAuthorityBlocker, SourceObjectLease, SourceProvider,
-    SourceWorkspaceManager, WorkspaceDiscovery, WorkspaceIntent, WorkspaceMaterialization,
-    WorkspaceProvider, WorkspaceProviderScope, WorkspaceProviderStatus,
+    SourceWorkspaceManager, TrustedLocalSourceBinding, WorkspaceDiscovery, WorkspaceIntent,
+    WorkspaceMaterialization, WorkspaceProvider, WorkspaceProviderScope, WorkspaceProviderStatus,
     WorkspaceProviderStatusReceipt, WorkspaceProviderStopReceipt, WorkspaceRequest,
     WorkspaceResource, WorkspaceStatus,
 };
@@ -31,8 +31,9 @@ impl SourceProvider for FakeSourceProvider {
     fn acquire(&mut self, lease: &SourceObjectLease) -> Result<AcquiredSource, RunError> {
         self.acquire_calls += 1;
         Ok(AcquiredSource {
-            source_object_id: lease.source_object_id.clone(),
+            source_object_id: lease.binding.source_object_id.clone(),
             immutable_revision: self.revision.clone(),
+            provider_scope: "fixture-source/v1".to_owned(),
             provider_identity: "source-provider/object-001".to_owned(),
             bytes: self.bytes.clone(),
         })
@@ -2693,6 +2694,750 @@ fn deadline_regression_late_source_acquisition_cannot_create_workspace() {
             .count(),
         0
     );
+    assert_eq!(fs::read_dir(fixture.root.join("cache")).unwrap().count(), 0);
+}
+
+#[cfg(unix)]
+#[test]
+fn source_binding_wrong_valid_commit_rejected_before_workspace_effects() {
+    let mut fixture = WorkspaceFixture::new("source-binding-wrong-commit");
+    let outside = fixture.outside();
+    fixture.source.revision = ImmutableRevision::GitCommit("a".repeat(40));
+    assert!(
+        fixture.prepare().is_err(),
+        "matching bytes do not bind a different commit"
+    );
+    fixture.assert_untouched(&outside);
+    assert_eq!(fixture.source.acquire_calls, 1);
+    assert_eq!(
+        fs::read_dir(fixture.root.join("workspaces"))
+            .unwrap()
+            .count(),
+        0
+    );
+    assert_eq!(fs::read_dir(fixture.root.join("cache")).unwrap().count(), 0);
+}
+
+#[cfg(unix)]
+#[test]
+fn source_binding_cached_declared_facts_must_match_expected_binding() {
+    for (field, wrong) in [
+        (
+            "immutable_revision",
+            serde_json::to_value(ImmutableRevision::GitCommit("a".repeat(40))).unwrap(),
+        ),
+        ("provider_scope", serde_json::json!("wrong-scope")),
+        (
+            "provider_identity",
+            serde_json::json!("wrong-provider/object"),
+        ),
+        ("source_object_id", serde_json::json!("wrong-object")),
+        ("raw_digest", serde_json::json!(sha256_digest(b"other"))),
+    ] {
+        let mut fixture = WorkspaceFixture::new("source-binding-cached-facts");
+        let original = fixture.prepare().unwrap();
+        let outside = fixture.outside();
+        let marker_path = fs::read_dir(fixture.root.join("cache"))
+            .unwrap()
+            .map(|entry| entry.unwrap().path())
+            .find(|path| path.to_string_lossy().ends_with(".binding.json"))
+            .unwrap();
+        let mut marker: serde_json::Value =
+            serde_json::from_slice(&fs::read(&marker_path).unwrap()).unwrap();
+        marker[field] = wrong;
+        fs::write(marker_path, serde_json::to_vec(&marker).unwrap()).unwrap();
+        fixture.request.generation = 2;
+        fixture.provider.materialize_calls = 0;
+        assert!(
+            fixture.prepare().is_err(),
+            "cached {field} must match explicit expectation"
+        );
+        fixture.assert_untouched(&outside);
+        assert_eq!(fixture.source.acquire_calls, 1);
+        assert_eq!(
+            fs::read(original.root().join("source.bin")).unwrap(),
+            fixture.source.bytes
+        );
+        assert!(!second_request_path(&fixture.root.join("workspaces"), &fixture.request).exists());
+    }
+}
+
+#[cfg(unix)]
+struct DeclaredSourceProvider {
+    acquired: AcquiredSource,
+    calls: usize,
+}
+
+#[cfg(unix)]
+impl SourceProvider for DeclaredSourceProvider {
+    fn acquire(&mut self, _: &SourceObjectLease) -> Result<AcquiredSource, RunError> {
+        self.calls += 1;
+        Ok(self.acquired.clone())
+    }
+}
+
+#[cfg(unix)]
+fn declared_source(fixture: &WorkspaceFixture) -> DeclaredSourceProvider {
+    DeclaredSourceProvider {
+        acquired: AcquiredSource {
+            source_object_id: fixture.reference.id.clone(),
+            immutable_revision: ImmutableRevision::GitCommit(COMMIT.to_owned()),
+            provider_scope: "fixture-source/v1".to_owned(),
+            provider_identity: "source-provider/object-001".to_owned(),
+            bytes: fixture.source.bytes.clone(),
+        },
+        calls: 0,
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn source_binding_fresh_declared_identity_and_revision_mismatches_have_no_effects() {
+    for field in [
+        "object",
+        "scope",
+        "identity",
+        "empty-scope",
+        "empty-identity",
+        "revision",
+        "floating",
+        "bytes",
+    ] {
+        let mut fixture = WorkspaceFixture::new("source-binding-fresh");
+        let outside = fixture.outside();
+        let mut source = declared_source(&fixture);
+        match field {
+            "object" => source.acquired.source_object_id = "another-object".into(),
+            "scope" => source.acquired.provider_scope = "another-scope".into(),
+            "identity" => source.acquired.provider_identity = "another-identity".into(),
+            "empty-scope" => source.acquired.provider_scope.clear(),
+            "empty-identity" => source.acquired.provider_identity.clear(),
+            "revision" => {
+                source.acquired.immutable_revision = ImmutableRevision::GitCommit("b".repeat(40))
+            }
+            "floating" => {
+                source.acquired.immutable_revision = ImmutableRevision::GitCommit("main".into())
+            }
+            "bytes" => source.acquired.bytes = b"other bytes".to_vec(),
+            _ => unreachable!(),
+        }
+        let result = fixture.manager.prepare(
+            &mut source,
+            &mut fixture.provider,
+            &fixture.reference,
+            &lease(&fixture.reference, &fixture.request),
+            &fixture.request,
+            &FixedClock::new(NOW).unwrap(),
+        );
+        assert!(result.is_err(), "field={field}");
+        assert_eq!(source.calls, 1);
+        fixture.assert_untouched(&outside);
+        assert_eq!(fs::read_dir(fixture.root.join("cache")).unwrap().count(), 0);
+        assert_eq!(
+            fs::read_dir(fixture.root.join("workspaces"))
+                .unwrap()
+                .count(),
+            0
+        );
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn source_binding_reference_shape_and_exact_match_checked_before_acquisition() {
+    for field in [
+        "kind",
+        "id",
+        "schema",
+        "digest",
+        "empty-id",
+        "bad-id",
+        "empty-schema",
+        "bad-schema",
+        "bad-digest",
+        "bad-raw",
+        "floating",
+        "bad-object-revision",
+        "empty-scope",
+        "empty-identity",
+    ] {
+        let mut fixture = WorkspaceFixture::new("source-binding-input");
+        let outside = fixture.outside();
+        let mut expected = lease(&fixture.reference, &fixture.request);
+        match field {
+            "kind" => fixture.reference.kind = "environment".into(),
+            "id" => fixture.reference.id = "different-id".into(),
+            "schema" => fixture.reference.schema_version = "qa.other/v2".into(),
+            "digest" => fixture.reference.content_digest = sha256_digest(b"another reference"),
+            "empty-id" => expected.binding.reference.id.clear(),
+            "bad-id" => expected.binding.reference.id = "../escape".into(),
+            "empty-schema" => expected.binding.reference.schema_version.clear(),
+            "bad-schema" => expected.binding.reference.schema_version = " invalid schema".into(),
+            "bad-digest" => expected.binding.reference.content_digest = "not-digest".into(),
+            "bad-raw" => expected.binding.expected_raw_digest = "not-digest".into(),
+            "floating" => {
+                expected.binding.expected_revision = ImmutableRevision::GitCommit("main".into())
+            }
+            "bad-object-revision" => {
+                expected.binding.expected_revision = ImmutableRevision::ObjectDigest("bad".into())
+            }
+            "empty-scope" => expected.binding.expected_provider_scope.clear(),
+            "empty-identity" => expected.binding.expected_provider_identity = "  ".into(),
+            _ => unreachable!(),
+        }
+        if !matches!(field, "kind" | "id" | "schema" | "digest") {
+            fixture.reference = expected.binding.reference.clone();
+        }
+        assert!(
+            fixture
+                .manager
+                .prepare(
+                    &mut fixture.source,
+                    &mut fixture.provider,
+                    &fixture.reference,
+                    &expected,
+                    &fixture.request,
+                    &FixedClock::new(NOW).unwrap()
+                )
+                .is_err(),
+            "field={field}"
+        );
+        assert_eq!(fixture.source.acquire_calls, 0);
+        fixture.assert_untouched(&outside);
+        assert_eq!(fs::read_dir(fixture.root.join("cache")).unwrap().count(), 0);
+        assert_eq!(
+            fs::read_dir(fixture.root.join("workspaces"))
+                .unwrap()
+                .count(),
+            0
+        );
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn source_binding_reference_and_object_revision_digests_are_distinct_from_raw_bytes() {
+    for object_revision in [false, true] {
+        let mut fixture = WorkspaceFixture::new("source-binding-distinct-digests");
+        let outside = fixture.outside();
+        let raw_digest = sha256_digest(&fixture.source.bytes);
+        fixture.reference.content_digest = sha256_digest(b"source reference metadata");
+        fixture.reference.schema_version = "local.fixture-source/v7".into();
+        let mut expected = lease(&fixture.reference, &fixture.request);
+        expected.binding.expected_raw_digest = raw_digest.clone();
+        expected.binding.source_object_id = "separate-raw-object-id".into();
+        let mut source = declared_source(&fixture);
+        source.acquired.source_object_id = expected.binding.source_object_id.clone();
+        if object_revision {
+            expected.binding.expected_revision =
+                ImmutableRevision::ObjectDigest(sha256_digest(b"declared snapshot tree"));
+            source.acquired.immutable_revision = expected.binding.expected_revision.clone();
+        }
+        assert_ne!(
+            expected.binding.reference.content_digest,
+            expected.binding.expected_raw_digest
+        );
+        let handle = fixture
+            .manager
+            .prepare(
+                &mut source,
+                &mut fixture.provider,
+                &fixture.reference,
+                &expected,
+                &fixture.request,
+                &FixedClock::new(NOW).unwrap(),
+            )
+            .unwrap();
+        assert_eq!(
+            fs::read(handle.root().join("source.bin")).unwrap(),
+            fixture.source.bytes
+        );
+        fixture.reopen();
+        assert_eq!(
+            fixture
+                .manager
+                .prepare(
+                    &mut source,
+                    &mut fixture.provider,
+                    &fixture.reference,
+                    &expected,
+                    &fixture.request,
+                    &FixedClock::new(NOW).unwrap()
+                )
+                .unwrap(),
+            handle
+        );
+        assert_eq!(source.calls, 1);
+        let original_bytes = fs::read(handle.root().join("source.bin")).unwrap();
+        let mut changed_reference = fixture.reference.clone();
+        changed_reference.content_digest = raw_digest.clone();
+        assert!(fixture
+            .manager
+            .prepare(
+                &mut source,
+                &mut fixture.provider,
+                &changed_reference,
+                &expected,
+                &fixture.request,
+                &FixedClock::new(NOW).unwrap()
+            )
+            .is_err());
+        let mut changed_binding = expected.clone();
+        changed_binding.binding.expected_raw_digest = fixture.reference.content_digest.clone();
+        assert!(fixture
+            .manager
+            .prepare(
+                &mut source,
+                &mut fixture.provider,
+                &fixture.reference,
+                &changed_binding,
+                &fixture.request,
+                &FixedClock::new(NOW).unwrap()
+            )
+            .is_err());
+        assert_eq!(source.calls, 1);
+        assert_eq!(fixture.provider.materialize_calls, 1);
+        assert_eq!(
+            fs::read(handle.root().join("source.bin")).unwrap(),
+            original_bytes
+        );
+        fixture.request.generation = 2;
+        expected.generation = 2;
+        source.acquired.immutable_revision = if object_revision {
+            ImmutableRevision::ObjectDigest(raw_digest)
+        } else {
+            ImmutableRevision::GitCommit("c".repeat(40))
+        };
+        // A new binding has no receipt; declaring a different revision cannot borrow the old receipt.
+        expected.binding.reference.id = "second-reference".into();
+        fixture.reference = expected.binding.reference.clone();
+        assert!(fixture
+            .manager
+            .prepare(
+                &mut source,
+                &mut fixture.provider,
+                &fixture.reference,
+                &expected,
+                &fixture.request,
+                &FixedClock::new(NOW).unwrap()
+            )
+            .is_err());
+        assert_eq!(source.calls, 2);
+        assert_eq!(fixture.provider.materialize_calls, 1);
+        fixture
+            .manager
+            .stop(&mut fixture.provider, &handle)
+            .unwrap();
+        assert_eq!(fs::read(outside.join("sentinel")).unwrap(), b"preserve");
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn source_binding_each_new_binding_freshly_acquires_before_sharing_raw_bytes() {
+    for field in [
+        "object",
+        "revision",
+        "scope",
+        "identity",
+        "reference-id",
+        "reference-schema",
+        "reference-digest",
+    ] {
+        let mut fixture = WorkspaceFixture::new("source-binding-byte-sharing");
+        let first = fixture.prepare().unwrap();
+        let outside = fixture.outside();
+        let original = fs::read(first.root().join("source.bin")).unwrap();
+        let mut expected = lease(&fixture.reference, &fixture.request);
+        let mut source = declared_source(&fixture);
+        match field {
+            "object" => expected.binding.source_object_id = "second-object".into(),
+            "revision" => {
+                expected.binding.expected_revision = ImmutableRevision::GitCommit("d".repeat(40))
+            }
+            "scope" => expected.binding.expected_provider_scope = "second-scope".into(),
+            "identity" => {
+                expected.binding.expected_provider_identity = "second-provider/object".into()
+            }
+            "reference-id" => expected.binding.reference.id = "second-ref".into(),
+            "reference-schema" => {
+                expected.binding.reference.schema_version = "local.fixture/v8".into()
+            }
+            "reference-digest" => {
+                expected.binding.reference.content_digest = sha256_digest(b"second reference")
+            }
+            _ => unreachable!(),
+        }
+        fixture.reference = expected.binding.reference.clone();
+        assert!(
+            fixture
+                .manager
+                .prepare(
+                    &mut source,
+                    &mut fixture.provider,
+                    &fixture.reference,
+                    &expected,
+                    &fixture.request,
+                    &FixedClock::new(NOW).unwrap()
+                )
+                .is_err(),
+            "same run/generation binding must be immutable: {field}"
+        );
+        assert_eq!(source.calls, 0);
+        fixture.request.generation = 2;
+        expected.generation = 2;
+        source.acquired.source_object_id = expected.binding.source_object_id.clone();
+        source.acquired.immutable_revision = expected.binding.expected_revision.clone();
+        source.acquired.provider_scope = expected.binding.expected_provider_scope.clone();
+        source.acquired.provider_identity = expected.binding.expected_provider_identity.clone();
+        // Failure must retain old bytes and cannot silently authorize the new binding.
+        let valid = source.acquired.clone();
+        source.acquired.provider_identity = "wrong-but-nonempty".into();
+        assert!(fixture
+            .manager
+            .prepare(
+                &mut source,
+                &mut fixture.provider,
+                &fixture.reference,
+                &expected,
+                &fixture.request,
+                &FixedClock::new(NOW).unwrap()
+            )
+            .is_err());
+        assert_eq!(source.calls, 1);
+        assert_eq!(fixture.provider.materialize_calls, 1);
+        assert!(!second_request_path(&fixture.root.join("workspaces"), &fixture.request).exists());
+        source.acquired = valid;
+        let second = fixture
+            .manager
+            .prepare(
+                &mut source,
+                &mut fixture.provider,
+                &fixture.reference,
+                &expected,
+                &fixture.request,
+                &FixedClock::new(NOW).unwrap(),
+            )
+            .unwrap();
+        assert_eq!(source.calls, 2);
+        assert_eq!(fixture.provider.materialize_calls, 2);
+        let cache = fs::read_dir(fixture.root.join("cache"))
+            .unwrap()
+            .map(|entry| entry.unwrap().path())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            cache
+                .iter()
+                .filter(|path| path.extension().is_some_and(|ext| ext == "source"))
+                .count(),
+            1
+        );
+        assert_eq!(
+            cache
+                .iter()
+                .filter(|path| path.to_string_lossy().ends_with(".binding.json"))
+                .count(),
+            2
+        );
+        fixture.reopen();
+        assert_eq!(
+            fixture
+                .manager
+                .prepare(
+                    &mut source,
+                    &mut fixture.provider,
+                    &fixture.reference,
+                    &expected,
+                    &fixture.request,
+                    &FixedClock::new(NOW).unwrap()
+                )
+                .unwrap(),
+            second
+        );
+        assert_eq!(source.calls, 2);
+        assert_eq!(fs::read(first.root().join("source.bin")).unwrap(), original);
+        fixture.manager.stop(&mut fixture.provider, &first).unwrap();
+        fixture
+            .manager
+            .stop(&mut fixture.provider, &second)
+            .unwrap();
+        assert_eq!(fs::read(outside.join("sentinel")).unwrap(), b"preserve");
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn source_binding_old_partial_and_corrupt_cache_is_unavailable_without_repair() {
+    for damage in [
+        "v1",
+        "missing-blob",
+        "missing-marker",
+        "missing-receipt",
+        "invalid-receipt",
+        "receipt-owner",
+        "receipt-digest",
+        "marker-digest",
+    ] {
+        let mut fixture = WorkspaceFixture::new("source-binding-cache-unavailable");
+        let original = fixture.prepare().unwrap();
+        let outside = fixture.outside();
+        let cache = fixture.root.join("cache");
+        let blob = cache.join(format!(
+            "{}.source",
+            fixture
+                .reference
+                .content_digest
+                .strip_prefix("sha256:")
+                .unwrap()
+        ));
+        let marker = blob.with_extension("source.json");
+        let receipt = fs::read_dir(&cache)
+            .unwrap()
+            .map(|entry| entry.unwrap().path())
+            .find(|path| path.to_string_lossy().ends_with(".binding.json"))
+            .unwrap();
+        match damage {
+            "v1" => fs::write(&marker, serde_json::to_vec(&serde_json::json!({
+                "schema_version": "fkst.local-qa-source-cache/v1",
+                "source_object_id": fixture.reference.id,
+                "content_digest": fixture.reference.content_digest,
+                "immutable_revision": format!("git:{COMMIT}"),
+                "provider_identity": "source-provider/object-001"
+            })).unwrap()).unwrap(),
+            "missing-blob" => fs::remove_file(&blob).unwrap(),
+            "missing-marker" => fs::remove_file(&marker).unwrap(),
+            "missing-receipt" => fs::remove_file(&receipt).unwrap(),
+            "invalid-receipt" => fs::write(&receipt, b"{partial").unwrap(),
+            "receipt-owner" | "receipt-digest" => {
+                let mut value: serde_json::Value = serde_json::from_slice(&fs::read(&receipt).unwrap()).unwrap();
+                if damage == "receipt-owner" { value["binding"]["reference"]["id"] = "foreign-reference".into(); }
+                else { value["binding"]["expected_raw_digest"] = sha256_digest(b"other").into(); }
+                fs::write(&receipt, serde_json::to_vec(&value).unwrap()).unwrap();
+            }
+            "marker-digest" => fs::write(&marker, serde_json::to_vec(&serde_json::json!({
+                "schema_version": "fkst.local-qa-source-cache/v2", "content_digest": sha256_digest(b"other")
+            })).unwrap()).unwrap(),
+            _ => unreachable!(),
+        }
+        let snapshot = || {
+            let mut files = fs::read_dir(&cache)
+                .unwrap()
+                .map(|entry| {
+                    let path = entry.unwrap().path();
+                    (
+                        path.file_name().unwrap().to_owned(),
+                        fs::read(path).unwrap(),
+                    )
+                })
+                .collect::<Vec<_>>();
+            files.sort();
+            files
+        };
+        let before = snapshot();
+        fixture.provider.materialize_calls = 0;
+        assert!(fixture.prepare().is_err(), "damage={damage}");
+        assert_eq!(fixture.source.acquire_calls, 1);
+        fixture.assert_untouched(&outside);
+        assert_eq!(snapshot(), before, "no delete/rebuild/upgrade: {damage}");
+        assert_eq!(
+            fs::read(original.root().join("source.bin")).unwrap(),
+            fixture.source.bytes
+        );
+        // Cache availability does not remove the independent obligation to stop.
+        fixture
+            .manager
+            .stop(&mut fixture.provider, &original)
+            .unwrap();
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn source_binding_v8_legacy_lifecycle_preserves_saved_bytes_and_denies_prepare() {
+    for state in ["bound", "stop_attempted", "create_attempted"] {
+        let mut fixture = WorkspaceFixture::new("source-binding-v8-legacy");
+        let original = fixture.prepare().unwrap();
+        let outside = fixture.outside();
+        let original_marker = fs::read(original.root().join(".fkst-workspace.json")).unwrap();
+        let key = stable_workspace_key(&fixture.request.run_id, fixture.request.generation);
+        for resource in fixture.provider.resources.values_mut() {
+            resource.intent.source_binding = None;
+        }
+        let legacy_resource = fixture.provider.resources.values().next().unwrap().clone();
+        let legacy_intent = format!(
+            " \n{}\n ",
+            serde_json::to_string_pretty(&legacy_resource.intent).unwrap()
+        );
+        let legacy_resource_bytes = format!(
+            " \n{}\n ",
+            serde_json::to_string_pretty(&legacy_resource).unwrap()
+        );
+        assert!(!legacy_intent.contains("source_binding"));
+        assert!(!legacy_resource_bytes.contains("source_binding"));
+        let connection = rusqlite::Connection::open(fixture.database()).unwrap();
+        connection.execute("UPDATE workspace_ownership SET intent_json=?1, resource_json=?2, state=?3 WHERE stable_key=?4",
+            rusqlite::params![legacy_intent, legacy_resource_bytes, state, key]).unwrap();
+        if state == "create_attempted" {
+            connection.execute("UPDATE workspace_ownership SET resource_json=NULL, provider_identity=NULL WHERE stable_key=?1", [&key]).unwrap();
+        }
+        connection.pragma_update(None, "user_version", 8).unwrap();
+        let saved = || {
+            connection.query_row("SELECT intent_json, resource_json FROM workspace_ownership WHERE stable_key=?1", [&key],
+            |row| Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?))).unwrap()
+        };
+        let before = saved();
+        fixture.reopen();
+        assert_eq!(
+            connection
+                .pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))
+                .unwrap(),
+            9
+        );
+        assert_eq!(saved(), before);
+        let acquisitions = fixture.source.acquire_calls;
+        let effects = fixture.provider.materialize_calls;
+        assert!(
+            fixture.prepare().is_err(),
+            "legacy {state} must not acquire/create"
+        );
+        assert_eq!(fixture.source.acquire_calls, acquisitions);
+        assert_eq!(fixture.provider.materialize_calls, effects);
+        assert_eq!(saved(), before);
+        if state == "stop_attempted" {
+            fixture
+                .provider
+                .active
+                .insert(original.workspace_provider_identity().to_owned(), false);
+        }
+        let recovered = fixture
+            .manager
+            .recover(&mut fixture.provider, &key)
+            .unwrap();
+        assert_eq!(
+            fs::read(recovered.root().join(".fkst-workspace.json")).unwrap(),
+            original_marker
+        );
+        assert_eq!(saved().0, legacy_intent);
+        if state != "create_attempted" {
+            assert_eq!(saved(), before);
+        }
+        let after_recover = saved();
+        assert!(!after_recover.1.as_ref().unwrap().contains("source_binding"));
+        let status = fixture
+            .manager
+            .status(&mut fixture.provider, &recovered)
+            .unwrap();
+        assert_eq!(
+            status,
+            if state == "stop_attempted" {
+                WorkspaceStatus::Stopped
+            } else {
+                WorkspaceStatus::Active
+            }
+        );
+        assert_eq!(
+            saved(),
+            after_recover,
+            "status must preserve actual saved legacy bytes"
+        );
+        fixture
+            .manager
+            .stop(&mut fixture.provider, &recovered)
+            .unwrap();
+        assert_eq!(
+            saved(),
+            after_recover,
+            "stop SQL must preserve actual saved legacy bytes"
+        );
+        fixture.reopen();
+        let stopped = fixture
+            .manager
+            .recover(&mut fixture.provider, &key)
+            .unwrap();
+        assert_eq!(
+            fixture
+                .manager
+                .status(&mut fixture.provider, &stopped)
+                .unwrap(),
+            WorkspaceStatus::Stopped
+        );
+        assert!(
+            fixture
+                .manager
+                .stop(&mut fixture.provider, &stopped)
+                .unwrap()
+                .already_stopped
+        );
+        assert_eq!(saved(), after_recover);
+        assert_eq!(fixture.provider.materialize_calls, effects);
+        assert_eq!(
+            fixture.provider.stop_calls,
+            usize::from(state != "stop_attempted")
+        );
+        assert_eq!(fs::read(outside.join("sentinel")).unwrap(), b"preserve");
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn source_binding_final_clock_callback_revalidates_receipt_and_preserves_ownership() {
+    use std::cell::Cell;
+    struct TamperingClock {
+        reads: Cell<usize>,
+        receipt: PathBuf,
+    }
+    impl fkst_local_qa_host::Clock for TamperingClock {
+        fn now_utc(&self) -> Result<String, RunError> {
+            let read = self.reads.get() + 1;
+            self.reads.set(read);
+            if read == 4 {
+                let mut value: serde_json::Value =
+                    serde_json::from_slice(&fs::read(&self.receipt)?).unwrap();
+                value["provider_identity"] = "changed-after-materialization".into();
+                fs::write(&self.receipt, serde_json::to_vec(&value).unwrap())?;
+            }
+            Ok(NOW.to_owned())
+        }
+    }
+    let mut fixture = WorkspaceFixture::new("source-binding-final-callback");
+    let first = fixture.prepare().unwrap();
+    let outside = fixture.outside();
+    fixture.request.generation = 2;
+    let receipt = fs::read_dir(fixture.root.join("cache"))
+        .unwrap()
+        .map(|entry| entry.unwrap().path())
+        .find(|path| path.to_string_lossy().ends_with(".binding.json"))
+        .unwrap();
+    let clock = TamperingClock {
+        reads: Cell::new(0),
+        receipt,
+    };
+    let result = fixture.manager.prepare(
+        &mut fixture.source,
+        &mut fixture.provider,
+        &fixture.reference,
+        &lease(&fixture.reference, &fixture.request),
+        &fixture.request,
+        &clock,
+    );
+    assert_eq!(clock.reads.get(), 4);
+    assert!(
+        result.is_err(),
+        "source receipt must be checked after the last external callback"
+    );
+    let key = stable_workspace_key(&fixture.request.run_id, fixture.request.generation);
+    let recovered = fixture
+        .manager
+        .recover(&mut fixture.provider, &key)
+        .unwrap();
+    assert_eq!(fixture.provider.materialize_calls, 2);
+    assert_eq!(fixture.source.acquire_calls, 1);
+    fixture
+        .manager
+        .stop(&mut fixture.provider, &recovered)
+        .unwrap();
+    fixture.manager.stop(&mut fixture.provider, &first).unwrap();
+    assert_eq!(fs::read(outside.join("sentinel")).unwrap(), b"preserve");
 }
 
 struct TestManager {
@@ -2756,10 +3501,16 @@ fn workspace_request(run_id: &str) -> WorkspaceRequest {
 fn lease(reference: &DigestBoundReferenceV2, request: &WorkspaceRequest) -> SourceObjectLease {
     SourceObjectLease {
         lease_id: format!("lease-{}", request.run_id),
-        source_object_id: reference.id.clone(),
+        binding: TrustedLocalSourceBinding {
+            reference: reference.clone(),
+            source_object_id: reference.id.clone(),
+            expected_raw_digest: reference.content_digest.clone(),
+            expected_revision: ImmutableRevision::GitCommit(COMMIT.to_owned()),
+            expected_provider_scope: "fixture-source/v1".to_owned(),
+            expected_provider_identity: "source-provider/object-001".to_owned(),
+        },
         run_id: request.run_id.clone(),
         generation: request.generation,
-        content_digest: reference.content_digest.clone(),
         deadline_utc: request.deadline_utc.clone(),
     }
 }

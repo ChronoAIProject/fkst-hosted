@@ -5,12 +5,14 @@ use rusqlite::{params, OptionalExtension, TransactionBehavior};
 use serde::{Deserialize, Serialize};
 
 use super::Journal;
-use crate::source_workspace::{ImmutableRevision, WorkspaceResource};
+use crate::source_workspace::{ImmutableRevision, TrustedLocalSourceBinding, WorkspaceResource};
 use crate::RunError;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct WorkspaceIntent {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_binding: Option<TrustedLocalSourceBinding>,
     pub stable_key: String,
     pub run_id: String,
     pub generation: i64,
@@ -75,6 +77,13 @@ impl Journal {
             PRAGMA user_version = 8;",
         )?;
         transaction.commit()?;
+        self.migrate_v9()
+    }
+
+    pub(super) fn migrate_v9(&mut self) -> Result<(), RunError> {
+        // Serialization compatibility fence: v8 readers reject new binding fields.
+        // Existing rows retain their exact bytes and no missing facts are inferred.
+        self.connection.pragma_update(None, "user_version", 9)?;
         Ok(())
     }
 
@@ -164,7 +173,8 @@ impl Journal {
         }
         transaction.execute(
             "UPDATE workspace_ownership SET state = ?2, directory_identity = ?3,
-             resource_json = ?4, provider_identity = ?5, blocker = ?6 WHERE stable_key = ?1",
+             resource_json = CASE WHEN resource_json IS NULL THEN ?4 ELSE resource_json END,
+             provider_identity = ?5, blocker = ?6 WHERE stable_key = ?1",
             params![
                 after.intent.stable_key,
                 state_name(after.state),
