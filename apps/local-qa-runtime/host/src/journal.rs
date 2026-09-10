@@ -12,8 +12,12 @@ use serde::{Deserialize, Serialize};
 use crate::executor::{ExecutionOutcome, ExecutorControlReport, ExecutorSelection};
 use crate::RunError;
 
+#[path = "workspace_journal.rs"]
+pub mod workspace;
+
 pub struct Journal {
     pub(crate) connection: Connection,
+    pub(crate) opened_database_identity: Option<Vec<(u64, u64)>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -126,6 +130,28 @@ pub(crate) struct RunCompletedEvent {
 impl Journal {
     pub fn open(path: &Path) -> Result<Self, RunError> {
         let connection = Connection::open(path)?;
+        // Optional observation for later workspace provisioning checks. Failure to
+        // capture does not change existing Journal opening or migration behavior.
+        #[cfg(unix)]
+        let opened_database_identity = {
+            use std::os::unix::fs::MetadataExt;
+            connection
+                .path()
+                .map(Path::new)
+                .filter(|path| path.is_absolute())
+                .and_then(|path| {
+                    path.ancestors()
+                        .map(|component| {
+                            std::fs::symlink_metadata(component)
+                                .ok()
+                                .filter(|metadata| metadata.is_file() || metadata.is_dir())
+                                .map(|metadata| (metadata.dev(), metadata.ino()))
+                        })
+                        .collect()
+                })
+        };
+        #[cfg(not(unix))]
+        let opened_database_identity = None;
         connection.busy_timeout(Duration::from_secs(5))?;
         connection.pragma_update(None, "foreign_keys", true)?;
         let foreign_keys: i64 =
@@ -145,7 +171,10 @@ impl Journal {
             }
         }
 
-        let mut journal = Self { connection };
+        let mut journal = Self {
+            connection,
+            opened_database_identity,
+        };
         journal.migrate()?;
         Ok(journal)
     }
@@ -194,7 +223,8 @@ impl Journal {
             4 => self.migrate_v5(),
             5 => self.migrate_v6(),
             6 => self.migrate_v7(),
-            7 => Ok(()),
+            7 => self.migrate_v8(),
+            8 => Ok(()),
             other => Err(RunError::UnsupportedDatabaseVersion(other)),
         }
     }
@@ -348,7 +378,7 @@ impl Journal {
         }
         transaction.pragma_update(None, "user_version", 7)?;
         transaction.commit()?;
-        Ok(())
+        self.migrate_v8()
     }
 
     fn migrate_v3(&mut self) -> Result<(), RunError> {
@@ -1988,6 +2018,101 @@ mod tests {
         fs::remove_dir_all(directory).expect("temporary directory must be removed");
     }
 
+    #[test]
+    fn v8_workspace_migration_preserves_all_existing_bytes_and_does_not_claim_v2() {
+        let (directory, database) = temporary_database("v8-workspaces");
+        let run_id = "00000000-0000-0000-0000-000000000014";
+        let mut journal = Journal::open(&database).unwrap();
+        assert!(matches!(
+            admit_v2(&mut journal, run_id, "v8-preserve", TEST_REQUEST_DIGEST),
+            Ok(Admission::Created(_))
+        ));
+        let intent = journal
+            .prepare_intent(
+                "environment-preserve",
+                run_id,
+                "profile",
+                "environment",
+                1,
+                "2026-09-11T00:00:00Z",
+            )
+            .unwrap();
+        journal
+            .record_handle(&super::OwnedHandle {
+                intent_id: intent.intent_id,
+                run_id: intent.run_id,
+                profile_id: intent.profile_id,
+                environment_id: intent.environment_id,
+                generation: intent.generation,
+                deadline_utc: intent.deadline_utc,
+                stable_provider_key: intent.stable_provider_key,
+                provider_identity: "environment/resource".to_owned(),
+                state: "active".to_owned(),
+            })
+            .unwrap();
+        journal
+            .connection
+            .execute_batch("DROP TABLE workspace_ownership; PRAGMA user_version = 7;")
+            .unwrap();
+        fn snapshot(journal: &Journal) -> Vec<Vec<Vec<rusqlite::types::Value>>> {
+            [
+                "accepted_requests",
+                "runs",
+                "events",
+                "cancel_requests",
+                "execution_attempts",
+                "resource_intents",
+                "owned_handles",
+                "admission_v2_records",
+                "active_run_slot",
+                "cancellation_controls",
+                "effect_admissions",
+            ]
+            .iter()
+            .map(|table| {
+                let mut statement = journal
+                    .connection
+                    .prepare(&format!("SELECT * FROM {table} ORDER BY rowid"))
+                    .unwrap();
+                let columns = statement.column_count();
+                statement
+                    .query_map([], |row| {
+                        (0..columns)
+                            .map(|column| row.get(column))
+                            .collect::<Result<Vec<_>, _>>()
+                    })
+                    .unwrap()
+                    .collect::<Result<Vec<_>, _>>()
+                    .unwrap()
+            })
+            .collect()
+        }
+        let before = snapshot(&journal);
+        let admission = journal.stored_v2_admission(run_id).unwrap().unwrap();
+        drop(journal);
+        let mut migrated = Journal::open(&database).unwrap();
+        assert_eq!(
+            migrated
+                .connection
+                .pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))
+                .unwrap(),
+            8
+        );
+        assert!(migrated.workspaces().unwrap().is_empty());
+        assert_eq!(snapshot(&migrated), before);
+        assert_eq!(
+            migrated.stored_v2_admission(run_id).unwrap().unwrap(),
+            admission
+        );
+        assert!(migrated.claim_next().unwrap().is_none());
+        assert_eq!(snapshot(&migrated), before);
+        drop(migrated);
+        let reopened = Journal::open(&database).unwrap();
+        assert_eq!(snapshot(&reopened), before);
+        drop(reopened);
+        fs::remove_dir_all(directory).unwrap();
+    }
+
     fn temporary_database(label: &str) -> (std::path::PathBuf, std::path::PathBuf) {
         let timestamp = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -2042,7 +2167,8 @@ mod tests {
         journal
             .connection
             .execute_batch(
-                "DROP TABLE effect_admissions;
+                "DROP TABLE workspace_ownership;
+                 DROP TABLE effect_admissions;
                  DROP TABLE cancellation_controls;
                  PRAGMA user_version = 6;",
             )
@@ -2051,7 +2177,10 @@ mod tests {
 
     fn preserved_rows(database_path: &std::path::Path) -> Vec<(String, i64)> {
         let connection = rusqlite::Connection::open(database_path).expect("database opens");
-        let journal = Journal { connection };
+        let journal = Journal {
+            connection,
+            opened_database_identity: None,
+        };
         preserved_rows_from(&journal)
     }
 

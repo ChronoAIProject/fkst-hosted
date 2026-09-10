@@ -153,6 +153,45 @@ before cache or workspace effects, rejects floating revisions and unsafe paths,
 reuses the same verified cache without re-contacting the provider, and confines
 idempotent workspace removal to the exact owned Run/generation path.
 
+The bounded workspace ownership driver uses the existing Host Journal's v8
+workspace records. `SourceWorkspaceManager::new` takes an open persistent
+Journal and an explicit local provider scope with its additional writable roots.
+Its database parent must be disjoint from cache, workspace and declared provider
+writable trees. On Unix, `Journal::open` optionally observes the main file and parent
+chain identities immediately after SQLite opens and before WAL setup/migration.
+The manager compares that observation with pinned files before executing manager
+SQL, and rechecks pinned database, sidecar and parent attachment around Journal
+access. Missing identity capture blocks manager construction. Existing Journal
+callers retain their WAL/migration behavior; memory and anonymous databases still
+cannot satisfy that existing WAL contract, and workspace management remains
+unsupported on non-Unix platforms.
+
+This assumes Host-owned provisioning remains stable across SQLite open and the
+subsequent metadata observation, and adapters accurately declare writable roots.
+The observation is not an atomic binding to SQLite's internal file descriptor;
+the available safe API does not provide that guarantee. A concurrent privileged
+provisioner must not replace storage during open. The checks detect later stale
+connections and attachment changes; they do not isolate a provider with arbitrary
+same-user access to the machine.
+
+Workspace intent snapshots the current internally supplied source facts, initial
+deadline, Run/generation, derived location and provider scope. Conditional Journal
+transitions commit directory/create/stop attempts before callbacks. Exact provider
+discovery can recover creation interrupted before binding; absent after an attempt,
+unknown and conflicting discovery never authorize automatic recreation. Opaque
+handles are checked against the durable record, and writable markers supply only
+diagnostic consistency. Replay requires an observed active provider. Recorded stop
+retains directory identity and any pending filesystem cleanup; a missing marker
+permits only removal of the same recorded empty directory. These records do not
+release the global execution slot or produce a global CleanupReceipt.
+
+`recover` reconciles an existing workspace key without admitting creation, including
+after its initial deadline. It returns ownership for status/stop, not permission to
+use a stopped resource. A directory creation interrupted before identity persistence,
+or unmarked partial data after provider stop, remains blocked for explicit recovery.
+These fake-provider tests establish local consistency only; they do not authenticate
+SourceObject leases or provide real Compose acceptance or production activation.
+
 These drivers are not wired into production admission. The pinned executable
 contracts still expose only generic `DigestBoundReferenceV2` values and do not
 provide the approved `SourceObjectLease` binding, controlled Environment

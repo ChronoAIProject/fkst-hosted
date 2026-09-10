@@ -136,6 +136,54 @@ mod platform {
             &self.path
         }
 
+        pub(crate) fn overlaps(&self, other: &Self) -> Result<bool, RunError> {
+            self.ensure_attached()?;
+            other.ensure_attached()?;
+            Ok(self.contains_identity(&fstat(&other.file).map_err(io)?)?
+                || other.contains_identity(&fstat(&self.file).map_err(io)?)?)
+        }
+
+        fn contains_identity(&self, identity: &FileStat) -> Result<bool, RunError> {
+            if same(&fstat(&self.file).map_err(io)?, identity) {
+                return Ok(true);
+            }
+            self.parent
+                .as_ref()
+                .map(|parent| parent.contains_identity(identity))
+                .unwrap_or(Ok(false))
+        }
+
+        pub(crate) fn identity(&self) -> Result<String, RunError> {
+            self.ensure_attached()?;
+            let stat = fstat(&self.file).map_err(io)?;
+            let parent = self
+                .parent
+                .as_ref()
+                .map(|parent| parent.identity())
+                .transpose()?
+                .unwrap_or_default();
+            #[cfg(target_os = "macos")]
+            let birth = format!("{}:{}", stat.st_birthtime, stat.st_birthtime_nsec);
+            #[cfg(not(target_os = "macos"))]
+            let birth = String::new();
+            Ok(format!("{parent}/{}:{}:{birth}", stat.st_dev, stat.st_ino))
+        }
+
+        pub(crate) fn remove_empty(self: &Arc<Self>) -> Result<(), RunError> {
+            let tree = self.tree()?;
+            if !tree.snapshot.files.is_empty() || !tree.snapshot.children.is_empty() {
+                return Err(changed());
+            }
+            self.ensure_attached()?;
+            let parent = self.parent.as_ref().ok_or_else(changed)?;
+            unlinkat(
+                &parent.file,
+                self.path.file_name().ok_or_else(changed)?,
+                UnlinkatFlags::RemoveDir,
+            )
+            .map_err(io)
+        }
+
         pub(crate) fn ensure_attached(&self) -> Result<(), RunError> {
             if let Some(parent) = &self.parent {
                 parent.ensure_attached()?;
@@ -278,6 +326,20 @@ mod platform {
     }
 
     impl PinnedFile {
+        pub(crate) fn identity_chain(&self) -> Result<Vec<(u64, u64)>, RunError> {
+            self.ensure_attached()?;
+            use std::os::unix::fs::MetadataExt;
+            let metadata = self.file.metadata()?;
+            let mut identity = vec![(metadata.dev(), metadata.ino())];
+            let mut ancestor = Some(self.parent.as_ref());
+            while let Some(directory) = ancestor {
+                let metadata = directory.file.metadata()?;
+                identity.push((metadata.dev(), metadata.ino()));
+                ancestor = directory.parent.as_deref();
+            }
+            Ok(identity)
+        }
+
         pub(crate) fn ensure_attached(&self) -> Result<(), RunError> {
             self.parent.ensure_attached()?;
             let current = stat(&self.parent, &self.name)?.ok_or_else(changed)?;
@@ -480,6 +542,15 @@ mod platform {
         pub(crate) fn path(&self) -> &Path {
             Path::new("")
         }
+        pub(crate) fn overlaps(&self, _: &Self) -> Result<bool, RunError> {
+            unsupported()
+        }
+        pub(crate) fn identity(&self) -> Result<String, RunError> {
+            unsupported()
+        }
+        pub(crate) fn remove_empty(self: &Arc<Self>) -> Result<(), RunError> {
+            unsupported()
+        }
         pub(crate) fn ensure_attached(&self) -> Result<(), RunError> {
             unsupported()
         }
@@ -518,6 +589,9 @@ mod platform {
         }
     }
     impl PinnedFile {
+        pub(crate) fn identity_chain(&self) -> Result<Vec<(u64, u64)>, RunError> {
+            unsupported()
+        }
         pub(crate) fn ensure_attached(&self) -> Result<(), RunError> {
             unsupported()
         }

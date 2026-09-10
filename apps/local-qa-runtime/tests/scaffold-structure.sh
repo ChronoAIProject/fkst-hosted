@@ -50,6 +50,7 @@ expected=$(printf '%s\n' \
   apps/local-qa-runtime/host/src/source_workspace_fs.rs \
   apps/local-qa-runtime/host/src/transport.rs \
   apps/local-qa-runtime/host/src/worker_process.rs \
+  apps/local-qa-runtime/host/src/workspace_journal.rs \
   apps/local-qa-runtime/host/tests/admission_v2.rs \
   apps/local-qa-runtime/host/tests/environment_ownership.rs \
   apps/local-qa-runtime/host/tests/environment_resource_lifecycle.rs \
