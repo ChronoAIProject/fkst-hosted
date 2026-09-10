@@ -6,6 +6,7 @@ mod coordinator;
 mod executor;
 mod journal;
 pub mod ownership;
+pub mod source_workspace;
 mod transport;
 #[cfg(feature = "mvp0-browser-test")]
 #[allow(dead_code)]
@@ -32,8 +33,11 @@ use fkst_qa_contracts::{validate_cancel_disposition, validate_event_cursor, vali
 use journal::{Cancellation, EventPayload};
 pub use journal::{Journal, OwnedHandle, ResourceIntent, StoredV2Admission};
 pub use ownership::{
-    reconcile_environment, Clock, CreateRequest, EnvironmentProvider, EnvironmentRequest,
-    FixedClock, ProviderResource, SystemClock,
+    check_environment_readiness, environment_status, reconcile_environment, stop_environment,
+    Clock, CreateRequest, EnvironmentProvider, EnvironmentRequest, EnvironmentStatus,
+    EnvironmentStopReceipt, FixedClock, ProviderReadinessReceipt, ProviderResource,
+    ProviderResourceState, ProviderStatusReceipt, ProviderStopReceipt, ReadinessEndpointClass,
+    ReadinessReceipt, ReadinessRequest, SystemClock,
 };
 use serde::Serialize;
 
@@ -71,6 +75,7 @@ pub enum RunError {
     InvalidJournal(&'static str),
     Io(io::Error),
     JournalMode(String),
+    Lifecycle(&'static str),
     ShutdownHandler(ctrlc::Error),
     UnsupportedDatabaseVersion(i64),
 }
@@ -85,6 +90,7 @@ impl fmt::Display for RunError {
             Self::InvalidJournal(detail) => write!(formatter, "invalid journal: {detail}"),
             Self::Io(error) => write!(formatter, "I/O error: {error}"),
             Self::JournalMode(mode) => write!(formatter, "SQLite WAL mode unavailable: {mode}"),
+            Self::Lifecycle(detail) => write!(formatter, "lifecycle error: {detail}"),
             Self::ShutdownHandler(error) => {
                 write!(formatter, "shutdown handler error: {error}")
             }
