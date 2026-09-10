@@ -18,7 +18,7 @@ use std::io::{self, Read, Write};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, Shutdown, SocketAddr, TcpListener, TcpStream};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
+use std::sync::{mpsc::Sender, Arc};
 use std::thread;
 use std::time::Duration;
 
@@ -235,6 +235,41 @@ pub fn serve_passive_for_test(
     )
 }
 
+#[doc(hidden)]
+pub fn serve_passive_with_listener_for_test(
+    config: StartupConfig,
+    shutdown: Arc<AtomicBool>,
+    listener: TcpListener,
+    ready: Sender<Result<SocketAddr, String>>,
+) -> Result<(), RunError> {
+    serve_with_startup(
+        config,
+        shutdown,
+        Arc::new(SystemClock),
+        Arc::new(UnavailableCurrentClaimVerifier),
+        ExecutionComposition::Passive,
+        Some((listener, ready)),
+    )
+}
+
+#[doc(hidden)]
+pub fn serve_mvp0_with_listener_for_test(
+    config: StartupConfig,
+    shutdown: Arc<AtomicBool>,
+    clock: Arc<dyn Clock + Send + Sync>,
+    listener: TcpListener,
+    ready: Sender<Result<SocketAddr, String>>,
+) -> Result<(), RunError> {
+    serve_with_startup(
+        config,
+        shutdown,
+        clock,
+        Arc::new(Mvp0DeterministicCurrentClaimVerifier),
+        ExecutionComposition::Coordinated,
+        Some((listener, ready)),
+    )
+}
+
 fn serve_with_dependencies(
     config: StartupConfig,
     shutdown: Arc<AtomicBool>,
@@ -295,13 +330,50 @@ fn serve_with_composition(
     current_claim_verifier: Arc<dyn CurrentClaimVerifier>,
     composition: ExecutionComposition,
 ) -> Result<(), RunError> {
-    let mut journal = Journal::open(&config.database_path)?;
-    let listener = TcpListener::bind(config.listen)?;
+    serve_with_startup(
+        config,
+        shutdown,
+        clock,
+        current_claim_verifier,
+        composition,
+        None,
+    )
+}
+
+struct InitializedHost {
+    journal: Journal,
+    listener: TcpListener,
+    assigned_address: SocketAddr,
+    admission_registry: ExecutorRegistry,
+    execution: ExecutionRuntime,
+}
+
+fn initialize_host(
+    config: &StartupConfig,
+    composition: ExecutionComposition,
+    listener: Option<TcpListener>,
+) -> Result<InitializedHost, RunError> {
+    if let Some(listener) = &listener {
+        let address = listener.local_addr()?;
+        if address != config.listen
+            || !matches!(address.ip(), IpAddr::V4(ip) if ip == Ipv4Addr::LOCALHOST)
+                && !matches!(address.ip(), IpAddr::V6(ip) if ip == Ipv6Addr::LOCALHOST)
+        {
+            return Err(
+                io::Error::new(io::ErrorKind::InvalidInput, "fixture listener mismatch").into(),
+            );
+        }
+    }
+    let journal = Journal::open(&config.database_path)?;
+    let listener = match listener {
+        Some(listener) => listener,
+        None => TcpListener::bind(config.listen)?,
+    };
     listener.set_nonblocking(true)?;
     let assigned_address = listener.local_addr()?;
     let admission_registry =
         ExecutorRegistry::new(vec![Box::new(FakeApiAdmissionExecutor::new())])?;
-    let mut execution = match composition {
+    let execution = match composition {
         ExecutionComposition::Coordinated => {
             let registry = ExecutorRegistry::new(vec![Box::new(InertExecutor::new())])?;
             ExecutionRuntime::Coordinated(CoordinatorHandle::start_versioned(
@@ -313,13 +385,48 @@ fn serve_with_composition(
         ExecutionComposition::Passive => ExecutionRuntime::Passive,
     };
 
-    let mut stdout = io::stdout().lock();
-    writeln!(
-        stdout,
-        "fkst-local-qa-host: listening on {assigned_address}"
-    )?;
-    stdout.flush()?;
-    drop(stdout);
+    Ok(InitializedHost {
+        journal,
+        listener,
+        assigned_address,
+        admission_registry,
+        execution,
+    })
+}
+
+fn serve_with_startup(
+    config: StartupConfig,
+    shutdown: Arc<AtomicBool>,
+    clock: Arc<dyn Clock + Send + Sync>,
+    current_claim_verifier: Arc<dyn CurrentClaimVerifier>,
+    composition: ExecutionComposition,
+    startup: Option<(TcpListener, Sender<Result<SocketAddr, String>>)>,
+) -> Result<(), RunError> {
+    let (listener, ready) = match startup {
+        Some((listener, ready)) => (Some(listener), Some(ready)),
+        None => (None, None),
+    };
+    let initialized = initialize_host(&config, composition, listener);
+    let InitializedHost {
+        mut journal,
+        listener,
+        assigned_address,
+        admission_registry,
+        mut execution,
+    } = match initialized {
+        Ok(host) => host,
+        Err(error) => {
+            if let Some(ready) = ready {
+                let _ = ready.send(Err("host initialization failed".to_owned()));
+            }
+            return Err(error);
+        }
+    };
+    let announcement = announce_startup(assigned_address, ready);
+    if let Err(error) = announcement {
+        let _ = execution.shutdown();
+        return Err(error);
+    }
 
     let serve_result = loop {
         if shutdown.load(Ordering::SeqCst) {
@@ -351,6 +458,34 @@ fn serve_with_composition(
     };
     let shutdown_result = execution.shutdown();
     serve_result.and(shutdown_result)
+}
+
+fn announce_startup(
+    assigned_address: SocketAddr,
+    ready: Option<Sender<Result<SocketAddr, String>>>,
+) -> Result<(), RunError> {
+    let announcement = (|| {
+        let mut stdout = io::stdout().lock();
+        writeln!(
+            stdout,
+            "fkst-local-qa-host: listening on {assigned_address}"
+        )?;
+        stdout.flush()
+    })();
+    if let Some(ready) = ready {
+        let receipt = match &announcement {
+            Ok(()) => Ok(assigned_address),
+            Err(_) => Err("host announcement failed".to_owned()),
+        };
+        let delivery = ready.send(receipt);
+        announcement?;
+        delivery.map_err(|_| {
+            io::Error::new(io::ErrorKind::BrokenPipe, "startup receiver disconnected")
+        })?;
+    } else {
+        announcement?;
+    }
+    Ok(())
 }
 
 #[derive(Serialize)]
