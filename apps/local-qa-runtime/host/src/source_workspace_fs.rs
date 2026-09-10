@@ -13,9 +13,11 @@ mod platform {
 
     use nix::dir::Dir;
     use nix::errno::Errno;
-    use nix::fcntl::{open, openat, AtFlags, OFlag};
+    use nix::fcntl::{open, openat, AtFlags, Flock, FlockArg, OFlag};
     use nix::sys::stat::{fchmod, fstat, fstatat, mkdirat, FileStat, Mode, SFlag};
-    use nix::unistd::{unlinkat, UnlinkatFlags};
+    use nix::unistd::{linkat, unlinkat, UnlinkatFlags};
+
+    use super::super::cache_checkpoint;
 
     use crate::RunError;
 
@@ -304,6 +306,126 @@ mod platform {
             pinned.ensure_attached()
         }
 
+        // A new open description is essential: dup/try_clone shares flock ownership.
+        // The kernel releases this nonblocking lock even on process exit.
+        pub(crate) fn publication_lock(&self) -> Result<Flock<File>, RunError> {
+            self.ensure_attached()?;
+            let file: File = openat(&self.file, ".", directory_flags(), Mode::empty())
+                .map_err(io)?
+                .into();
+            if !same(&fstat(&self.file).map_err(io)?, &fstat(&file).map_err(io)?) {
+                return Err(changed());
+            }
+            let lock =
+                Flock::lock(file, FlockArg::LockExclusiveNonblock).map_err(|(_, error)| {
+                    if error == Errno::EWOULDBLOCK {
+                        RunError::Lifecycle("source cache publication is busy; retry")
+                    } else {
+                        io(error)
+                    }
+                })?;
+            self.ensure_attached()?;
+            Ok(lock)
+        }
+
+        pub(crate) fn sync_chain(&self) -> Result<(), RunError> {
+            self.ensure_attached()?;
+            self.file.sync_all()?;
+            if let Some(parent) = &self.parent {
+                parent.sync_chain()?;
+            }
+            self.ensure_attached()
+        }
+
+        /// Publish complete bytes without ever replacing a destination. A crash
+        /// between link and unlink leaves a multiple-link record, which remains
+        /// a blocker: no unrelated link is inferred to be disposable.
+        pub(crate) fn publish_new(
+            self: &Arc<Self>,
+            name: &OsStr,
+            bytes: &[u8],
+            readonly: bool,
+        ) -> Result<(), RunError> {
+            use std::sync::atomic::{AtomicU64, Ordering};
+            use std::time::{SystemTime, UNIX_EPOCH};
+            static NEXT: AtomicU64 = AtomicU64::new(0);
+            component(name)?;
+            self.ensure_attached()?;
+            if self.open_file(name)?.is_some() {
+                return Ok(());
+            }
+            let nonce = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .map_err(|_| changed())?
+                .as_nanos();
+            let temporary = OsString::from(format!(
+                ".source-{}-{nonce}-{}.tmp",
+                std::process::id(),
+                NEXT.fetch_add(1, Ordering::Relaxed)
+            ));
+            let mut file: File = openat(
+                &self.file,
+                temporary.as_os_str(),
+                OFlag::O_WRONLY
+                    | OFlag::O_CREAT
+                    | OFlag::O_EXCL
+                    | OFlag::O_NOFOLLOW
+                    | OFlag::O_CLOEXEC,
+                Mode::S_IRUSR | Mode::S_IWUSR,
+            )
+            .map_err(io)?
+            .into();
+            cache_checkpoint("temporary-created")?;
+            file.write_all(bytes)?;
+            if readonly {
+                fchmod(&file, Mode::S_IRUSR).map_err(io)?;
+            }
+            cache_checkpoint("temporary-written")?;
+            file.sync_all()?;
+            let pinned = PinnedFile {
+                file,
+                parent: self.clone(),
+                name: temporary.clone(),
+            };
+            pinned.ensure_attached()?;
+            cache_checkpoint("temporary-synced")?;
+            pinned.ensure_attached()?;
+            linkat(
+                &self.file,
+                temporary.as_os_str(),
+                &self.file,
+                name,
+                AtFlags::empty(),
+            )
+            .map_err(io)?;
+            cache_checkpoint("temporary-linked")?;
+            let expected = fstat(&pinned.file).map_err(io)?;
+            for leaf in [temporary.as_os_str(), name] {
+                let current = stat(self, leaf)?.ok_or_else(changed)?;
+                if !same(&expected, &current) || current.st_nlink != 2 {
+                    return Err(changed());
+                }
+            }
+            self.ensure_attached()?;
+            unlinkat(
+                &self.file,
+                temporary.as_os_str(),
+                UnlinkatFlags::NoRemoveDir,
+            )
+            .map_err(io)?;
+            cache_checkpoint("temporary-unlinked")?;
+            let published = PinnedFile {
+                file: pinned.file,
+                parent: self.clone(),
+                name: name.to_owned(),
+            };
+            published.sync()?;
+            cache_checkpoint("before-directory-sync")?;
+            self.sync_chain()?;
+            cache_checkpoint("after-directory-sync")?;
+            published.ensure_attached()
+        }
+
         pub(crate) fn tree(self: &Arc<Self>) -> Result<Tree, RunError> {
             self.tree_with_reserved_entries(0)
         }
@@ -350,6 +472,109 @@ mod platform {
                 return Err(changed());
             }
             Ok(())
+        }
+
+        pub(crate) fn sync(&self) -> Result<(), RunError> {
+            self.ensure_attached()?;
+            self.file.sync_all()?;
+            self.ensure_attached()
+        }
+
+        pub(crate) fn digest(&self) -> Result<String, RunError> {
+            use sha2::{Digest, Sha256};
+            self.ensure_attached()?;
+            let before = fstat(&self.file).map_err(io)?;
+            let mut remaining = u64::try_from(before.st_size).map_err(|_| changed())?;
+            let mut file = &self.file;
+            file.seek(SeekFrom::Start(0))?;
+            let mut hash = Sha256::new();
+            let mut buffer = [0u8; 64 * 1024];
+            while remaining > 0 {
+                let length =
+                    usize::try_from(remaining.min(buffer.len() as u64)).map_err(|_| changed())?;
+                let read = file.read(&mut buffer[..length])?;
+                if read == 0 {
+                    return Err(changed());
+                }
+                hash.update(&buffer[..read]);
+                remaining -= read as u64;
+                cache_checkpoint("digest-chunk")?;
+            }
+            self.ensure_unchanged(&before)?;
+            let hex: String = hash
+                .finalize()
+                .iter()
+                .map(|byte| format!("{byte:02x}"))
+                .collect();
+            Ok(format!("sha256:{hex}"))
+        }
+
+        fn ensure_unchanged(&self, before: &FileStat) -> Result<(), RunError> {
+            self.ensure_attached()?;
+            let after = fstat(&self.file).map_err(io)?;
+            if !same(before, &after)
+                || before.st_nlink != after.st_nlink
+                || before.st_size != after.st_size
+                || before.st_mtime != after.st_mtime
+                || before.st_mtime_nsec != after.st_mtime_nsec
+                || before.st_ctime != after.st_ctime
+                || before.st_ctime_nsec != after.st_ctime_nsec
+            {
+                return Err(changed());
+            }
+            Ok(())
+        }
+
+        // Collapse only runs of JSON whitespace outside strings. This preserves
+        // token separation and permits legacy formatting without allocating from
+        // attacker-supplied file lengths or whitespace. CPU/I/O is not a quota.
+        pub(crate) fn bounded_json(&self, limit: usize) -> Result<Vec<u8>, RunError> {
+            self.ensure_attached()?;
+            let before = fstat(&self.file).map_err(io)?;
+            let mut remaining = u64::try_from(before.st_size).map_err(|_| changed())?;
+            let mut file = &self.file;
+            file.seek(SeekFrom::Start(0))?;
+            let mut bytes = Vec::new();
+            let mut buffer = [0u8; 4096];
+            let (mut string, mut escaped, mut whitespace) = (false, false, false);
+            while remaining > 0 {
+                let length =
+                    usize::try_from(remaining.min(buffer.len() as u64)).map_err(|_| changed())?;
+                let read = file.read(&mut buffer[..length])?;
+                if read == 0 {
+                    return Err(changed());
+                }
+                remaining -= read as u64;
+                for &byte in &buffer[..read] {
+                    if !string && matches!(byte, b' ' | b'\n' | b'\r' | b'\t') {
+                        if whitespace {
+                            continue;
+                        }
+                        whitespace = true;
+                    } else {
+                        whitespace = false;
+                    }
+                    if bytes.len() == limit {
+                        return Err(RunError::Lifecycle(
+                            "source cache metadata exceeds expected binding encoding bound",
+                        ));
+                    }
+                    bytes.push(if whitespace { b' ' } else { byte });
+                    if string {
+                        if escaped {
+                            escaped = false;
+                        } else if byte == b'\\' {
+                            escaped = true;
+                        } else if byte == b'"' {
+                            string = false;
+                        }
+                    } else if byte == b'"' {
+                        string = true;
+                    }
+                }
+            }
+            self.ensure_unchanged(&before)?;
+            Ok(bytes)
         }
 
         pub(crate) fn bytes(&self) -> Result<Vec<u8>, RunError> {
@@ -578,6 +803,20 @@ mod platform {
         ) -> Result<(), RunError> {
             unsupported()
         }
+        pub(crate) fn publication_lock(&self) -> Result<(), RunError> {
+            unsupported()
+        }
+        pub(crate) fn sync_chain(&self) -> Result<(), RunError> {
+            unsupported()
+        }
+        pub(crate) fn publish_new(
+            self: &Arc<Self>,
+            _: &OsStr,
+            _: &[u8],
+            _: bool,
+        ) -> Result<(), RunError> {
+            unsupported()
+        }
         pub(crate) fn tree(self: &Arc<Self>) -> Result<Tree, RunError> {
             unsupported()
         }
@@ -593,6 +832,15 @@ mod platform {
             unsupported()
         }
         pub(crate) fn ensure_attached(&self) -> Result<(), RunError> {
+            unsupported()
+        }
+        pub(crate) fn sync(&self) -> Result<(), RunError> {
+            unsupported()
+        }
+        pub(crate) fn bounded_json(&self, _: usize) -> Result<Vec<u8>, RunError> {
+            unsupported()
+        }
+        pub(crate) fn digest(&self) -> Result<String, RunError> {
             unsupported()
         }
         pub(crate) fn bytes(&self) -> Result<Vec<u8>, RunError> {

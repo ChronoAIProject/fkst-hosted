@@ -19,6 +19,18 @@ use crate::RunError;
 
 const WORKSPACE_MARKER: &str = ".fkst-workspace.json";
 
+#[cfg(all(test, unix))]
+#[path = "source_cache_tests.rs"]
+mod cache_tests;
+
+// Test injection is absent from production builds, including Browser mode.
+fn cache_checkpoint(stage: &str) -> Result<(), RunError> {
+    #[cfg(all(test, unix))]
+    cache_tests::checkpoint(stage)?;
+    let _ = stage;
+    Ok(())
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ImmutableRevision {
     GitCommit(String),
@@ -175,16 +187,30 @@ struct VerifiedSource {
     marker: PinnedFile,
     binding_receipt: PinnedFile,
     binding: TrustedLocalSourceBinding,
+    cache_root: Arc<Directory>,
 }
 
 impl VerifiedSource {
     fn validate(&self) -> Result<(), RunError> {
+        let _lock = self.cache_root.publication_lock()?;
+        self.validate_locked()
+    }
+
+    fn validate_locked(&self) -> Result<(), RunError> {
         verify_file_digest(&self.blob, &self.binding.expected_raw_digest)?;
         let marker = read_cache_marker(&self.marker)?;
         if marker.content_digest != self.binding.expected_raw_digest {
             return Err(RunError::Lifecycle("source cache byte metadata mismatch"));
         }
-        validate_binding_receipt(&self.binding_receipt, &self.binding)
+        validate_binding_receipt(&self.binding_receipt, &self.binding)?;
+        self.blob.sync()?;
+        self.marker.sync()?;
+        self.binding_receipt.sync()?;
+        cache_checkpoint("before-verified-sync")?;
+        self.cache_root.sync_chain()?;
+        self.blob.ensure_attached()?;
+        self.marker.ensure_attached()?;
+        self.binding_receipt.ensure_attached()
     }
 }
 
@@ -641,50 +667,53 @@ impl SourceWorkspaceManager {
         binding: &TrustedLocalSourceBinding,
         acquired: AcquiredSource,
     ) -> Result<VerifiedSource, RunError> {
-        // Recheck after the provider callback. Existing partial/corrupt storage is
-        // never deleted or completed by this acquisition path.
-        if let Some(source) = self.load_cached_source(binding)? {
+        validate_acquired(binding, &acquired)?;
+        let _lock = self.cache_root.publication_lock()?;
+        if let Some(source) = self.load_cached_source_locked(binding)? {
             return Ok(source);
         }
-        let cache_path = self.cache_path(&binding.expected_raw_digest)?;
-        let new_blob = self
+        let intent_path = self.publication_intent_path(binding)?;
+        if self
             .cache_root
-            .open_file(file_name(&cache_path)?)?
-            .is_none();
-        if new_blob {
-            self.cache_root
-                .write_new(file_name(&cache_path)?, &acquired.bytes, true)?;
-        }
-        let receipt = SourceBindingReceipt {
-            schema_version: "fkst.local-qa-source-binding/v1".to_owned(),
-            binding: binding.clone(),
-            source_object_id: acquired.source_object_id,
-            raw_digest: sha256_digest(&acquired.bytes),
-            immutable_revision: acquired.immutable_revision,
-            provider_scope: acquired.provider_scope,
-            provider_identity: acquired.provider_identity,
-        };
-        self.cache_root.write_new(
-            file_name(&self.binding_receipt_path(binding)?)?,
-            &encode_cache(&receipt)?,
-            false,
-        )?;
-        if new_blob {
-            // Initial completion follows the receipt: interrupted creation remains
-            // partial, rather than appearing to be reusable byte-only storage.
-            let marker = SourceCacheMarker {
-                schema_version: "fkst.local-qa-source-cache/v2".to_owned(),
-                content_digest: binding.expected_raw_digest.clone(),
-            };
-            self.cache_root.write_new(
-                file_name(&cache_marker_path(&cache_path))?,
-                &encode_cache(&marker)?,
+            .open_file(file_name(&intent_path)?)?
+            .is_none()
+        {
+            cache_checkpoint("before-intent")?;
+            self.cache_root.publish_new(
+                file_name(&intent_path)?,
+                &encode_cache(&SourcePublicationIntent::new(binding))?,
                 false,
             )?;
         }
-        self.load_cached_source(binding)?.ok_or(RunError::Lifecycle(
-            "source binding receipt publication is incomplete",
-        ))
+        // A visible intent may have survived a failed directory sync. Revalidate
+        // and complete durability before allowing it to authorize any content.
+        if !self.validate_publication_intent(binding)? {
+            return Err(RunError::Lifecycle("source publication intent is missing"));
+        }
+        cache_checkpoint("after-intent")?;
+        let cache_path = self.cache_path(&binding.expected_raw_digest)?;
+        cache_checkpoint("before-raw")?;
+        self.cache_root
+            .publish_new(file_name(&cache_path)?, &acquired.bytes, true)?;
+        cache_checkpoint("after-raw")?;
+        cache_checkpoint("before-marker")?;
+        self.cache_root.publish_new(
+            file_name(&cache_marker_path(&cache_path))?,
+            &encode_cache(&SourceCacheMarker::new(&binding.expected_raw_digest))?,
+            false,
+        )?;
+        cache_checkpoint("after-marker")?;
+        cache_checkpoint("before-receipt")?;
+        self.cache_root.publish_new(
+            file_name(&self.binding_receipt_path(binding)?)?,
+            &encode_cache(&SourceBindingReceipt::new(binding))?,
+            false,
+        )?;
+        cache_checkpoint("after-receipt")?;
+        self.load_cached_source_locked(binding)?
+            .ok_or(RunError::Lifecycle(
+                "source binding receipt publication is incomplete",
+            ))
     }
 
     fn binding_receipt_path(
@@ -698,7 +727,52 @@ impl SourceWorkspaceManager {
         )))
     }
 
+    fn publication_intent_path(
+        &self,
+        binding: &TrustedLocalSourceBinding,
+    ) -> Result<PathBuf, RunError> {
+        let digest = sha256_digest(&encode_cache(binding)?);
+        Ok(self.cache_root.path().join(format!(
+            "{}.publication.json",
+            digest.strip_prefix("sha256:").expect("SHA-256 prefix")
+        )))
+    }
+
+    fn validate_publication_intent(
+        &self,
+        binding: &TrustedLocalSourceBinding,
+    ) -> Result<bool, RunError> {
+        let Some(file) = self
+            .cache_root
+            .open_file(file_name(&self.publication_intent_path(binding)?)?)?
+        else {
+            return Ok(false);
+        };
+        let expected = SourcePublicationIntent::new(binding);
+        let intent: SourcePublicationIntent =
+            serde_json::from_slice(&file.bounded_json(metadata_bound(&expected)?)?)
+                .map_err(|_| RunError::Lifecycle("source publication intent is invalid"))?;
+        if intent != expected {
+            return Err(RunError::Lifecycle(
+                "source publication intent ownership mismatch",
+            ));
+        }
+        file.sync()?;
+        cache_checkpoint("before-intent-sync")?;
+        self.cache_root.sync_chain()?;
+        file.ensure_attached()?;
+        Ok(true)
+    }
+
     fn load_cached_source(
+        &self,
+        binding: &TrustedLocalSourceBinding,
+    ) -> Result<Option<VerifiedSource>, RunError> {
+        let _lock = self.cache_root.publication_lock()?;
+        self.load_cached_source_locked(binding)
+    }
+
+    fn load_cached_source_locked(
         &self,
         binding: &TrustedLocalSourceBinding,
     ) -> Result<Option<VerifiedSource>, RunError> {
@@ -707,35 +781,43 @@ impl SourceWorkspaceManager {
         let binding_receipt = self
             .cache_root
             .open_file(file_name(&self.binding_receipt_path(binding)?)?)?;
-        match (
-            self.cache_root.open_file(file_name(&cache_path)?)?,
-            self.cache_root.open_file(file_name(&marker_path)?)?,
-        ) {
-            (None, None) if binding_receipt.is_none() => Ok(None),
-            (Some(blob), Some(marker_file)) => {
-                verify_file_digest(&blob, &binding.expected_raw_digest)?;
-                let marker = read_cache_marker(&marker_file)?;
-                if marker.content_digest != binding.expected_raw_digest {
-                    return Err(RunError::Lifecycle("source cache byte metadata mismatch"));
-                }
-                let Some(binding_receipt) = binding_receipt else {
-                    // Verified byte storage is reusable, but is not a source binding.
-                    // Each distinct binding must freshly acquire and check its facts.
-                    return Ok(None);
-                };
-                validate_binding_receipt(&binding_receipt, binding)?;
-                Ok(Some(VerifiedSource {
+        let blob = self.cache_root.open_file(file_name(&cache_path)?)?;
+        let marker = self.cache_root.open_file(file_name(&marker_path)?)?;
+        // Validate every existing final member before considering recovery. Missing
+        // siblings never excuse corrupt bytes, old schemas, or conflicting facts.
+        if let Some(blob) = &blob {
+            verify_file_digest(blob, &binding.expected_raw_digest)?;
+        }
+        if let Some(marker) = &marker {
+            if read_cache_marker(marker)?.content_digest != binding.expected_raw_digest {
+                return Err(RunError::Lifecycle("source cache byte metadata mismatch"));
+            }
+        }
+        if let Some(receipt) = &binding_receipt {
+            validate_binding_receipt(receipt, binding)?;
+        }
+        let intent = self.validate_publication_intent(binding)?;
+        match (blob, marker, binding_receipt) {
+            (Some(blob), Some(marker), Some(binding_receipt)) => {
+                let source = VerifiedSource {
                     source_object_id: binding.source_object_id.clone(),
                     content_digest: binding.expected_raw_digest.clone(),
                     immutable_revision: binding.expected_revision.clone(),
                     provider_identity: binding.expected_provider_identity.clone(),
                     cache_path,
                     blob,
-                    marker: marker_file,
+                    marker,
                     binding_receipt,
                     binding: binding.clone(),
-                }))
+                    cache_root: self.cache_root.clone(),
+                };
+                source.validate_locked()?;
+                Ok(Some(source))
             }
+            (None, None, None) | (Some(_), Some(_), None) => Ok(None),
+            // Receipt is published last. Its presence cannot explain lost
+            // prerequisites, even when an old publication intent remains.
+            (_, _, None) if intent => Ok(None),
             _ => Err(RunError::Lifecycle("verified source cache is incomplete")),
         }
     }
@@ -1114,6 +1196,56 @@ struct SourceBindingReceipt {
     provider_identity: String,
 }
 
+#[derive(Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+struct SourcePublicationIntent {
+    schema_version: String,
+    binding: TrustedLocalSourceBinding,
+}
+
+impl SourcePublicationIntent {
+    fn new(binding: &TrustedLocalSourceBinding) -> Self {
+        Self {
+            schema_version: "fkst.local-qa-source-publication/v1".into(),
+            binding: binding.clone(),
+        }
+    }
+}
+
+impl SourceCacheMarker {
+    fn new(digest: &str) -> Self {
+        Self {
+            schema_version: "fkst.local-qa-source-cache/v2".into(),
+            content_digest: digest.into(),
+        }
+    }
+}
+
+impl SourceBindingReceipt {
+    fn new(binding: &TrustedLocalSourceBinding) -> Self {
+        Self {
+            schema_version: "fkst.local-qa-source-binding/v1".into(),
+            binding: binding.clone(),
+            source_object_id: binding.source_object_id.clone(),
+            raw_digest: binding.expected_raw_digest.clone(),
+            immutable_revision: binding.expected_revision.clone(),
+            provider_scope: binding.expected_provider_scope.clone(),
+            provider_identity: binding.expected_provider_identity.clone(),
+        }
+    }
+}
+
+// JSON escaping can expand each expected byte to six bytes. This is a storage
+// encoding bound derived from trusted facts, not a source payload size policy.
+fn metadata_bound(expected: &impl Serialize) -> Result<usize, RunError> {
+    encode_cache(expected)?
+        .len()
+        .checked_mul(6)
+        .ok_or(RunError::Lifecycle(
+            "source metadata encoding bound overflow",
+        ))
+}
+
 impl WorkspaceMarker {
     fn from_handle(handle: &WorkspaceHandle) -> Self {
         Self {
@@ -1236,8 +1368,10 @@ fn validate_binding_receipt(
     file: &PinnedFile,
     binding: &TrustedLocalSourceBinding,
 ) -> Result<(), RunError> {
-    let receipt: SourceBindingReceipt = serde_json::from_slice(&file.bytes()?)
-        .map_err(|_| RunError::Lifecycle("source binding receipt is invalid"))?;
+    let receipt: SourceBindingReceipt = serde_json::from_slice(
+        &file.bounded_json(metadata_bound(&SourceBindingReceipt::new(binding))?)?,
+    )
+    .map_err(|_| RunError::Lifecycle("source binding receipt is invalid"))?;
     if receipt.schema_version != "fkst.local-qa-source-binding/v1" || receipt.binding != *binding {
         return Err(RunError::Lifecycle(
             "source binding receipt ownership mismatch",
@@ -1275,7 +1409,8 @@ fn cache_marker_path(cache_path: &Path) -> PathBuf {
 }
 
 fn read_cache_marker(file: &PinnedFile) -> Result<SourceCacheMarker, RunError> {
-    let marker = serde_json::from_slice::<SourceCacheMarker>(&file.bytes()?)
+    let bound = metadata_bound(&SourceCacheMarker::new(&sha256_digest(b"")))?;
+    let marker = serde_json::from_slice::<SourceCacheMarker>(&file.bounded_json(bound)?)
         .map_err(|_| RunError::Lifecycle("source cache marker is invalid"))?;
     if marker.schema_version != "fkst.local-qa-source-cache/v2" {
         return Err(RunError::Lifecycle(
@@ -1286,8 +1421,7 @@ fn read_cache_marker(file: &PinnedFile) -> Result<SourceCacheMarker, RunError> {
 }
 
 fn verify_file_digest(file: &PinnedFile, expected_digest: &str) -> Result<(), RunError> {
-    let bytes = file.bytes()?;
-    if sha256_digest(&bytes) != expected_digest {
+    if file.digest()? != expected_digest {
         return Err(RunError::Lifecycle("verified source cache is corrupt"));
     }
     Ok(())

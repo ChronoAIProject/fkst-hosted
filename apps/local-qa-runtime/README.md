@@ -167,10 +167,62 @@ Byte storage remains addressed by raw digest, with explicit v2 byte metadata and
 separate receipts for complete source bindings. Exact binding replay revalidates
 both metadata and raw bytes without re-contacting the provider. A different binding
 must freshly acquire and match all expected facts before sharing the same bytes.
-Existing v1 metadata, corrupt or partial records, and an existing workspace's missing
-source receipt are unavailable; the manager does not delete, reconstruct or silently
-upgrade them. A missing receipt for a new binding never suffices to authorize reuse.
-General cache publication/recovery and garbage collection remain a separate unit.
+Successful cache publication and replay sync the checked files and their pinned
+containing directory chain before returning a verified source; sync failure refuses
+success. This relies on the filesystem honoring file/directory sync and advisory
+locks; the local macOS process tests do not establish support for every filesystem
+or simulate physical power loss. Linux process behavior requires the Linux CI run.
+
+Cache publication uses a persistent per-binding
+`fkst.local-qa-source-publication/v1` intent sidecar, containing the exact trusted
+binding. This is a local cache format, not a new Source authorization contract or
+Journal migration. The intent is synced before publishing raw bytes, then v2 byte
+metadata, then the binding receipt. A reopened intent is revalidated and synced
+again before it can justify completing missing members. Recovery requires a fresh
+matching acquisition and no existing workspace ownership record. Unknown orphan
+files, corrupt/truncated committed members, conflicting facts, old v1 metadata,
+or a receipt whose prerequisites are missing remain blockers; no catch-and-delete
+or implicit upgrade occurs. An existing workspace's missing cache remains unavailable.
+Legacy complete v2 records need no intent and remain readable and revalidatable.
+
+Every cooperating cache reader and publisher takes a nonblocking advisory lock on
+a fresh open description of the pinned cache-root directory. This serializes cache
+I/O across managers and processes, including two bindings sharing raw bytes, without
+holding a lock across acquisition, provider, or Host clock callbacks. Contention
+returns `source cache publication is busy; retry`; the caller may retry after the
+other operation releases it. Cache-root and parent identities are checked before
+and after lock acquisition and filesystem operations. This is cooperative storage
+coordination, not isolation from arbitrary same-user mutation or a mixed-version
+writer that does not follow the same locking protocol.
+
+Each member is written to a unique exclusive temporary file, file-synced, and
+published with an fd-relative no-clobber hard link before unlinking its own temporary
+name and syncing directories. Pre-link abandoned temporary files are never enumerated,
+read as content, or deleted by retry. Errors retain evidence. A process exit in the
+hard-link/temporary-unlink window leaves a multiple-link final file: this is an
+explicit safety blocker and is **not automatically recovered**. General abandoned-file
+cleanup, that link-window recovery, and total cache storage quotas remain unfinished.
+
+Raw-cache hashing uses a fixed 64 KiB buffer and the initial file length, with
+pre/post descriptor metadata and attachment checks. This bounds hash allocation and
+prevents concurrent growth from extending the read loop indefinitely; 64 KiB is a
+chunk size, not a Source payload limit. Metadata reads use a fixed 4 KiB input buffer,
+collapse only runs of JSON whitespace outside strings to one separator, and cap the
+normalized encoding at six times the trusted expected record's canonical UTF-8 JSON
+byte length. The current marker, receipt and intent shapes contain only objects and
+strings. An ASCII byte can expand to six bytes (`\uXXXX`); a supplementary Unicode
+character uses twelve escaped bytes for four UTF-8 bytes, and canonical control/quote/
+backslash escapes already consume at least two bytes. Structural-byte slack covers
+one separator per token boundary. No numeric encoding compatibility is claimed.
+The original typed serde parser still decides syntax and field/relationship validity;
+normal indentation, field order and string escaping remain supported without rewriting
+saved metadata. Token-separated invalid input is not joined into valid JSON. Encodings
+beyond this bound are explicitly rejected, so compatibility is not an unconditional
+promise for every JSON representation. Long leading/trailing/interspersed whitespace
+uses bounded memory but still consumes I/O proportional to the initial file length.
+These checks do not impose a hard elapsed-time or total-read-byte budget. The provider's
+`AcquiredSource.bytes: Vec<u8>` allocation and real provider-call deadlines remain
+separate unresolved bounds.
 
 The bounded workspace ownership driver uses the Host Journal's v9 serialization
 compatibility fence, so older v8 readers reject databases containing the new format.

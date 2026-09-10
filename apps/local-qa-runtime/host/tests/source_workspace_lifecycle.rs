@@ -3440,6 +3440,103 @@ fn source_binding_final_clock_callback_revalidates_receipt_and_preserves_ownersh
     assert_eq!(fs::read(outside.join("sentinel")).unwrap(), b"preserve");
 }
 
+#[cfg(unix)]
+#[test]
+fn source_cache_interrupted_publication_requires_exact_intent_and_fresh_acquisition() {
+    for state in ["intent", "raw", "marker"] {
+        let mut fixture = WorkspaceFixture::new("source-cache-publication-recovery");
+        let binding = lease(&fixture.reference, &fixture.request).binding;
+        let cache = fixture.root.join("cache");
+        let key = sha256_digest(&serde_json::to_vec(&binding).unwrap());
+        let intent = cache.join(format!(
+            "{}.publication.json",
+            key.strip_prefix("sha256:").unwrap()
+        ));
+        fs::write(
+            &intent,
+            serde_json::to_vec(&serde_json::json!({
+                "schema_version": "fkst.local-qa-source-publication/v1",
+                "binding": binding,
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+        let blob = cache.join(format!(
+            "{}.source",
+            binding.expected_raw_digest.strip_prefix("sha256:").unwrap()
+        ));
+        if state != "intent" {
+            fs::write(&blob, &fixture.source.bytes).unwrap();
+        }
+        if state == "marker" {
+            fs::write(
+                blob.with_extension("source.json"),
+                serde_json::to_vec(&serde_json::json!({
+                    "schema_version": "fkst.local-qa-source-cache/v2",
+                    "content_digest": binding.expected_raw_digest,
+                }))
+                .unwrap(),
+            )
+            .unwrap();
+        }
+        // An unrelated abandoned temporary artifact is never a recovery credential.
+        let stale = cache.join(".unrelated-publication.tmp");
+        fs::write(&stale, b"retain unrelated partial bytes").unwrap();
+        let before = fs::read(&intent).unwrap();
+        fixture.source.revision = ImmutableRevision::GitCommit("a".repeat(40));
+        assert!(fixture.prepare().is_err());
+        assert_eq!(fixture.source.acquire_calls, 1, "state={state}");
+        assert_eq!(fixture.provider.materialize_calls, 0);
+        assert_eq!(fs::read(&intent).unwrap(), before);
+        fixture.source.revision = ImmutableRevision::GitCommit(COMMIT.into());
+        fixture.reopen();
+        let handle = fixture.prepare().unwrap();
+        assert_eq!(fixture.source.acquire_calls, 2, "state={state}");
+        assert_eq!(fs::read(&blob).unwrap(), fixture.source.bytes);
+        assert_eq!(fs::read(&stale).unwrap(), b"retain unrelated partial bytes");
+        assert_eq!(fixture.prepare().unwrap(), handle);
+        assert_eq!(fixture.source.acquire_calls, 2);
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn source_cache_orphan_or_foreign_intent_never_authorizes_partial_repair() {
+    for evidence in ["absent", "foreign", "truncated"] {
+        let mut fixture = WorkspaceFixture::new("source-cache-orphan");
+        let binding = lease(&fixture.reference, &fixture.request).binding;
+        let cache = fixture.root.join("cache");
+        let blob = cache.join(format!(
+            "{}.source",
+            binding.expected_raw_digest.strip_prefix("sha256:").unwrap()
+        ));
+        fs::write(&blob, &fixture.source.bytes).unwrap();
+        let key = sha256_digest(&serde_json::to_vec(&binding).unwrap());
+        let intent = cache.join(format!(
+            "{}.publication.json",
+            key.strip_prefix("sha256:").unwrap()
+        ));
+        if evidence == "foreign" {
+            let mut foreign = binding.clone();
+            foreign.expected_provider_identity = "other-provider".into();
+            fs::write(
+                &intent,
+                serde_json::to_vec(&serde_json::json!({
+                    "schema_version": "fkst.local-qa-source-publication/v1", "binding": foreign,
+                }))
+                .unwrap(),
+            )
+            .unwrap();
+        } else if evidence == "truncated" {
+            fs::write(&intent, b"{partial").unwrap();
+        }
+        assert!(fixture.prepare().is_err(), "evidence={evidence}");
+        assert_eq!(fixture.source.acquire_calls, 0);
+        assert_eq!(fixture.provider.materialize_calls, 0);
+        assert_eq!(fs::read(&blob).unwrap(), fixture.source.bytes);
+    }
+}
+
 struct TestManager {
     inner: SourceWorkspaceManager,
     journal_root: PathBuf,

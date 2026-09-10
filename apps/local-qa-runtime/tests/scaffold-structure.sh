@@ -46,6 +46,7 @@ expected=$(printf '%s\n' \
   apps/local-qa-runtime/host/src/lib.rs \
   apps/local-qa-runtime/host/src/main.rs \
   apps/local-qa-runtime/host/src/ownership.rs \
+  apps/local-qa-runtime/host/src/source_cache_tests.rs \
   apps/local-qa-runtime/host/src/source_workspace.rs \
   apps/local-qa-runtime/host/src/source_workspace_fs.rs \
   apps/local-qa-runtime/host/src/transport.rs \
