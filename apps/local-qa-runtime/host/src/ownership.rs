@@ -1,4 +1,5 @@
 use std::collections::BTreeMap;
+use std::net::SocketAddr;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use fkst_qa_contracts::validate_scalar;
@@ -34,10 +35,109 @@ pub struct ProviderResource {
     pub provider_identity: String,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProviderResourceState {
+    Active,
+    Stopped,
+    Unknown,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProviderStatusReceipt {
+    pub resource: ProviderResource,
+    pub state: ProviderResourceState,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProviderStopReceipt {
+    pub resource: ProviderResource,
+    pub stopped: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ReadinessEndpointClass {
+    LoopbackHttp,
+    LoopbackTcp,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReadinessRequest {
+    pub service_id: String,
+    pub endpoint_class: ReadinessEndpointClass,
+    pub deadline_utc: String,
+    pub max_attempts: u32,
+    pub max_duration_ms: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProviderReadinessReceipt {
+    pub resource: ProviderResource,
+    pub service_id: String,
+    pub endpoint_class: ReadinessEndpointClass,
+    pub endpoint: SocketAddr,
+    pub observed_at_utc: String,
+    pub attempts: u32,
+    pub elapsed_ms: u64,
+    pub ready: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EnvironmentStatus {
+    Active,
+    Stopped,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EnvironmentStopReceipt {
+    pub intent_id: String,
+    pub provider_identity: String,
+    pub already_stopped: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReadinessReceipt {
+    pub intent_id: String,
+    pub provider_identity: String,
+    pub service_id: String,
+    pub endpoint_class: ReadinessEndpointClass,
+    pub endpoint: SocketAddr,
+    pub deadline_utc: String,
+    pub attempts: u32,
+    pub elapsed_ms: u64,
+}
+
 pub trait EnvironmentProvider {
     fn discover(&mut self, stable_provider_key: &str)
         -> Result<Option<ProviderResource>, RunError>;
     fn create(&mut self, request: CreateRequest) -> Result<ProviderResource, RunError>;
+
+    fn status(
+        &mut self,
+        _resource: &ProviderResource,
+    ) -> Result<ProviderStatusReceipt, RunError> {
+        Err(RunError::Lifecycle(
+            "environment provider status is unavailable",
+        ))
+    }
+
+    fn stop(
+        &mut self,
+        _resource: &ProviderResource,
+    ) -> Result<ProviderStopReceipt, RunError> {
+        Err(RunError::Lifecycle(
+            "environment provider stop is unavailable",
+        ))
+    }
+
+    fn readiness(
+        &mut self,
+        _resource: &ProviderResource,
+        _request: &ReadinessRequest,
+    ) -> Result<ProviderReadinessReceipt, RunError> {
+        Err(RunError::Lifecycle(
+            "environment provider readiness is unavailable",
+        ))
+    }
 }
 
 pub trait Clock {
@@ -146,10 +246,156 @@ pub fn reconcile_environment<P: EnvironmentProvider>(
     })
 }
 
+pub fn environment_status<P: EnvironmentProvider>(
+    provider: &mut P,
+    handle: &OwnedHandle,
+) -> Result<EnvironmentStatus, RunError> {
+    let expected = resource_from_handle(handle)?;
+    let receipt = provider.status(&expected)?;
+    validate_receipt_resource(&expected, &receipt.resource)?;
+    match receipt.state {
+        ProviderResourceState::Active => Ok(EnvironmentStatus::Active),
+        ProviderResourceState::Stopped => Ok(EnvironmentStatus::Stopped),
+        ProviderResourceState::Unknown => Err(RunError::Lifecycle(
+            "environment provider ownership is unknown",
+        )),
+    }
+}
+
+pub fn stop_environment<P: EnvironmentProvider>(
+    provider: &mut P,
+    handle: &OwnedHandle,
+) -> Result<EnvironmentStopReceipt, RunError> {
+    let expected = resource_from_handle(handle)?;
+    let status = provider.status(&expected)?;
+    validate_receipt_resource(&expected, &status.resource)?;
+    match status.state {
+        ProviderResourceState::Stopped => {
+            return Ok(EnvironmentStopReceipt {
+                intent_id: handle.intent_id.clone(),
+                provider_identity: handle.provider_identity.clone(),
+                already_stopped: true,
+            });
+        }
+        ProviderResourceState::Unknown => {
+            return Err(RunError::Lifecycle(
+                "environment provider ownership is unknown",
+            ));
+        }
+        ProviderResourceState::Active => {}
+    }
+    let receipt = provider.stop(&expected)?;
+    validate_receipt_resource(&expected, &receipt.resource)?;
+    if !receipt.stopped {
+        return Err(RunError::Lifecycle(
+            "environment stop receipt did not prove termination",
+        ));
+    }
+    Ok(EnvironmentStopReceipt {
+        intent_id: handle.intent_id.clone(),
+        provider_identity: handle.provider_identity.clone(),
+        already_stopped: false,
+    })
+}
+
+pub fn check_environment_readiness<P: EnvironmentProvider>(
+    provider: &mut P,
+    handle: &OwnedHandle,
+    request: &ReadinessRequest,
+    clock: &impl Clock,
+) -> Result<ReadinessReceipt, RunError> {
+    validate_readiness_request(request)?;
+    ensure_before_deadline(clock, &request.deadline_utc)?;
+    if request.deadline_utc > handle.deadline_utc {
+        return Err(RunError::Lifecycle(
+            "readiness deadline exceeds the environment deadline",
+        ));
+    }
+    let expected = resource_from_handle(handle)?;
+    let receipt = provider.readiness(&expected, request)?;
+    validate_receipt_resource(&expected, &receipt.resource)?;
+    validate_scalar("ISO8601", &receipt.observed_at_utc)
+        .map_err(|_| RunError::Lifecycle("readiness observation time must be ISO8601"))?;
+    if receipt.service_id != request.service_id
+        || receipt.endpoint_class != request.endpoint_class
+        || receipt.attempts == 0
+        || receipt.attempts > request.max_attempts
+        || receipt.elapsed_ms > request.max_duration_ms
+        || receipt.observed_at_utc.as_str() >= request.deadline_utc
+    {
+        return Err(RunError::Lifecycle(
+            "readiness receipt does not match service identity or budget",
+        ));
+    }
+    if !receipt.endpoint.ip().is_loopback() || receipt.endpoint.port() == 0 {
+        return Err(RunError::Lifecycle(
+            "readiness endpoint must be an allocated loopback port",
+        ));
+    }
+    if !receipt.ready {
+        return Err(RunError::Lifecycle(
+            "environment did not become ready within the bounded probe",
+        ));
+    }
+    Ok(ReadinessReceipt {
+        intent_id: handle.intent_id.clone(),
+        provider_identity: handle.provider_identity.clone(),
+        service_id: receipt.service_id,
+        endpoint_class: receipt.endpoint_class,
+        endpoint: receipt.endpoint,
+        deadline_utc: request.deadline_utc.clone(),
+        attempts: receipt.attempts,
+        elapsed_ms: receipt.elapsed_ms,
+    })
+}
+
 fn validate_request(request: &EnvironmentRequest) -> Result<(), RunError> {
     if request.provider_identity.is_empty() {
         return Err(RunError::InvalidJournal(
             "provider identity must not be empty",
+        ));
+    }
+    Ok(())
+}
+
+fn validate_readiness_request(request: &ReadinessRequest) -> Result<(), RunError> {
+    if request.service_id.is_empty() || request.max_attempts == 0 || request.max_duration_ms == 0 {
+        return Err(RunError::Lifecycle("invalid readiness request"));
+    }
+    validate_scalar("ISO8601", &request.deadline_utc)
+        .map_err(|_| RunError::Lifecycle("readiness deadline must be ISO8601"))?;
+    Ok(())
+}
+
+fn resource_from_handle(handle: &OwnedHandle) -> Result<ProviderResource, RunError> {
+    if handle.state != "active"
+        || handle.intent_id.is_empty()
+        || handle.provider_identity.is_empty()
+        || handle.stable_provider_key != stable_provider_key(&handle.intent_id)
+    {
+        return Err(RunError::Lifecycle("invalid environment owned handle"));
+    }
+    Ok(ProviderResource {
+        stable_provider_key: handle.stable_provider_key.clone(),
+        labels: BTreeMap::from([
+            (RUN_ID_LABEL.to_owned(), handle.run_id.clone()),
+            (PROFILE_ID_LABEL.to_owned(), handle.profile_id.clone()),
+            (
+                ENVIRONMENT_ID_LABEL.to_owned(),
+                handle.environment_id.clone(),
+            ),
+        ]),
+        provider_identity: handle.provider_identity.clone(),
+    })
+}
+
+fn validate_receipt_resource(
+    expected: &ProviderResource,
+    actual: &ProviderResource,
+) -> Result<(), RunError> {
+    if expected != actual {
+        return Err(RunError::Lifecycle(
+            "provider receipt does not match the owned environment identity",
         ));
     }
     Ok(())

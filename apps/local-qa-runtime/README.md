@@ -145,6 +145,22 @@ repeated. This is infrastructure execution only: it is not enabled in default
 production, does not make v2 rows claimable, and does not claim Testing Packages
 `CaseResultSet` authority.
 
+The Host now contains reusable lifecycle drivers for an authority-bound immutable
+Source payload, a revalidated read-only Source cache, fresh Runtime-derived
+per-Run workspaces, exact Environment ownership status/stop receipts, and typed
+bounded loopback readiness receipts. The Source driver verifies payload bytes
+before cache or workspace effects, rejects floating revisions and unsafe paths,
+reuses the same verified cache without re-contacting the provider, and confines
+idempotent workspace removal to the exact owned Run/generation path.
+
+These drivers are not wired into production admission. The pinned executable
+contracts still expose only generic `DigestBoundReferenceV2` values and do not
+provide the approved `SourceObjectLease` binding, controlled Environment
+Profile-to-provider projection, or readiness receipt mapping required before
+real Source or Compose effects. The Host therefore keeps that boundary
+fail-closed rather than treating repository/commit equality, profile digests,
+caller configuration, or fake providers as execution authority.
+
 The following capabilities remain explicitly deferred:
 
 - production Browser executor registration, v2 claiming, and persisted v2
@@ -153,7 +169,7 @@ The following capabilities remain explicitly deferred:
   owner;
 - crash-after-effect uncertainty and restart-to-`lost` reconciliation;
 - NyxID and Hosted transport or authentication;
-- Source, Compose, and Secrets;
+- production Source/Compose activation and Secrets;
 - upload, Quality, Report, Publication, and Settlement; and
 - hardened VM, egress, or EffectGate claims.
 
