@@ -810,12 +810,13 @@ fn review_regression_non_utf8_host_roots_preserve_argv_and_sibling() {
     fs::create_dir(&raw).unwrap();
     fs::create_dir(&sibling).unwrap();
     let mut config = f.config();
+    // Keep SQLite's UTF-8 journal location contract; exercise raw bytes in every
+    // root used for Git arguments and source/workspace I/O instead.
     for path in [
         &mut config.source_store,
         &mut config.state_root,
         &mut config.workspace_root,
         &mut config.cache_root,
-        &mut config.journal_parent,
     ] {
         let target = raw.join(path.file_name().unwrap());
         fs::rename(&*path, &target).unwrap();
