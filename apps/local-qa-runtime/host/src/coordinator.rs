@@ -415,6 +415,7 @@ mod tests {
         Valid,
         Malformed,
         RelationMismatch,
+        FailBeforeRequest,
     }
 
     impl VersionedExecutor for RecordingVersionedExecutor {
@@ -423,6 +424,11 @@ mod tests {
         }
 
         fn execute(&self, request: &ExecutorRequest) -> Result<ExecutorResult, RunError> {
+            if matches!(self.result_behavior, ResultBehavior::FailBeforeRequest) {
+                return Err(RunError::Contract(
+                    "controlled failure before request signal",
+                ));
+            }
             self.requests
                 .lock()
                 .map_err(|_| RunError::Contract("recording executor poisoned"))?
@@ -482,6 +488,7 @@ mod tests {
             acceptance_bytes: b"{}",
             binding_json: TEST_BINDING_JSON,
             selection_json: TEST_SELECTION_JSON,
+            request_json: b"{}",
         })
     }
 
@@ -752,8 +759,7 @@ mod tests {
             CoordinatorHandle::start_versioned(&database_path, registry, api_selection())
                 .expect("coordinator starts before executor result validation");
         assert_eq!(
-            request_receiver
-                .recv_timeout(Duration::from_secs(2))
+            wait_for_executor_request(&request_receiver, &mut coordinator)
                 .expect("executor must be invoked once")
                 .run_id,
             run_id
@@ -794,8 +800,7 @@ mod tests {
             CoordinatorHandle::start_versioned(&database_path, registry, api_selection())
                 .expect("coordinator starts before executor result validation");
         assert_eq!(
-            request_receiver
-                .recv_timeout(Duration::from_secs(2))
+            wait_for_executor_request(&request_receiver, &mut coordinator)
                 .expect("executor must be invoked once")
                 .run_id,
             run_id
@@ -953,6 +958,165 @@ mod tests {
         fs::remove_dir_all(directory).expect("temporary directory must be removed");
     }
 
+    #[derive(Debug)]
+    struct RequestWaitFailure {
+        request_error: mpsc::RecvTimeoutError,
+        coordinator_finished: bool,
+        terminal_result: Option<Result<(), RunError>>,
+    }
+
+    fn wait_for_executor_request(
+        receiver: &mpsc::Receiver<ExecutorRequest>,
+        coordinator: &mut CoordinatorHandle,
+    ) -> Result<ExecutorRequest, RequestWaitFailure> {
+        receiver
+            .recv_timeout(Duration::from_secs(2))
+            .map_err(|request_error| {
+                let coordinator_finished = coordinator
+                    .join
+                    .as_ref()
+                    .is_some_and(thread::JoinHandle::is_finished);
+                let terminal_result = coordinator_finished.then(|| coordinator.check());
+                RequestWaitFailure {
+                    request_error,
+                    coordinator_finished,
+                    terminal_result,
+                }
+            })
+    }
+
+    fn finished_request_fixture(
+        result_behavior: ResultBehavior,
+    ) -> (
+        std::path::PathBuf,
+        CoordinatorHandle,
+        mpsc::Receiver<ExecutorRequest>,
+    ) {
+        let directory = temporary_directory("request-observation");
+        let mut journal = Journal::open(&directory.join("journal.sqlite")).expect("journal opens");
+        journal
+            .seed_executable_v1(
+                "00000000-0000-0000-0000-000000000007",
+                "idem-observation",
+                TEST_REQUEST_DIGEST,
+            )
+            .expect("executable v1 fixture must be seeded");
+        let (request_sender, request_receiver) = mpsc::channel();
+        let registry = ExecutorRegistry::new(vec![Box::new(RecordingVersionedExecutor {
+            descriptor: api_descriptor(),
+            requests: Mutex::new(request_sender),
+            result_behavior,
+        })])
+        .expect("registry must be valid");
+        let (sender, receiver) = mpsc::channel();
+        let (startup_sender, startup_receiver) = mpsc::sync_channel(0);
+        let coordinator_registry = registry.clone();
+        let join = thread::spawn(move || {
+            run_coordinator(
+                journal,
+                coordinator_registry,
+                api_selection(),
+                receiver,
+                Some(startup_sender),
+            )
+        });
+        let coordinator = CoordinatorHandle {
+            sender,
+            join: Some(join),
+            registry,
+            selection: api_selection(),
+        };
+        let startup_result = startup_receiver.recv_timeout(Duration::from_secs(2));
+        drop(startup_receiver);
+        assert!(!startup_result.expect("controlled startup failure must reach the barrier"));
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while !coordinator
+            .join
+            .as_ref()
+            .expect("join remains owned")
+            .is_finished()
+        {
+            assert!(
+                Instant::now() < deadline,
+                "controlled coordinator must finish"
+            );
+            thread::yield_now();
+        }
+        (directory, coordinator, request_receiver)
+    }
+
+    #[test]
+    fn delayed_startup_handshake_disconnects_before_owned_thread_cleanup() {
+        let (startup_sender, startup_receiver) = mpsc::sync_channel(0);
+        let (release_sender, release_receiver) = mpsc::channel();
+        let (completion_sender, completion_receiver) = mpsc::channel();
+        let join = thread::spawn(move || {
+            if release_receiver.recv().is_ok() {
+                let result = startup_sender.send(false);
+                let _ = completion_sender.send(result);
+            }
+        });
+        let (startup_result, release_result, completion_result) = {
+            // Scope exit still disconnects the sender if the explicit drop regresses.
+            let startup_receiver = startup_receiver;
+            let startup_result = startup_receiver.recv_timeout(Duration::from_secs(2));
+            drop(startup_receiver);
+            let release_result = release_sender.send(());
+            let completion_result = completion_receiver.recv_timeout(Duration::from_secs(2));
+            (startup_result, release_result, completion_result)
+        };
+        let joined = join.join();
+        assert_eq!(startup_result, Err(mpsc::RecvTimeoutError::Timeout));
+        release_result.expect("delayed sender must be released after receiver drop");
+        assert_eq!(completion_result, Ok(Err(mpsc::SendError(false))));
+        joined.expect("delayed sender must be joined before test assertions unwind");
+    }
+
+    #[test]
+    fn request_wait_reports_timeout_and_exact_finished_coordinator_error() {
+        let (directory, mut coordinator, request_receiver) =
+            finished_request_fixture(ResultBehavior::FailBeforeRequest);
+        let failure = wait_for_executor_request(&request_receiver, &mut coordinator)
+            .expect_err("the retained registry sender must leave the request wait timing out");
+        assert_eq!(failure.request_error, mpsc::RecvTimeoutError::Timeout);
+        assert!(failure.coordinator_finished);
+        assert!(matches!(
+            failure.terminal_result,
+            Some(Err(RunError::Contract(
+                "controlled failure before request signal"
+            )))
+        ));
+        assert_eq!(
+            format!("{failure:?}"),
+            "RequestWaitFailure { request_error: Timeout, coordinator_finished: true, terminal_result: Some(Err(Contract(\"controlled failure before request signal\"))) }"
+        );
+        assert!(
+            coordinator.join.is_none(),
+            "terminal result must be captured once"
+        );
+        drop(coordinator);
+        fs::remove_dir_all(directory).expect("temporary directory must be removed");
+    }
+
+    #[test]
+    fn request_wait_success_preserves_finished_coordinator_error() {
+        let (directory, mut coordinator, request_receiver) =
+            finished_request_fixture(ResultBehavior::RelationMismatch);
+        let request = wait_for_executor_request(&request_receiver, &mut coordinator)
+            .expect("the queued request must remain observable after coordinator exit");
+        assert_eq!(request.run_id, "00000000-0000-0000-0000-000000000007");
+        assert!(
+            coordinator.join.is_some(),
+            "success must not consume the terminal result"
+        );
+        assert!(matches!(
+            wait_for_coordinator_error(&mut coordinator),
+            RunError::Contract("executor result relation failed")
+        ));
+        drop(coordinator);
+        fs::remove_dir_all(directory).expect("temporary directory must be removed");
+    }
+
     fn wait_for_coordinator_error(coordinator: &mut CoordinatorHandle) -> RunError {
         let deadline = Instant::now() + Duration::from_secs(2);
         loop {
@@ -1015,16 +1179,68 @@ mod tests {
             .expect("row count must be readable")
     }
 
+    #[test]
+    fn temporary_directories_are_distinct_for_concurrent_identical_timestamps() {
+        let timestamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let barrier = std::sync::Barrier::new(2);
+        let results = thread::scope(|scope| {
+            let workers: Vec<_> = (0..2)
+                .map(|_| {
+                    scope.spawn(|| {
+                        barrier.wait();
+                        temporary_directory_with_timestamp("same-timestamp", timestamp)
+                    })
+                })
+                .collect();
+            workers
+                .into_iter()
+                .map(|worker| worker.join())
+                .collect::<Vec<_>>()
+        });
+        let directories: Vec<_> = results
+            .iter()
+            .filter_map(|result| result.as_ref().ok())
+            .collect();
+        let distinct = directories
+            .iter()
+            .collect::<std::collections::HashSet<_>>()
+            .len();
+        for directory in &directories {
+            fs::remove_dir_all(directory).expect("owned directory must be removed");
+        }
+        assert!(
+            results.iter().all(Result::is_ok),
+            "both concurrent allocations must succeed"
+        );
+        assert_eq!(
+            distinct, 2,
+            "each caller must reserve a different directory"
+        );
+    }
+
     fn temporary_directory(label: &str) -> std::path::PathBuf {
         let timestamp = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .expect("system clock must be after the Unix epoch")
             .as_nanos();
-        let directory = std::env::temp_dir().join(format!(
-            "fkst-local-qa-host-{label}-{}-{timestamp}",
-            std::process::id()
-        ));
-        fs::create_dir(&directory).expect("temporary directory must be created");
-        directory
+        temporary_directory_with_timestamp(label, timestamp)
+    }
+
+    fn temporary_directory_with_timestamp(label: &str, timestamp: u128) -> std::path::PathBuf {
+        for attempt in 0..128 {
+            let directory = std::env::temp_dir().join(format!(
+                "fkst-local-qa-host-{label}-{}-{timestamp}-{attempt}",
+                std::process::id()
+            ));
+            match fs::create_dir(&directory) {
+                Ok(()) => return directory,
+                Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
+                Err(error) => panic!("temporary directory must be created: {error}"),
+            }
+        }
+        panic!("temporary directory allocation exhausted");
     }
 }

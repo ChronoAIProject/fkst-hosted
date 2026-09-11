@@ -922,6 +922,13 @@ export function validateScalar(
   }
 }
 
+/** Compare canonical UTC timestamps after validating both ISO8601 operands. */
+export function compareIso8601Timestamps(left: string, right: string): number {
+  validateScalar("ISO8601", left);
+  validateScalar("ISO8601", right);
+  return compareIso8601(left, right);
+}
+
 export function canonicalBytes(value: ValidatedValue): Uint8Array {
   return canonicalizeUnknown(value.value());
 }

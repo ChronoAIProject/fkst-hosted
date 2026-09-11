@@ -136,6 +136,171 @@ fn insert_run(path: &Path) {
 }
 
 #[test]
+fn deadline_regression_environment_fractional_boundaries_fail_closed() {
+    struct RawClock(&'static str);
+    impl fkst_local_qa_host::Clock for RawClock {
+        fn now_utc(&self) -> Result<String, RunError> {
+            Ok(self.0.to_owned())
+        }
+    }
+    for (now, deadline, allowed) in [
+        ("2026-08-14T12:00:00Z", "2026-08-14T12:00:00.5Z", true),
+        ("2026-08-14T12:00:00.5Z", DEADLINE, false),
+        (DEADLINE, DEADLINE, false),
+        ("2026-08-14T12:00:00.5Z", "2026-08-14T12:00:00.5Z", false),
+        ("2026-08-14T12:00:00.05Z", "2026-08-14T12:00:00.5Z", true),
+        ("short", DEADLINE, false),
+        (NOW, "short", false),
+        (NOW, "2026-08-14T12:00:00.0Z", false),
+    ] {
+        let path = database_path("fractional-boundary");
+        let mut journal = Journal::open(&path).unwrap();
+        insert_run(&path);
+        let mut provider = FakeProvider {
+            database_path: path.clone(),
+            discover_calls: Arc::default(),
+            create_calls: Arc::default(),
+            provider_identity: "provider-env-001".to_owned(),
+            expected_intent_id: "fractional-intent".to_owned(),
+            mismatch: false,
+        };
+        let result = reconcile_environment(
+            &mut journal,
+            &mut provider,
+            &request("fractional-intent", deadline),
+            &RawClock(now),
+        );
+        assert_eq!(
+            result.is_ok(),
+            allowed,
+            "now={now}, deadline={deadline}: {result:?}"
+        );
+        assert_eq!(
+            provider.create_calls.lock().unwrap().len(),
+            usize::from(allowed)
+        );
+        assert_eq!(
+            provider.discover_calls.lock().unwrap().len(),
+            usize::from(allowed)
+        );
+        std::fs::remove_file(path).unwrap();
+    }
+}
+
+#[test]
+fn deadline_regression_environment_late_returns_bind_before_clock_failure() {
+    use fkst_local_qa_host::{
+        environment_status, stop_environment, Clock, EnvironmentStatus, ProviderResourceState,
+        ProviderStatusReceipt, ProviderStopReceipt,
+    };
+    use std::cell::Cell;
+    use std::rc::Rc;
+    struct CallbackClock(Rc<Cell<bool>>, Option<&'static str>);
+    impl Clock for CallbackClock {
+        fn now_utc(&self) -> Result<String, RunError> {
+            if !self.0.get() {
+                return Ok(NOW.to_owned());
+            }
+            self.1
+                .map(str::to_owned)
+                .ok_or(RunError::Lifecycle("clock unavailable"))
+        }
+    }
+    struct ReturningProvider {
+        returned: Rc<Cell<bool>>,
+        discover: bool,
+        resource: ProviderResource,
+        creates: usize,
+        stops: usize,
+    }
+    impl EnvironmentProvider for ReturningProvider {
+        fn discover(&mut self, _: &str) -> Result<Option<ProviderResource>, RunError> {
+            if self.discover {
+                self.returned.set(true);
+                Ok(Some(self.resource.clone()))
+            } else {
+                Ok(None)
+            }
+        }
+        fn create(&mut self, _: CreateRequest) -> Result<ProviderResource, RunError> {
+            self.creates += 1;
+            self.returned.set(true);
+            Ok(self.resource.clone())
+        }
+        fn status(&mut self, _: &ProviderResource) -> Result<ProviderStatusReceipt, RunError> {
+            Ok(ProviderStatusReceipt {
+                resource: self.resource.clone(),
+                state: ProviderResourceState::Active,
+            })
+        }
+        fn stop(&mut self, _: &ProviderResource) -> Result<ProviderStopReceipt, RunError> {
+            self.stops += 1;
+            Ok(ProviderStopReceipt {
+                resource: self.resource.clone(),
+                stopped: true,
+            })
+        }
+    }
+    for discover in [false, true] {
+        for returned_at in [Some(DEADLINE), Some(EXPIRED_NOW), Some("malformed"), None] {
+            let path = database_path("environment-late-return");
+            let mut journal = Journal::open(&path).unwrap();
+            insert_run(&path);
+            let request = request("late-intent", DEADLINE);
+            let returned = Rc::new(Cell::new(false));
+            let mut provider = ReturningProvider {
+                returned: returned.clone(),
+                discover,
+                creates: 0,
+                stops: 0,
+                resource: ProviderResource {
+                    stable_provider_key: fkst_local_qa_host::ownership::stable_provider_key(
+                        &request.intent_id,
+                    ),
+                    labels: fkst_local_qa_host::ownership::ownership_labels(&request),
+                    provider_identity: request.provider_identity.clone(),
+                },
+            };
+            let result = reconcile_environment(
+                &mut journal,
+                &mut provider,
+                &request,
+                &CallbackClock(returned, returned_at),
+            );
+            assert!(
+                result.is_err(),
+                "late/invalid return from discover={discover}, clock={returned_at:?}: {result:?}"
+            );
+            drop(journal);
+            let mut journal = Journal::open(&path).unwrap();
+            let handle = journal
+                .owned_handle(&request.intent_id)
+                .unwrap()
+                .expect("ownership must survive late failure");
+            assert_eq!(handle.provider_identity, request.provider_identity);
+            assert_eq!(provider.creates, usize::from(!discover));
+            assert_eq!(
+                environment_status(&mut provider, &handle).unwrap(),
+                EnvironmentStatus::Active
+            );
+            let replay = reconcile_environment(
+                &mut journal,
+                &mut provider,
+                &request,
+                &FixedClock::new(EXPIRED_NOW).unwrap(),
+            )
+            .unwrap();
+            assert_eq!(replay, handle);
+            assert_eq!(provider.creates, usize::from(!discover));
+            stop_environment(&mut provider, &handle).unwrap();
+            assert_eq!(provider.stops, 1);
+            drop(journal);
+            std::fs::remove_file(path).unwrap();
+        }
+    }
+}
+
+#[test]
 fn exact_environment_discovery_binds_without_create() {
     let path = database_path("environment-exact-discovery");
     let mut journal = Journal::open(&path).expect("journal must open");
@@ -341,7 +506,7 @@ fn environment_bind_walks_the_host_and_replays_without_provider_effect() {
         connection
             .pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))
             .unwrap(),
-        7
+        10
     );
     let foreign_key_errors: Vec<(String, i64, String, i64)> = connection
         .prepare("PRAGMA foreign_key_check")
@@ -542,7 +707,7 @@ fn version_three_migration_preserves_lifecycle_rows() {
     let version: i64 = connection
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .expect("schema version must be readable");
-    assert_eq!(version, 7);
+    assert_eq!(version, 10);
     assert_eq!(
         connection
             .query_row(
@@ -615,7 +780,7 @@ fn version_three_migration_preserves_lifecycle_rows() {
         connection
             .pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))
             .unwrap(),
-        7
+        10
     );
     drop(connection);
     drop(journal);

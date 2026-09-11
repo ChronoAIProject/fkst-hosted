@@ -26,11 +26,34 @@ rejects every new v2 admission before executor resolution or Journal mutation.
 The MVP-0 deterministic verifier is available only through the explicit hidden
 test serving entry point. Those tests resolve the exact
 `qa.local-executor/v1` selection without invoking it and atomically persist the
-immutable acceptance bytes, binding, selection, ordered `run.accepted` Event,
-and singleton active slot in SQLite journal v6. Exact durable replay does not
+immutable acceptance bytes, canonical validated request, binding, selection,
+ordered `run.accepted` Event, and singleton active slot in SQLite journal v10. Exact durable replay does not
 re-contact current-claim authority, including after restart; changed keys or
 canonical request digests return a mutation-free conflict. `POST` is not an
 admission alias, and the former `{"kind":"inert"}` body is rejected.
+
+Journal v10 adds a nullable `request_json` BLOB without rewriting any prior row.
+New admissions retain only the canonical body produced by the existing strict
+request validator, including all digest-bound references, policy, budget, nonce,
+and producer version. HTTP headers, bearer/lease credentials, provider responses,
+and original transport bytes are never inputs to this storage path. This is not
+an Evidence sanitized export and is not automatically emitted to logs, Events,
+or errors. Callers must use non-credential fields for their documented purposes:
+strict schema validation cannot detect secrets hidden inside legal strings.
+
+`Journal::reconstruct_v2_request` returns the complete typed request after strict
+validation, canonical-byte and digest checks, and comparison with the original
+run, idempotency key, acceptance, attempt binding, and Executor selection in one
+SQLite snapshot. It checks the original acceptance window, so already accepted
+history remains readable after its deadline. Noncanonical, malformed, oversized,
+or inconsistent stored input returns a fixed `InvalidJournal` error without
+stored content. Missing runs and legacy null input return `None`; existing input
+with missing associated rows fails closed. The older `stored_v2_admission` read
+interface and exact response replay remain compatible, including legacy rows
+without reconstructable input. Reading historical input does not check or grant
+a current claim, invoke an executor, or make v2 eligible for `claim_next`.
+References alone do not supply production Source lease or environment-profile
+authority; the existing trusted-local Source binding and cache schema are unchanged.
 
 The snapshot route reads the current durable Run state and latest Event
 sequence. The Events route reads Events after the required cursor in ascending
@@ -145,13 +168,130 @@ repeated. This is infrastructure execution only: it is not enabled in default
 production, does not make v2 rows claimable, and does not claim Testing Packages
 `CaseResultSet` authority.
 
-The Host now contains reusable lifecycle drivers for an authority-bound immutable
-Source payload, a revalidated read-only Source cache, fresh Runtime-derived
-per-Run workspaces, exact Environment ownership status/stop receipts, and typed
-bounded loopback readiness receipts. The Source driver verifies payload bytes
-before cache or workspace effects, rejects floating revisions and unsafe paths,
-reuses the same verified cache without re-contacting the provider, and confines
-idempotent workspace removal to the exact owned Run/generation path.
+The Host contains reusable local lifecycle drivers for an immutable Source payload,
+a revalidated read-only Source cache, fresh Runtime-derived per-Run workspaces,
+exact Environment ownership status/stop receipts, and bounded loopback readiness
+receipts. Source acquisition requires an explicit `TrustedLocalSourceBinding`
+supplied by the trusted local embedding independently of the incoming reference.
+It binds the complete reference kind/id/schema/digest, a separate source object ID,
+the expected raw-byte SHA-256, expected immutable revision, and mandatory nonempty
+source provider scope and identity. Every incoming reference must match that binding
+and the pinned generic reference shape. A schema string such as `qa.source/v1`
+does not establish a registered executable Source schema or grant authority.
+
+The driver hashes actual raw bytes and compares the provider's declared object,
+revision, scope and identity with those expectations. Reference digests and
+`ObjectDigest` revision labels remain distinct from raw-byte digests. Matching
+Git commit or snapshot/tree labels is local consistency, not proof of Git contents,
+a reconstructed tree, or authenticated provenance. No signature, issuer, transport,
+production Source lease, or new contract schema is implemented here.
+
+Byte storage remains addressed by raw digest, with explicit v2 byte metadata and
+separate receipts for complete source bindings. Exact binding replay revalidates
+both metadata and raw bytes without re-contacting the provider. A different binding
+must freshly acquire and match all expected facts before sharing the same bytes.
+Successful cache publication and replay sync the checked files and their pinned
+containing directory chain before returning a verified source; sync failure refuses
+success. This relies on the filesystem honoring file/directory sync and advisory
+locks; the local macOS process tests do not establish support for every filesystem
+or simulate physical power loss. Linux process behavior requires the Linux CI run.
+
+Cache publication uses a persistent per-binding
+`fkst.local-qa-source-publication/v1` intent sidecar, containing the exact trusted
+binding. This is a local cache format, not a new Source authorization contract or
+Journal migration. The intent is synced before publishing raw bytes, then v2 byte
+metadata, then the binding receipt. A reopened intent is revalidated and synced
+again before it can justify completing missing members. Recovery requires a fresh
+matching acquisition and no existing workspace ownership record. Unknown orphan
+files, corrupt/truncated committed members, conflicting facts, old v1 metadata,
+or a receipt whose prerequisites are missing remain blockers; no catch-and-delete
+or implicit upgrade occurs. An existing workspace's missing cache remains unavailable.
+Legacy complete v2 records need no intent and remain readable and revalidatable.
+
+Every cooperating cache reader and publisher takes a nonblocking advisory lock on
+a fresh open description of the pinned cache-root directory. This serializes cache
+I/O across managers and processes, including two bindings sharing raw bytes, without
+holding a lock across acquisition, provider, or Host clock callbacks. Contention
+returns `source cache publication is busy; retry`; the caller may retry after the
+other operation releases it. Cache-root and parent identities are checked before
+and after lock acquisition and filesystem operations. This is cooperative storage
+coordination, not isolation from arbitrary same-user mutation or a mixed-version
+writer that does not follow the same locking protocol.
+
+Each member is written to a unique exclusive temporary file, file-synced, and
+published with an fd-relative no-clobber hard link before unlinking its own temporary
+name and syncing directories. Pre-link abandoned temporary files are never enumerated,
+read as content, or deleted by retry. Errors retain evidence. A process exit in the
+hard-link/temporary-unlink window leaves a multiple-link final file: this is an
+explicit safety blocker and is **not automatically recovered**. General abandoned-file
+cleanup, that link-window recovery, and total cache storage quotas remain unfinished.
+
+Raw-cache hashing uses a fixed 64 KiB buffer and the initial file length, with
+pre/post descriptor metadata and attachment checks. This bounds hash allocation and
+prevents concurrent growth from extending the read loop indefinitely; 64 KiB is a
+chunk size, not a Source payload limit. Metadata reads use a fixed 4 KiB input buffer,
+collapse only runs of JSON whitespace outside strings to one separator, and cap the
+normalized encoding at six times the trusted expected record's canonical UTF-8 JSON
+byte length. The current marker, receipt and intent shapes contain only objects and
+strings. An ASCII byte can expand to six bytes (`\uXXXX`); a supplementary Unicode
+character uses twelve escaped bytes for four UTF-8 bytes, and canonical control/quote/
+backslash escapes already consume at least two bytes. Structural-byte slack covers
+one separator per token boundary. No numeric encoding compatibility is claimed.
+The original typed serde parser still decides syntax and field/relationship validity;
+normal indentation, field order and string escaping remain supported without rewriting
+saved metadata. Token-separated invalid input is not joined into valid JSON. Encodings
+beyond this bound are explicitly rejected, so compatibility is not an unconditional
+promise for every JSON representation. Long leading/trailing/interspersed whitespace
+uses bounded memory but still consumes I/O proportional to the initial file length.
+These checks do not impose a hard elapsed-time or total-read-byte budget. The provider's
+`AcquiredSource.bytes: Vec<u8>` allocation and real provider-call deadlines remain
+separate unresolved bounds.
+
+The bounded workspace ownership driver uses the Host Journal's v9 serialization
+compatibility fence, so older v8 readers reject databases containing the new format.
+Migration advances only the version; it preserves existing v8 rows byte-for-byte
+without inventing source bindings. Missing `source_binding` deserializes as `None`
+and is omitted on serialization. State transitions retain existing intent/resource
+JSON bytes, including legacy formatting. Legacy prepare is denied before acquisition;
+independent recorded workspace ownership still permits safe recover/status/stop.
+New workspace intent includes the full binding and rejects changes within the same
+Run/generation before acquisition or workspace effects. `SourceWorkspaceManager::new` takes an open persistent
+Journal and an explicit local provider scope with its additional writable roots.
+Its database parent must be disjoint from cache, workspace and declared provider
+writable trees. On Unix, `Journal::open` optionally observes the main file and parent
+chain identities immediately after SQLite opens and before WAL setup/migration.
+The manager compares that observation with pinned files before executing manager
+SQL, and rechecks pinned database, sidecar and parent attachment around Journal
+access. Missing identity capture blocks manager construction. Existing Journal
+callers retain their WAL/migration behavior; memory and anonymous databases still
+cannot satisfy that existing WAL contract, and workspace management remains
+unsupported on non-Unix platforms.
+
+This assumes Host-owned provisioning remains stable across SQLite open and the
+subsequent metadata observation, and adapters accurately declare writable roots.
+The observation is not an atomic binding to SQLite's internal file descriptor;
+the available safe API does not provide that guarantee. A concurrent privileged
+provisioner must not replace storage during open. The checks detect later stale
+connections and attachment changes; they do not isolate a provider with arbitrary
+same-user access to the machine.
+
+Workspace intent snapshots the current internally supplied source facts, initial
+deadline, Run/generation, derived location and provider scope. Conditional Journal
+transitions commit directory/create/stop attempts before callbacks. Exact provider
+discovery can recover creation interrupted before binding; absent after an attempt,
+unknown and conflicting discovery never authorize automatic recreation. Opaque
+handles are checked against the durable record, and writable markers supply only
+diagnostic consistency. Replay requires an observed active provider. Recorded stop
+retains directory identity and any pending filesystem cleanup; a missing marker
+permits only removal of the same recorded empty directory. These records do not
+release the global execution slot or produce a global CleanupReceipt.
+
+`recover` reconciles an existing workspace key without admitting creation, including
+after its initial deadline. It returns ownership for status/stop, not permission to
+use a stopped resource. A directory creation interrupted before identity persistence,
+or unmarked partial data after provider stop, remains blocked for explicit recovery.
+These fake-provider tests establish local consistency only; they do not authenticate
+SourceObject leases or provide real Compose acceptance or production activation.
 
 These drivers are not wired into production admission. The pinned executable
 contracts still expose only generic `DigestBoundReferenceV2` values and do not

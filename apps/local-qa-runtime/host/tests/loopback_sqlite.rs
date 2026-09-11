@@ -1,15 +1,16 @@
 use std::fs;
 use std::io::{BufRead, BufReader, Read, Write};
-use std::net::{Shutdown, TcpStream};
+use std::net::{Shutdown, SocketAddr, TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Barrier, Mutex, OnceLock};
+use std::sync::{mpsc, Arc, Barrier};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use fkst_local_qa_host::{
-    parse_startup, serve_mvp0_with_clock, serve_passive_for_test, FixedClock, Journal,
+    parse_startup, serve_mvp0_with_listener_for_test, serve_passive_with_listener_for_test,
+    FixedClock, Journal, RunError, StartupConfig,
 };
 use fkst_qa_contracts::{admit_json, canonical_admitted_bytes, sha256_digest};
 use rusqlite::{Connection, OptionalExtension};
@@ -158,135 +159,390 @@ impl Drop for HostProcess {
     }
 }
 
-struct PassiveHost {
+const STARTUP_TIMEOUT: Duration = Duration::from_secs(15);
+
+#[derive(Clone, Copy, Debug)]
+enum FixtureMode {
+    Passive,
+    FixedClock,
+}
+
+struct OwnedHost {
     shutdown: Arc<AtomicBool>,
-    join: Option<thread::JoinHandle<()>>,
+    join: Option<thread::JoinHandle<Result<(), RunError>>>,
+    done: mpsc::Receiver<()>,
+    ready: Option<mpsc::Receiver<Result<SocketAddr, String>>>,
+    release: Option<mpsc::Sender<()>>,
+    mode: FixtureMode,
     port: u16,
 }
+
+fn fixture_config(database_path: &Path, address: SocketAddr) -> StartupConfig {
+    parse_startup([
+        "local-demo".into(),
+        "--listen".into(),
+        address.to_string().into(),
+        "--database".into(),
+        database_path.as_os_str().to_owned(),
+    ])
+    .expect("fixture configuration must parse")
+}
+
+impl OwnedHost {
+    fn spawn(database_path: &Path, mode: FixtureMode, gated: bool) -> Self {
+        let listener = TcpListener::bind(("127.0.0.1", 0)).expect("loopback port must bind");
+        let config = fixture_config(database_path, listener.local_addr().unwrap());
+        Self::spawn_config(config, listener, mode, gated)
+    }
+
+    fn spawn_config(
+        config: StartupConfig,
+        listener: TcpListener,
+        mode: FixtureMode,
+        gated: bool,
+    ) -> Self {
+        let port = listener.local_addr().unwrap().port();
+        let shutdown = Arc::new(AtomicBool::new(false));
+        let thread_shutdown = Arc::clone(&shutdown);
+        let (completed, done) = mpsc::channel();
+        let (sender, ready) = mpsc::channel();
+        let (release, gate) = mpsc::channel();
+        let join = thread::spawn(move || {
+            if gated && gate.recv_timeout(STARTUP_TIMEOUT).is_err() {
+                return Err(RunError::Lifecycle("fixture start gate timed out"));
+            }
+            let result = match mode {
+                FixtureMode::Passive => {
+                    serve_passive_with_listener_for_test(config, thread_shutdown, listener, sender)
+                }
+                FixtureMode::FixedClock => serve_mvp0_with_listener_for_test(
+                    config,
+                    thread_shutdown,
+                    Arc::new(FixedClock::new("2026-08-25T16:00:01Z").unwrap()),
+                    listener,
+                    sender,
+                ),
+            };
+            let _ = completed.send(());
+            result
+        });
+        Self {
+            shutdown,
+            join: Some(join),
+            done,
+            ready: Some(ready),
+            release: Some(release),
+            mode,
+            port,
+        }
+    }
+
+    fn release_start(&mut self) {
+        if let Some(release) = self.release.take() {
+            let _ = release.send(());
+        }
+    }
+
+    fn wait_ready(mut self) -> Result<Self, String> {
+        let receipt = self
+            .ready
+            .as_ref()
+            .expect("startup receiver must exist")
+            .recv_timeout(STARTUP_TIMEOUT);
+        match receipt {
+            Ok(Ok(address)) if address == SocketAddr::from(([127, 0, 0, 1], self.port)) => Ok(self),
+            failure => {
+                let result = self.finish();
+                Err(format!(
+                    "{:?} Host {} startup receipt: {failure:?}; thread result: {result:?}",
+                    self.mode, self.port
+                ))
+            }
+        }
+    }
+
+    fn finish(&mut self) -> Result<(), String> {
+        self.shutdown.store(true, Ordering::SeqCst);
+        self.release_start();
+        let Some(join) = self.join.as_ref() else {
+            return Ok(());
+        };
+        let deadline = Instant::now() + STARTUP_TIMEOUT;
+        let _ = self.done.recv_timeout(STARTUP_TIMEOUT);
+        while !join.is_finished() {
+            if Instant::now() >= deadline {
+                // Rust cannot cancel synchronous initialization. Fail this test process
+                // rather than detach a writer and delete its database during unwinding.
+                eprintln!(
+                    "{:?} Host {} cleanup deadline exceeded",
+                    self.mode, self.port
+                );
+                std::process::abort();
+            }
+            thread::sleep(Duration::from_millis(1));
+        }
+        self.join
+            .take()
+            .unwrap()
+            .join()
+            .map_err(|_| "Host thread panicked".to_owned())?
+            .map_err(|error| error.to_string())
+    }
+
+    fn stop(mut self) {
+        self.finish().expect("fixture Host must stop");
+    }
+}
+
+impl Drop for OwnedHost {
+    fn drop(&mut self) {
+        let _ = self.finish();
+    }
+}
+
+struct PassiveHost;
 
 impl PassiveHost {
-    fn start(database_path: &Path) -> Self {
-        let _start_guard = fixed_clock_start_lock()
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
-        let listener = std::net::TcpListener::bind(("127.0.0.1", 0))
-            .expect("ephemeral loopback port must bind");
-        let port = listener
-            .local_addr()
-            .expect("local address must exist")
-            .port();
-        drop(listener);
-        let config = parse_startup([
-            "local-demo".into(),
-            "--listen".into(),
-            format!("127.0.0.1:{port}").into(),
-            "--database".into(),
-            database_path.as_os_str().to_owned(),
-        ])
-        .expect("passive host configuration must parse");
-        let shutdown = Arc::new(AtomicBool::new(false));
-        let thread_shutdown = Arc::clone(&shutdown);
-        let join = thread::spawn(move || {
-            serve_passive_for_test(config, thread_shutdown).expect("passive host must serve");
-        });
-        for _ in 0..100 {
-            if TcpStream::connect(("127.0.0.1", port)).is_ok() {
-                return Self {
-                    shutdown,
-                    join: Some(join),
-                    port,
-                };
-            }
-            thread::sleep(Duration::from_millis(10));
-        }
-        panic!("passive host did not start")
-    }
-
-    fn stop(mut self) {
-        self.shutdown.store(true, Ordering::SeqCst);
-        if let Some(join) = self.join.take() {
-            join.join().expect("passive host must stop");
-        }
+    fn start(database_path: &Path) -> OwnedHost {
+        OwnedHost::spawn(database_path, FixtureMode::Passive, false)
+            .wait_ready()
+            .unwrap_or_else(|error| panic!("passive Host startup failed: {error}"))
     }
 }
 
-impl Drop for PassiveHost {
-    fn drop(&mut self) {
-        self.shutdown.store(true, Ordering::SeqCst);
-        if let Some(join) = self.join.take() {
-            let _ = join.join();
-        }
-    }
-}
-
-fn fixed_clock_start_lock() -> &'static Mutex<()> {
-    static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-    LOCK.get_or_init(|| Mutex::new(()))
-}
-
-struct FixedClockHost {
-    shutdown: Arc<AtomicBool>,
-    join: Option<thread::JoinHandle<()>>,
-    port: u16,
-}
+struct FixedClockHost;
 
 impl FixedClockHost {
-    fn start(database_path: &Path) -> Self {
-        let _start_guard = fixed_clock_start_lock()
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
-        let listener = std::net::TcpListener::bind(("127.0.0.1", 0))
-            .expect("ephemeral loopback port must bind");
-        let port = listener
-            .local_addr()
-            .expect("local address must exist")
-            .port();
-        drop(listener);
-        let config = parse_startup([
-            "local-demo".into(),
-            "--listen".into(),
-            format!("127.0.0.1:{port}").into(),
-            "--database".into(),
-            database_path.as_os_str().to_owned(),
-        ])
-        .expect("fixed-clock host configuration must parse");
-        let shutdown = Arc::new(AtomicBool::new(false));
-        let thread_shutdown = Arc::clone(&shutdown);
-        let join = thread::spawn(move || {
-            serve_mvp0_with_clock(
-                config,
-                thread_shutdown,
-                Arc::new(FixedClock::new("2026-08-25T16:00:01Z").unwrap()),
-            )
-            .expect("fixed-clock host must serve");
-        });
-        for _ in 0..100 {
-            if TcpStream::connect(("127.0.0.1", port)).is_ok() {
-                return Self {
-                    shutdown,
-                    join: Some(join),
-                    port,
-                };
-            }
-            thread::sleep(Duration::from_millis(10));
-        }
-        panic!("fixed-clock host did not start")
+    fn start(database_path: &Path) -> OwnedHost {
+        OwnedHost::spawn(database_path, FixtureMode::FixedClock, false)
+            .wait_ready()
+            .unwrap_or_else(|error| panic!("fixed-clock Host startup failed: {error}"))
     }
+}
 
-    fn stop(mut self) {
-        self.shutdown.store(true, Ordering::SeqCst);
-        if let Some(join) = self.join.take() {
-            join.join().expect("fixed-clock host must stop");
+#[test]
+fn owned_startup_requires_initialized_host_receipt() {
+    for mode in [FixtureMode::Passive, FixtureMode::FixedClock] {
+        let temporary = TempDirectory::new("owned-startup");
+        let database = temporary.database_path();
+        let mut pending = OwnedHost::spawn(&database, mode, true);
+        let address = SocketAddr::from(([127, 0, 0, 1], pending.port));
+        let foreign = TcpListener::bind(address).ok();
+        let port_stolen = foreign.is_some();
+        let connected = TcpStream::connect(address).expect("bound port must be connectable");
+        let premature_ready = pending.ready.as_ref().unwrap().try_recv();
+        let database_before_release = database.exists();
+        drop(connected);
+        drop(foreign);
+        pending.release_start();
+        let host = pending
+            .wait_ready()
+            .unwrap_or_else(|error| panic!("startup failed: {error}"));
+        let connection = Connection::open(&database).unwrap();
+        let schema_present: bool = connection.query_row(
+            "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'accepted_requests')",
+            [], |row| row.get(0),
+        ).unwrap();
+        let version: i64 = connection
+            .pragma_query_value(None, "user_version", |row| row.get(0))
+            .unwrap();
+        drop(connection);
+        let response = request(host.port, "GET", "/v1/health", &[], &[]);
+        host.stop();
+        assert_eq!(response.status_line, "HTTP/1.1 200 OK");
+        assert_eq!(response.body, HEALTH_BODY);
+        assert_eq!(version, 10);
+        assert_eq!(
+            premature_ready,
+            Err(mpsc::TryRecvError::Empty),
+            "a connectable port must not signal intended Host readiness"
+        );
+        assert!(
+            !port_stolen,
+            "pending Host must retain ownership of its port"
+        );
+        assert!(
+            !database_before_release,
+            "gated Host must not have initialized Journal"
+        );
+        assert!(
+            schema_present,
+            "actual Host ready receipt must follow Journal migrations"
+        );
+    }
+}
+
+#[test]
+fn owned_startup_reports_initialization_failure_and_releases_listener() {
+    for mode in [FixtureMode::Passive, FixtureMode::FixedClock] {
+        let temporary = TempDirectory::new("owned-init-error");
+        let mut pending = OwnedHost::spawn(&temporary.path, mode, false);
+        let address = SocketAddr::from(([127, 0, 0, 1], pending.port));
+        assert_eq!(
+            pending
+                .ready
+                .as_ref()
+                .unwrap()
+                .recv_timeout(STARTUP_TIMEOUT)
+                .unwrap(),
+            Err("host initialization failed".to_owned()),
+        );
+        let result = pending.finish();
+        assert!(
+            result.is_err(),
+            "original initialization error must survive: {result:?}"
+        );
+        assert_eq!(
+            pending.ready.as_ref().unwrap().try_recv(),
+            Err(mpsc::TryRecvError::Disconnected)
+        );
+        TcpListener::bind(address).expect("failed startup must release listener");
+    }
+}
+
+fn listener_close_probe(address: SocketAddr, context: &str) -> TcpStream {
+    let target = SocketAddr::from(([127, 0, 0, 1], address.port()));
+    let probe = TcpStream::connect_timeout(&target, Duration::from_secs(1))
+        .unwrap_or_else(|error| panic!("{context}; probe connect to {target} failed: {error}"));
+    probe
+        .set_read_timeout(Some(Duration::from_secs(1)))
+        .unwrap_or_else(|error| {
+            panic!("{context}; probe read timeout configuration failed: {error}")
+        });
+    probe
+}
+
+fn assert_listener_probe_closed(probe: &mut TcpStream, context: &str) {
+    let observation = probe.read(&mut [0u8; 1]);
+    assert!(
+        matches!(observation, Ok(0))
+            || matches!(&observation, Err(error) if error.kind() == std::io::ErrorKind::ConnectionReset),
+        "{context}; original listener connection must close: {observation:?}; probe_local={:?}; probe_peer={:?}",
+        probe.local_addr(),
+        probe.peer_addr(),
+    );
+}
+
+#[test]
+fn owned_startup_listener_probe_detects_retained_clone() {
+    let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+    let address = listener.local_addr().unwrap();
+    let context = format!("retained clone control; listener={address}");
+    let retained = listener.try_clone().unwrap();
+    let mut probe = listener_close_probe(address, &context);
+    drop(listener);
+    probe.set_nonblocking(true).unwrap();
+    let observation = probe.read(&mut [0u8; 1]);
+    assert!(
+        matches!(&observation, Err(error) if error.kind() == std::io::ErrorKind::WouldBlock),
+        "{context}; retained listener must keep original connection open: {observation:?}; probe_local={:?}; probe_peer={:?}",
+        probe.local_addr(),
+        probe.peer_addr(),
+    );
+    drop(retained);
+    probe.set_nonblocking(false).unwrap();
+    assert_listener_probe_closed(&mut probe, &context);
+}
+
+#[test]
+fn owned_startup_rejects_listener_mismatch_before_journal_effects() {
+    for mode in [FixtureMode::Passive, FixtureMode::FixedClock] {
+        for mismatch in ["port", "ip", "nonloopback"] {
+            let temporary = TempDirectory::new("owned-listener-error");
+            let database = temporary.database_path();
+            let ip = if mismatch == "nonloopback" {
+                "0.0.0.0"
+            } else {
+                "127.0.0.1"
+            };
+            let listener = TcpListener::bind((ip, 0)).unwrap();
+            let address = listener.local_addr().unwrap();
+            let configured = match mismatch {
+                "port" => {
+                    SocketAddr::from(([127, 0, 0, 1], if address.port() == 1 { 2 } else { 1 }))
+                }
+                "ip" => SocketAddr::new(std::net::Ipv6Addr::LOCALHOST.into(), address.port()),
+                _ => SocketAddr::from(([127, 0, 0, 1], address.port())),
+            };
+            let config = fixture_config(&database, configured);
+            let context = format!(
+                "mode={mode:?}; mismatch={mismatch}; config={config:?}; listener={address}"
+            );
+            let mut probe = listener_close_probe(address, &context);
+            let context = format!(
+                "{context}; probe_local={:?}; probe_peer={:?}",
+                probe.local_addr(),
+                probe.peer_addr(),
+            );
+            let mut pending = OwnedHost::spawn_config(config, listener, mode, false);
+            assert_eq!(
+                pending
+                    .ready
+                    .as_ref()
+                    .unwrap()
+                    .recv_timeout(STARTUP_TIMEOUT)
+                    .unwrap_or_else(|error| panic!("{context}; startup receipt failed: {error}")),
+                Err("host initialization failed".to_owned()),
+                "{context}",
+            );
+            let result = pending.finish();
+            assert!(
+                result
+                    .as_ref()
+                    .is_err_and(|error| error.contains("fixture listener mismatch")),
+                "{context}; thread result: {result:?}"
+            );
+            assert!(
+                !database.exists(),
+                "{context}; must fail before opening Journal"
+            );
+            assert_eq!(
+                pending.ready.as_ref().unwrap().try_recv(),
+                Err(mpsc::TryRecvError::Disconnected),
+                "{context}",
+            );
+            assert_listener_probe_closed(&mut probe, &context);
         }
     }
 }
 
-impl Drop for FixedClockHost {
-    fn drop(&mut self) {
-        self.shutdown.store(true, Ordering::SeqCst);
-        if let Some(join) = self.join.take() {
-            let _ = join.join();
-        }
+#[test]
+fn owned_startup_receiver_disconnect_stops_host_and_coordinator() {
+    for mode in [FixtureMode::Passive, FixtureMode::FixedClock] {
+        let temporary = TempDirectory::new("owned-receiver-error");
+        let database = temporary.database_path();
+        let mut pending = OwnedHost::spawn(&database, mode, true);
+        let address = SocketAddr::from(([127, 0, 0, 1], pending.port));
+        drop(pending.ready.take());
+        pending.release_start();
+        pending
+            .done
+            .recv_timeout(STARTUP_TIMEOUT)
+            .expect("Host must exit without external shutdown");
+        assert!(!pending.shutdown.load(Ordering::SeqCst));
+        let result = pending.finish();
+        assert!(
+            result
+                .as_ref()
+                .is_err_and(|error| error.contains("startup receiver disconnected")),
+            "{result:?}"
+        );
+        TcpListener::bind(address).expect("disconnected receiver must release listener");
+        Journal::open(&database).expect("initialized Journal must reopen after coordinator joins");
+    }
+}
+
+#[test]
+fn owned_startup_drop_releases_gate_and_joins_before_database_cleanup() {
+    for mode in [FixtureMode::Passive, FixtureMode::FixedClock] {
+        let temporary = TempDirectory::new("owned-gate-drop");
+        let database = temporary.database_path();
+        let pending = OwnedHost::spawn(&database, mode, true);
+        let address = SocketAddr::from(([127, 0, 0, 1], pending.port));
+        assert!(!database.exists());
+        drop(pending);
+        TcpListener::bind(address).expect("dropping gated Host must release listener");
+        Journal::open(&database).expect("Host must finish initialization before fixture cleanup");
     }
 }
 
@@ -843,7 +1099,7 @@ fn reads_cancellation_and_restart_match_the_durable_contract() {
         connection
             .pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))
             .unwrap(),
-        7
+        10
     );
     assert_eq!(
         connection
@@ -1134,7 +1390,7 @@ fn version_one_database_migrates_without_changing_accepted_bytes() {
         connection
             .pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))
             .unwrap(),
-        7
+        10
     );
     assert_eq!(
         connection
@@ -1186,7 +1442,7 @@ fn version_two_database_migrates_without_rewriting_durable_data() {
         connection
             .pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))
             .unwrap(),
-        7
+        10
     );
     assert_eq!(
         connection
@@ -1309,7 +1565,7 @@ fn assert_exact_journal(database_path: &Path, accepted_key: &str) {
         connection
             .pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))
             .expect("journal version must be readable"),
-        7
+        10
     );
     assert_eq!(
         connection
