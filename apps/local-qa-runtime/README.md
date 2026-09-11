@@ -243,9 +243,9 @@ saved metadata. Token-separated invalid input is not joined into valid JSON. Enc
 beyond this bound are explicitly rejected, so compatibility is not an unconditional
 promise for every JSON representation. Long leading/trailing/interspersed whitespace
 uses bounded memory but still consumes I/O proportional to the initial file length.
-These checks do not impose a hard elapsed-time or total-read-byte budget. The provider's
-`AcquiredSource.bytes: Vec<u8>` allocation and real provider-call deadlines remain
-separate unresolved bounds.
+These checks do not impose a hard elapsed-time or total-read-byte budget. Generic providers remain responsible for their
+`AcquiredSource.bytes: Vec<u8>` allocation and callback deadlines. The optional
+local bundle provider below bounds its own acquisition and callbacks.
 
 The bounded workspace ownership driver uses the Host Journal's v9 serialization
 compatibility fence, so older v8 readers reject databases containing the new format.
@@ -300,6 +300,130 @@ Profile-to-provider projection, or readiness receipt mapping required before
 real Source or Compose effects. The Host therefore keeps that boundary
 fail-closed rather than treating repository/commit equality, profile digests,
 caller configuration, or fake providers as execution authority.
+
+### Optional trusted local Git bundle provider
+
+`host/src/local_bundle.rs` implements the existing Source and Workspace provider
+traits under `local-bundle-provider`. The Host binary has no activation path for
+this feature. Its default features remain empty, and production admission remains
+closed. This adapter supplies local evidence, not the signed SourceObjectLease,
+resolver authority, Environment, Compose, readiness, or global cleanup contracts.
+
+`local_bundle_providers(LocalBundleConfig)` accepts Host-selected paths and fixed
+object registrations. Each registration binds an immutable object ID, the complete
+`TrustedLocalSourceBinding`, a single-component filename, `git_bundle`, and
+`exact_commit`. Other formats and revision strategies are rejected. Incoming lease
+fields must match the registration. Paths, remotes, and Git configuration from a
+caller do not select a source. Acquisition reads at most `max_bundle_bytes` from
+a pinned regular single-link file and checks its raw SHA-256 before any Git effect.
+
+The source store, provider state, cache, workspace, Journal parent, and additional
+writable roots must already exist. All are pairwise disjoint, owned by the effective
+UID, and inaccessible to other users by permission bits. Construction checks their
+no-follow parent chains and creates no files, including on configuration errors.
+The embedding must accurately declare every writable root and keep provisioning
+stable. These checks do not prevent malicious replacement by another process with
+the same UID or by a privileged provisioner.
+
+The embedding selects the absolute Git executable. It must be a pinned regular
+single-link executable owned by root or the effective UID, without group or other
+write permission. A system shim with multiple hard links is rejected. The macOS
+fixtures use the concrete Git binary at
+`/Library/Developer/CommandLineTools/usr/bin/git`, verified on the test machine.
+That location is not a production default or a universal macOS installation path.
+The executable and its installation must be trusted, including Git's own bundled
+helpers. The provider does not validate a Git release signature or isolate a
+compromised Git executable.
+
+A new workspace contains its own `.git` directory, object database, detached HEAD,
+and index. Git verifies a standalone SHA-1 bundle, imports its objects, runs
+`fsck --full --strict`, inventories object types and expanded sizes, and checks
+that the requested object is a commit. Bundles with prerequisites are rejected
+without fetching. The full tree listing is validated before source files are
+written. Raw `cat-file blob` bytes preserve binary content and empty files without
+checkout filters. `read-tree` creates the index without a checkout. Executable
+regular files retain the owner execute bit. Normal `git status` and
+`rev-parse --show-toplevel` operate on the resulting workspace.
+
+Supported source entries are regular `100644` and `100755` files with portable
+ASCII paths. Symlinks, gitlinks, other modes, traversal, control characters, colons,
+trailing dots or spaces, reserved metadata names, and case-folding collisions are
+rejected. Source paths have at most 24 components, 200 bytes per component, and
+2048 bytes total. The manager's existing 10,000-entry workspace bound still includes
+`.git` and a reserved manager marker entry. Source trees and independent Git data
+can reach that bound before a configured source-file count is reached.
+
+Each Git child receives fixed arguments, an empty template, a private working
+and temporary directory, and a cleared environment. System and global Git config,
+replacement objects, hooks, attributes, credential helpers, maintenance, and
+transport protocols are disabled. Git config is captured after initialization and
+must remain unchanged. No-follow scans reject special files, shared hard links,
+symlinks, alternates, grafts, and replacement refs. Git files and directories are
+synced before the completion record is published. Discovery rechecks directory
+identities, configuration, bounded evidence, and durability without executing Git.
+
+The provider stores exact attempt, completion, and stopped records using the
+existing nonblocking directory lock and no-clobber atomic publication. An attempt
+is persisted before Git starts. A failed or partial attempt remains unknown and
+cannot be repeated automatically. A completed effect whose reply was lost can be
+discovered after restart. Workspace markers cannot replace these records or the
+manager Journal. Stop records provider release; the manager owns workspace deletion.
+Provider records and retained input bundles have no automatic retention or cleanup
+policy in this increment.
+
+`LocalBundleLimits` uses these defaults and accepted maxima. Every configurable
+limit must be positive. Binary units below use powers of 1024.
+
+| Limit | Default | Maximum accepted configuration |
+| --- | --- | --- |
+| Raw bundle bytes | 16 MiB | 64 MiB |
+| Any individual expanded Git object | 4 MiB | 16 MiB |
+| Sum of all expanded object sizes, and separately materialized source bytes | 32 MiB | 128 MiB |
+| Materialized source files | 1,000 | 4,000 |
+| Pack header objects, and separately inventoried objects | 10,000 | 50,000 |
+| Each Git stdout and stderr stream, per command | 4 MiB | 16 MiB |
+| Combined Git output over one materialization | 64 MiB | 256 MiB |
+| Observed Git file bytes after each command | 64 MiB | 256 MiB |
+| Provider callback duration | 30 seconds | 120 seconds, minimum 10 ms |
+
+Bundle headers are capped at 64 KiB. A provider record is capped at 128 KiB, a
+registration at 8 KiB, and a Git config at 64 KiB. There are at most 128 registrations
+and 32 additional writable roots. Acquisition and materialization also honor the
+lease deadline, supported here with the canonical ISO8601 fractional-second grammar.
+Fractions are conservatively truncated to nanoseconds for the monotonic budget.
+Discovery, status, and stop use
+a fresh callback budget so expired creation leases do not remove cleanup authority.
+All Git steps in one materialization share an absolute monotonic deadline and an
+output budget that only decreases. Up to one third of the remaining duration,
+capped at two seconds, is reserved for child containment.
+
+The internal process runner drains both pipes without blocking, with finite buffers
+and bounded work per poll. Its fixed system `ps` inspection reads only PID, process
+group, and state, capped at 1 MiB per snapshot with at most 4 KiB of stderr. The
+leader remains unreaped while its group is inspected and signalled, preventing
+PGID reuse during cleanup. The runner skips signals for zombie-only groups,
+verifies that no live members remain, and reaps the leader. Inspection and signal
+errors remain failures. No reader threads survive a timeout.
+
+**Remaining resource blocker:** Git's transient decompression disk usage has no
+kernel-enforced quota. The observed Git-file bound is checked after commands and
+cannot prevent a larger temporary peak or an earlier full disk. Expanded inventory
+limits apply after import. Aggregate state and cache storage across Runs are also
+unbounded. The deadlines do not interrupt blocked kernel I/O, process spawning,
+`fsync`, or reaping, and process groups do not contain descendants that deliberately
+escape their group. The trusted fixed Git commands are not an OS sandbox. Generic
+manager cache hashing and Journal I/O retain their existing limits. This increment
+therefore does not satisfy full Source resource-budget or production acceptance.
+
+The feature contains Unix code, with local execution tested on macOS. Linux has the
+same implementation but needs its own runtime validation. On Windows the provider
+module and tests are compiled out, including when the feature is selected. Default
+cross-target compile success does not test the provider. Focused local commands are:
+
+```bash
+cargo test --manifest-path apps/local-qa-runtime/Cargo.toml -p fkst-local-qa-host --features local-bundle-provider --test local_bundle_provider --locked --offline
+cargo test --manifest-path apps/local-qa-runtime/Cargo.toml -p fkst-local-qa-host --features local-bundle-provider --lib local_bundle --locked --offline
+```
 
 The following capabilities remain explicitly deferred:
 

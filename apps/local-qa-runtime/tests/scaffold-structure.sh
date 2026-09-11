@@ -44,6 +44,8 @@ expected=$(printf '%s\n' \
   apps/local-qa-runtime/host/src/executor.rs \
   apps/local-qa-runtime/host/src/journal.rs \
   apps/local-qa-runtime/host/src/lib.rs \
+  apps/local-qa-runtime/host/src/local_bundle.rs \
+  apps/local-qa-runtime/host/src/local_bundle_process.rs \
   apps/local-qa-runtime/host/src/main.rs \
   apps/local-qa-runtime/host/src/ownership.rs \
   apps/local-qa-runtime/host/src/source_cache_tests.rs \
@@ -56,6 +58,7 @@ expected=$(printf '%s\n' \
   apps/local-qa-runtime/host/tests/environment_ownership.rs \
   apps/local-qa-runtime/host/tests/environment_resource_lifecycle.rs \
   apps/local-qa-runtime/host/tests/fail_closed.rs \
+  apps/local-qa-runtime/host/tests/local_bundle_provider.rs \
   apps/local-qa-runtime/host/tests/loopback_sqlite.rs \
   apps/local-qa-runtime/host/tests/source_workspace_lifecycle.rs \
   apps/local-qa-runtime/launcher/src/main.rs \
@@ -80,6 +83,8 @@ for required in \
   apps/local-qa-runtime/host/src/executor.rs \
   apps/local-qa-runtime/host/src/journal.rs \
   apps/local-qa-runtime/host/src/lib.rs \
+  apps/local-qa-runtime/host/src/local_bundle.rs \
+  apps/local-qa-runtime/host/src/local_bundle_process.rs \
   apps/local-qa-runtime/host/src/main.rs \
   apps/local-qa-runtime/host/src/transport.rs \
   apps/local-qa-runtime/host/src/worker_process.rs \
@@ -170,7 +175,9 @@ assert.deepEqual(browserFeature[1].trim().split('\n').map(line => line.trim()), 
   '"fkst-local-qa-browser-adapter/mvp0-test-support",',
   '"dep:fkst-local-qa-evidence-stager",',
   '"nix/signal",',
-], 'Host signal support must stay behind the Browser feature');
+], 'Host Browser feature dependencies must remain unchanged');
+assert.match(manifest, /^local-bundle-provider = \["nix\/signal", "nix\/user"\]$/m,
+  'Local bundle process and ownership support must remain explicitly feature-gated');
 NODE
 grep -Eq '^fkst-qa-contracts = \{ path = "\.\./\.\./\.\./packages/qa-contracts/rust" \}$' "$host_manifest" || {
   echo 'Local QA Host must consume the checked-in QA contracts API' >&2

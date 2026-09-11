@@ -7,6 +7,10 @@ use std::sync::Arc;
 mod filesystem;
 use filesystem::{Directory, PinnedFile};
 
+#[cfg(all(unix, feature = "local-bundle-provider"))]
+#[path = "local_bundle.rs"]
+pub mod local_bundle;
+
 use fkst_qa_contracts::{
     compare_iso8601_timestamps, sha256_digest, validate_scalar, DigestBoundReferenceV2,
 };
@@ -130,6 +134,7 @@ pub struct WorkspaceProviderStatusReceipt {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum WorkspaceDiscovery {
     Absent,
+    RetryableBusy,
     Found(Box<WorkspaceProviderStatusReceipt>),
     Unknown,
     Conflict,
@@ -539,6 +544,9 @@ impl SourceWorkspaceManager {
             directory.tree()?.ensure_attached()?;
             let receipt = match provider.discover(&record.intent) {
                 Ok(WorkspaceDiscovery::Found(receipt)) => receipt,
+                Ok(WorkspaceDiscovery::RetryableBusy) => {
+                    return Err(RunError::Lifecycle("workspace discovery is busy; retry"));
+                }
                 _ => return self.block(&record, "workspace discovery remains unresolved"),
             };
             directory.ensure_attached()?;
@@ -884,6 +892,9 @@ impl SourceWorkspaceManager {
         directory.tree()?.ensure_attached()?;
         let discovery = match workspace_provider.discover(&intent) {
             Ok(discovery) => discovery,
+            Err(RunError::Lifecycle("workspace discovery is busy; retry")) => {
+                return Err(RunError::Lifecycle("workspace discovery is busy; retry"));
+            }
             Err(_) => return self.block(&record, "workspace discovery failed"),
         };
         directory.ensure_attached()?;
@@ -906,6 +917,9 @@ impl SourceWorkspaceManager {
                 if receipt.status != WorkspaceProviderStatus::Active {
                     return self.block(&record, "recovered workspace provider state is unknown");
                 }
+            }
+            WorkspaceDiscovery::RetryableBusy => {
+                return Err(RunError::Lifecycle("workspace discovery is busy; retry"));
             }
             WorkspaceDiscovery::Absent
                 if record.state == WorkspaceState::DirectoryReady && record.blocker.is_none() =>

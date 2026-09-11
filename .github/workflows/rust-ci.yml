@@ -38,6 +38,9 @@ jobs:
       - name: Local QA Runtime MVP-0 Browser clippy -D warnings
         working-directory: apps/local-qa-runtime
         run: cargo clippy -p fkst-local-qa-host --features mvp0-browser-test --all-targets --locked -- -D warnings
+      - name: Local QA controlled bundle provider clippy
+        working-directory: apps/local-qa-runtime
+        run: cargo clippy -p fkst-local-qa-host --features local-bundle-provider --all-targets --locked -- -D warnings
       - name: Set up Node
         uses: actions/setup-node@v4
         with:
@@ -71,6 +74,9 @@ jobs:
       - name: Build Local QA Runtime
         working-directory: apps/local-qa-runtime
         run: cargo build --workspace --locked
+      - name: Build Local QA controlled bundle provider with Browser feature
+        working-directory: apps/local-qa-runtime
+        run: cargo build -p fkst-local-qa-host --features local-bundle-provider,mvp0-browser-test --locked
       - name: Check Local QA Runtime macOS target
         working-directory: apps/local-qa-runtime
         run: cargo check --workspace --all-targets --locked --target aarch64-apple-darwin
@@ -120,6 +126,13 @@ jobs:
           workspaces: |
             backend
             apps/local-qa-runtime
+      - name: Test Local QA controlled bundle provider
+        working-directory: apps/local-qa-runtime
+        run: |
+          test "$(uname -s)" = Linux
+          test -x /usr/bin/git
+          cargo test -p fkst-local-qa-host --features local-bundle-provider --locked --lib local_bundle -- --nocapture
+          cargo test -p fkst-local-qa-host --features local-bundle-provider --locked --test local_bundle_provider -- --nocapture
       - name: test
         run: cargo test --workspace --locked
       - name: Test Local QA Runtime
