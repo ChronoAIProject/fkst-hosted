@@ -61,9 +61,10 @@ fn git(executable: &Path, cwd: &Path, args: &[&str]) -> String {
 impl Fixture {
     fn new() -> Self {
         static NEXT: AtomicU64 = AtomicU64::new(0);
+        let temporary_root = std::env::temp_dir().canonicalize().unwrap();
         let root = loop {
-            let root = PathBuf::from(format!(
-                "/private/tmp/6092-bundle-provider-fixture-{}-{}",
+            let root = temporary_root.join(format!(
+                "6092-bundle-provider-fixture-{}-{}",
                 std::process::id(),
                 NEXT.fetch_add(1, Ordering::Relaxed)
             ));
