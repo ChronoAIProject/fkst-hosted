@@ -134,6 +134,32 @@ mod platform {
             Ok(directory)
         }
 
+        #[cfg(feature = "local-bundle-provider")]
+        pub(crate) fn open_existing(path: &Path) -> Result<Arc<Self>, RunError> {
+            if !path.is_absolute()
+                || path == Path::new("/")
+                || path.components().count() > MAX_ROOT_COMPONENTS + 1
+                || path
+                    .components()
+                    .any(|part| !matches!(part, Component::RootDir | Component::Normal(_)))
+            {
+                return Err(changed());
+            }
+            let mut directory = Arc::new(Self {
+                file: open("/", directory_flags(), Mode::empty())
+                    .map_err(io)?
+                    .into(),
+                parent: None,
+                path: PathBuf::from("/"),
+            });
+            for part in path.components() {
+                if let Component::Normal(name) = part {
+                    directory = directory.child(name, false)?.ok_or_else(changed)?;
+                }
+            }
+            Ok(directory)
+        }
+
         pub(crate) fn path(&self) -> &Path {
             &self.path
         }
@@ -426,6 +452,18 @@ mod platform {
             published.ensure_attached()
         }
 
+        #[cfg(feature = "local-bundle-provider")]
+        pub(crate) fn sync_bounded_tree(
+            self: &Arc<Self>,
+            limit: u64,
+            deadline: std::time::Instant,
+        ) -> Result<(), RunError> {
+            let mut remaining = MAX_TREE_ENTRIES;
+            let snapshot = Node::scan(self, 0, &mut remaining, Some(deadline))?;
+            snapshot.sync_bounded(self, &mut 0, limit, deadline)?;
+            self.sync_chain()
+        }
+
         pub(crate) fn tree(self: &Arc<Self>) -> Result<Tree, RunError> {
             self.tree_with_reserved_entries(0)
         }
@@ -437,7 +475,7 @@ mod platform {
             let mut remaining = MAX_TREE_ENTRIES
                 .checked_sub(reserved)
                 .ok_or_else(budget_exceeded)?;
-            let snapshot = Node::scan(self, 0, &mut remaining)?;
+            let snapshot = Node::scan(self, 0, &mut remaining, None)?;
             let tree = Tree {
                 directory: self.clone(),
                 snapshot,
@@ -577,6 +615,51 @@ mod platform {
             Ok(bytes)
         }
 
+        #[cfg(feature = "local-bundle-provider")]
+        pub(crate) fn set_executable(&self) -> Result<(), RunError> {
+            self.ensure_attached()?;
+            fchmod(&self.file, Mode::S_IRWXU).map_err(io)?;
+            self.sync()
+        }
+
+        #[cfg(feature = "local-bundle-provider")]
+        pub(crate) fn bounded_bytes(
+            &self,
+            limit: usize,
+            deadline: std::time::Instant,
+        ) -> Result<Vec<u8>, RunError> {
+            self.ensure_attached()?;
+            let before = fstat(&self.file).map_err(io)?;
+            let length = usize::try_from(before.st_size).map_err(|_| changed())?;
+            if length > limit {
+                return Err(RunError::Lifecycle("local bundle file exceeds byte limit"));
+            }
+            let mut bytes = Vec::new();
+            let mut file = &self.file;
+            file.seek(SeekFrom::Start(0))?;
+            let mut chunk = [0; 64 * 1024];
+            while bytes.len() < length {
+                if std::time::Instant::now() >= deadline {
+                    return Err(RunError::Lifecycle(
+                        "local bundle operation deadline expired",
+                    ));
+                }
+                let amount = (length - bytes.len()).min(chunk.len());
+                let read = file.read(&mut chunk[..amount])?;
+                if read == 0 {
+                    return Err(changed());
+                }
+                bytes.extend_from_slice(&chunk[..read]);
+            }
+            self.ensure_unchanged(&before)?;
+            if std::time::Instant::now() >= deadline {
+                return Err(RunError::Lifecycle(
+                    "local bundle operation deadline expired",
+                ));
+            }
+            Ok(bytes)
+        }
+
         pub(crate) fn bytes(&self) -> Result<Vec<u8>, RunError> {
             self.ensure_attached()?;
             let mut bytes = vec![];
@@ -625,12 +708,19 @@ mod platform {
             directory: &Arc<Directory>,
             depth: usize,
             remaining: &mut usize,
+            deadline: Option<std::time::Instant>,
         ) -> Result<Self, RunError> {
+            if deadline.is_some_and(|end| std::time::Instant::now() >= end) {
+                return Err(RunError::Lifecycle("filesystem traversal deadline expired"));
+            }
             directory.ensure_attached()?;
             let mut entries =
                 Dir::openat(&directory.file, ".", directory_flags(), Mode::empty()).map_err(io)?;
             let mut names = Vec::new();
             for entry in entries.iter() {
+                if deadline.is_some_and(|end| std::time::Instant::now() >= end) {
+                    return Err(RunError::Lifecycle("filesystem traversal deadline expired"));
+                }
                 let entry = entry.map_err(io)?;
                 let name = OsStr::from_bytes(entry.file_name().to_bytes());
                 if name == OsStr::new(".") || name == OsStr::new("..") {
@@ -656,7 +746,7 @@ mod platform {
                             return Err(budget_exceeded());
                         }
                         let child = entry.directory(directory)?;
-                        let snapshot = Self::scan(&child, depth + 1, remaining)?;
+                        let snapshot = Self::scan(&child, depth + 1, remaining, deadline)?;
                         node.children.push((entry, snapshot));
                     }
                     SFlag::S_IFREG => {
@@ -679,6 +769,42 @@ mod platform {
                 child.ensure_attached(&entry.directory(directory)?)?;
             }
             Ok(())
+        }
+
+        #[cfg(feature = "local-bundle-provider")]
+        fn sync_bounded(
+            &self,
+            directory: &Arc<Directory>,
+            bytes: &mut u64,
+            limit: u64,
+            deadline: std::time::Instant,
+        ) -> Result<(), RunError> {
+            for entry in &self.files {
+                if std::time::Instant::now() >= deadline {
+                    return Err(RunError::Lifecycle(
+                        "filesystem synchronization deadline expired",
+                    ));
+                }
+                let file = entry.file(directory)?;
+                let length =
+                    u64::try_from(fstat(&file.file).map_err(io)?.st_size).map_err(|_| changed())?;
+                *bytes = bytes.checked_add(length).ok_or_else(budget_exceeded)?;
+                if *bytes > limit {
+                    return Err(RunError::Lifecycle(
+                        "observed Git disk bytes exceed configured limit",
+                    ));
+                }
+                file.sync()?;
+            }
+            for (entry, node) in &self.children {
+                node.sync_bounded(&entry.directory(directory)?, bytes, limit, deadline)?;
+            }
+            if std::time::Instant::now() >= deadline {
+                return Err(RunError::Lifecycle(
+                    "filesystem synchronization deadline expired",
+                ));
+            }
+            directory.sync_chain()
         }
 
         fn remove_contents(
