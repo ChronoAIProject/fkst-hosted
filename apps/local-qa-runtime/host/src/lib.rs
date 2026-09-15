@@ -6,6 +6,7 @@ mod coordinator;
 mod executor;
 mod journal;
 pub mod ownership;
+pub mod package_release;
 pub mod source_workspace;
 mod transport;
 #[cfg(feature = "mvp0-browser-test")]

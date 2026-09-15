@@ -10,6 +10,11 @@ use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
 use serde::{Deserialize, Serialize};
 
 use crate::executor::{ExecutionOutcome, ExecutorControlReport, ExecutorSelection};
+use crate::package_release::{
+    PackageReleaseAdmissionPreflight, PackageReleaseAdmissionReceipt,
+    PackageReleaseJournalAdmission, PackageReleaseSelectionPreflight, PackageReleaseTransition,
+    ReceiptExecutor, SelectedPackageRelease,
+};
 use crate::RunError;
 
 #[path = "workspace_journal.rs"]
@@ -227,7 +232,8 @@ impl Journal {
             7 => self.migrate_v8(),
             8 => self.migrate_v9(),
             9 => self.migrate_v10(),
-            10 => Ok(()),
+            10 => self.migrate_v11(),
+            11 => Ok(()),
             other => Err(RunError::UnsupportedDatabaseVersion(other)),
         }
     }
@@ -239,6 +245,93 @@ impl Journal {
         transaction.execute_batch(
             "ALTER TABLE admission_v2_records ADD COLUMN request_json BLOB;
              PRAGMA user_version = 10;",
+        )?;
+        transaction.commit()?;
+        self.migrate_v11()
+    }
+
+    fn migrate_v11(&mut self) -> Result<(), RunError> {
+        let transaction = self
+            .connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        transaction.execute_batch(
+            "CREATE TABLE package_release_admissions (
+                idempotency_key TEXT PRIMARY KEY NOT NULL,
+                request_digest TEXT NOT NULL,
+                release_repository TEXT NOT NULL,
+                release_commit_sha TEXT NOT NULL,
+                release_path TEXT NOT NULL,
+                release_sha256 TEXT NOT NULL,
+                release_sequence INTEGER NOT NULL CHECK (release_sequence > 0),
+                authority_keyid TEXT NOT NULL,
+                authorization_sha256 TEXT NOT NULL,
+                dsse_sha256 TEXT NOT NULL,
+                manifest_path TEXT NOT NULL,
+                manifest_sha256 TEXT NOT NULL,
+                manifest_digest TEXT NOT NULL,
+                bundle_path TEXT NOT NULL,
+                bundle_sha256 TEXT NOT NULL,
+                schema_catalog_path TEXT NOT NULL,
+                schema_catalog_sha256 TEXT NOT NULL,
+                schema_release_path TEXT NOT NULL,
+                schema_release_sha256 TEXT NOT NULL,
+                repository_commit TEXT NOT NULL,
+                fkst_packages_commit TEXT NOT NULL,
+                fkst_substrate_commit TEXT NOT NULL,
+                package_id TEXT NOT NULL,
+                package_version TEXT NOT NULL,
+                package_content_sha256 TEXT NOT NULL,
+                supported_profile TEXT NOT NULL,
+                executor_id TEXT NOT NULL,
+                executor_module TEXT NOT NULL CHECK (
+                    executor_module <> '' AND
+                    executor_module NOT LIKE '/%' AND
+                    executor_module NOT LIKE '%/%' AND
+                    executor_module NOT LIKE '%\\%' AND
+                    executor_module NOT LIKE '%..%'
+                ),
+                executor_function TEXT NOT NULL CHECK (executor_function <> ''),
+                entrypoint TEXT NOT NULL CHECK (entrypoint = 'testing-runner.run'),
+                contract_major TEXT NOT NULL,
+                reducer_id TEXT NOT NULL,
+                reducer_version TEXT NOT NULL,
+                reducer_sha256 TEXT NOT NULL,
+                reducer_policy_profile TEXT NOT NULL,
+                capability TEXT NOT NULL,
+                policy_profile TEXT NOT NULL,
+                platform TEXT NOT NULL,
+                cache_key TEXT NOT NULL,
+                receipt_json BLOB NOT NULL,
+                CHECK (length(request_digest) = 64),
+                CHECK (length(release_sha256) = 64),
+                CHECK (length(authorization_sha256) = 64),
+                CHECK (length(dsse_sha256) = 64),
+                CHECK (length(manifest_sha256) = 64),
+                CHECK (length(manifest_digest) = 64),
+                CHECK (length(bundle_sha256) = 64),
+                CHECK (length(schema_catalog_sha256) = 64),
+                CHECK (length(schema_release_sha256) = 64),
+                CHECK (length(repository_commit) = 40),
+                CHECK (length(fkst_packages_commit) = 40),
+                CHECK (length(fkst_substrate_commit) = 40),
+                CHECK (length(package_content_sha256) = 64),
+                CHECK (length(reducer_sha256) = 64),
+                CHECK (cache_key = release_sha256)
+            );
+            CREATE TABLE selected_package_releases (
+                selection_name TEXT PRIMARY KEY NOT NULL CHECK (selection_name = 'testing-runner.v1'),
+                idempotency_key TEXT NOT NULL,
+                release_sha256 TEXT NOT NULL,
+                release_sequence INTEGER NOT NULL CHECK (release_sequence > 0),
+                executor_id TEXT NOT NULL,
+                executor_module TEXT NOT NULL,
+                executor_function TEXT NOT NULL,
+                entrypoint TEXT NOT NULL CHECK (entrypoint = 'testing-runner.run'),
+                contract_major TEXT NOT NULL,
+                receipt_json BLOB NOT NULL,
+                FOREIGN KEY (idempotency_key) REFERENCES package_release_admissions(idempotency_key)
+            );
+            PRAGMA user_version = 11;",
         )?;
         transaction.commit()?;
         Ok(())
@@ -877,6 +970,349 @@ impl Journal {
             )
             .optional()
             .map_err(RunError::from)
+    }
+
+    pub(crate) fn preflight_package_release_admission(
+        &self,
+        idempotency_key: &str,
+        request_digest: &str,
+    ) -> Result<PackageReleaseAdmissionPreflight, RunError> {
+        let stored = self
+            .connection
+            .query_row(
+                "SELECT request_digest, receipt_json
+                 FROM package_release_admissions
+                 WHERE idempotency_key = ?1",
+                [idempotency_key],
+                |row| Ok((row.get::<_, String>(0)?, row.get::<_, Vec<u8>>(1)?)),
+            )
+            .optional()?;
+        let Some((stored_digest, receipt_json)) = stored else {
+            return Ok(PackageReleaseAdmissionPreflight::Continue);
+        };
+        if stored_digest != request_digest {
+            return Ok(PackageReleaseAdmissionPreflight::Conflict);
+        }
+        let receipt = parse_package_release_receipt(&receipt_json)?;
+        Ok(PackageReleaseAdmissionPreflight::Replay(Box::new(receipt)))
+    }
+
+    pub(crate) fn preflight_package_release_selection(
+        &self,
+        receipt: &PackageReleaseAdmissionReceipt,
+        transition: PackageReleaseTransition,
+    ) -> Result<PackageReleaseSelectionPreflight, RunError> {
+        if receipt.policy.transition != transition.as_str() {
+            return Ok(PackageReleaseSelectionPreflight::InvalidTransition);
+        }
+        let selected = self
+            .connection
+            .query_row(
+                "SELECT release_sequence
+                 FROM selected_package_releases
+                 WHERE selection_name = 'testing-runner.v1'",
+                [],
+                |row| row.get::<_, i64>(0),
+            )
+            .optional()?;
+        self.evaluate_package_release_transition(receipt, transition, selected)
+    }
+
+    pub(crate) fn admit_package_release(
+        &mut self,
+        idempotency_key: &str,
+        request_digest: &str,
+        receipt: &PackageReleaseAdmissionReceipt,
+        transition: PackageReleaseTransition,
+    ) -> Result<PackageReleaseJournalAdmission, RunError> {
+        if receipt.policy.transition != transition.as_str() {
+            return Err(RunError::InvalidJournal(
+                "package release receipt transition does not match admission transition",
+            ));
+        }
+        let receipt_json = package_release_receipt_json(receipt)?;
+        let transaction = self
+            .connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let stored = transaction
+            .query_row(
+                "SELECT request_digest, receipt_json
+                 FROM package_release_admissions
+                 WHERE idempotency_key = ?1",
+                [idempotency_key],
+                |row| Ok((row.get::<_, String>(0)?, row.get::<_, Vec<u8>>(1)?)),
+            )
+            .optional()?;
+        if let Some((stored_digest, stored_receipt_json)) = stored {
+            let admission = if stored_digest == request_digest {
+                PackageReleaseJournalAdmission::Replay(Box::new(parse_package_release_receipt(
+                    &stored_receipt_json,
+                )?))
+            } else {
+                PackageReleaseJournalAdmission::Conflict
+            };
+            transaction.commit()?;
+            return Ok(admission);
+        }
+
+        let selected = transaction
+            .query_row(
+                "SELECT release_sequence
+                 FROM selected_package_releases
+                 WHERE selection_name = 'testing-runner.v1'",
+                [],
+                |row| row.get::<_, i64>(0),
+            )
+            .optional()?;
+        match selected {
+            None if transition != PackageReleaseTransition::Initial => {
+                transaction.commit()?;
+                return Ok(PackageReleaseJournalAdmission::InvalidTransition);
+            }
+            Some(sequence) => {
+                let selected_sequence = u64::try_from(sequence).map_err(|_| {
+                    RunError::InvalidJournal("selected package release sequence is invalid")
+                })?;
+                if receipt.release.release_sequence > selected_sequence
+                    && transition != PackageReleaseTransition::Update
+                {
+                    transaction.commit()?;
+                    return Ok(PackageReleaseJournalAdmission::InvalidTransition);
+                }
+                if receipt.release.release_sequence < selected_sequence {
+                    let previously_admitted = transaction
+                        .query_row(
+                            "SELECT 1
+                             FROM package_release_admissions
+                             WHERE release_sha256 = ?1
+                             LIMIT 1",
+                            [receipt.release.sha256.as_str()],
+                            |row| row.get::<_, i64>(0),
+                        )
+                        .optional()?
+                        .is_some();
+                    if transition != PackageReleaseTransition::ApprovedRollback
+                        || !previously_admitted
+                    {
+                        transaction.commit()?;
+                        return Ok(PackageReleaseJournalAdmission::AntiRollback);
+                    }
+                }
+            }
+            _ => {}
+        }
+
+        transaction.execute(
+            "INSERT INTO package_release_admissions (
+                idempotency_key, request_digest, release_repository, release_commit_sha,
+                release_path, release_sha256, release_sequence, authority_keyid,
+                authorization_sha256, dsse_sha256, manifest_path, manifest_sha256,
+                manifest_digest, bundle_path, bundle_sha256, schema_catalog_path,
+                schema_catalog_sha256, schema_release_path, schema_release_sha256,
+                repository_commit, fkst_packages_commit, fkst_substrate_commit,
+                package_id, package_version, package_content_sha256, supported_profile,
+                executor_id, executor_module, executor_function, entrypoint,
+                contract_major, reducer_id, reducer_version, reducer_sha256,
+                reducer_policy_profile, capability, policy_profile, platform,
+                cache_key, receipt_json
+             ) VALUES (
+                ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10,
+                ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20,
+                ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30,
+                ?31, ?32, ?33, ?34, ?35, ?36, ?37, ?38, ?39, ?40
+             )",
+            params![
+                idempotency_key,
+                request_digest,
+                receipt.release.repository,
+                receipt.release.commit_sha,
+                receipt.release.path,
+                receipt.release.sha256,
+                i64::try_from(receipt.release.release_sequence).map_err(|_| {
+                    RunError::InvalidJournal("package release sequence is too large")
+                })?,
+                receipt.authority.keyid,
+                receipt.authority.authorization_sha256,
+                receipt.authority.dsse_sha256,
+                receipt.manifest.path,
+                receipt.manifest.sha256,
+                receipt.manifest.manifest_digest,
+                receipt.bundle.path,
+                receipt.bundle.sha256,
+                receipt.schema_catalog.path,
+                receipt.schema_catalog.sha256,
+                receipt.schema_release.path,
+                receipt.schema_release.sha256,
+                receipt.dependency_lock.repository_commit,
+                receipt.dependency_lock.fkst_packages_commit,
+                receipt.dependency_lock.fkst_substrate_commit,
+                receipt.package.package_id,
+                receipt.package.package_version,
+                receipt.package.package_content_sha256,
+                receipt.package.supported_profile,
+                receipt.executor.executor_id,
+                receipt.executor.module,
+                receipt.executor.function,
+                receipt.executor.entrypoint,
+                receipt.executor.contract_major,
+                receipt.reducer.reducer_id,
+                receipt.reducer.reducer_version,
+                receipt.reducer.reducer_sha256,
+                receipt.reducer.policy_profile,
+                receipt.capability,
+                receipt.policy.supported_profile,
+                receipt.policy.platform,
+                receipt.cache_key,
+                receipt_json,
+            ],
+        )?;
+        transaction.execute(
+            "INSERT INTO selected_package_releases (
+                selection_name, idempotency_key, release_sha256, release_sequence,
+                executor_id, executor_module, executor_function, entrypoint,
+                contract_major, receipt_json
+             ) VALUES (
+                'testing-runner.v1', ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9
+             )
+             ON CONFLICT(selection_name) DO UPDATE SET
+                idempotency_key = excluded.idempotency_key,
+                release_sha256 = excluded.release_sha256,
+                release_sequence = excluded.release_sequence,
+                executor_id = excluded.executor_id,
+                executor_module = excluded.executor_module,
+                executor_function = excluded.executor_function,
+                entrypoint = excluded.entrypoint,
+                contract_major = excluded.contract_major,
+                receipt_json = excluded.receipt_json",
+            params![
+                idempotency_key,
+                receipt.release.sha256,
+                i64::try_from(receipt.release.release_sequence).map_err(|_| {
+                    RunError::InvalidJournal("package release sequence is too large")
+                })?,
+                receipt.executor.executor_id,
+                receipt.executor.module,
+                receipt.executor.function,
+                receipt.executor.entrypoint,
+                receipt.executor.contract_major,
+                package_release_receipt_json(receipt)?,
+            ],
+        )?;
+        transaction.commit()?;
+        Ok(PackageReleaseJournalAdmission::Created(Box::new(
+            receipt.clone(),
+        )))
+    }
+
+    fn evaluate_package_release_transition(
+        &self,
+        receipt: &PackageReleaseAdmissionReceipt,
+        transition: PackageReleaseTransition,
+        selected: Option<i64>,
+    ) -> Result<PackageReleaseSelectionPreflight, RunError> {
+        let Some(selected) = selected else {
+            return if transition == PackageReleaseTransition::Initial {
+                Ok(PackageReleaseSelectionPreflight::Continue)
+            } else {
+                Ok(PackageReleaseSelectionPreflight::InvalidTransition)
+            };
+        };
+        let selected_sequence = u64::try_from(selected).map_err(|_| {
+            RunError::InvalidJournal("selected package release sequence is invalid")
+        })?;
+        if receipt.release.release_sequence > selected_sequence {
+            return if transition == PackageReleaseTransition::Update {
+                Ok(PackageReleaseSelectionPreflight::Continue)
+            } else {
+                Ok(PackageReleaseSelectionPreflight::InvalidTransition)
+            };
+        }
+        if receipt.release.release_sequence < selected_sequence {
+            if transition != PackageReleaseTransition::ApprovedRollback {
+                return Ok(PackageReleaseSelectionPreflight::AntiRollback);
+            }
+            let previously_admitted = self
+                .connection
+                .query_row(
+                    "SELECT 1
+                     FROM package_release_admissions
+                     WHERE release_sha256 = ?1
+                     LIMIT 1",
+                    [receipt.release.sha256.as_str()],
+                    |row| row.get::<_, i64>(0),
+                )
+                .optional()?
+                .is_some();
+            return if previously_admitted {
+                Ok(PackageReleaseSelectionPreflight::Continue)
+            } else {
+                Ok(PackageReleaseSelectionPreflight::AntiRollback)
+            };
+        }
+        Ok(PackageReleaseSelectionPreflight::Continue)
+    }
+
+    pub fn selected_package_release(&self) -> Result<Option<SelectedPackageRelease>, RunError> {
+        let selected = self
+            .connection
+            .query_row(
+                "SELECT release_sha256, release_sequence, executor_id, executor_module,
+                        executor_function, entrypoint, contract_major, receipt_json
+                 FROM selected_package_releases
+                 WHERE selection_name = 'testing-runner.v1'",
+                [],
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, i64>(1)?,
+                        row.get::<_, String>(2)?,
+                        row.get::<_, String>(3)?,
+                        row.get::<_, String>(4)?,
+                        row.get::<_, String>(5)?,
+                        row.get::<_, String>(6)?,
+                        row.get::<_, Vec<u8>>(7)?,
+                    ))
+                },
+            )
+            .optional()?;
+        let Some((
+            release_sha256,
+            release_sequence,
+            executor_id,
+            executor_module,
+            executor_function,
+            entrypoint,
+            contract_major,
+            receipt_json,
+        )) = selected
+        else {
+            return Ok(None);
+        };
+        let release_sequence = u64::try_from(release_sequence).map_err(|_| {
+            RunError::InvalidJournal("selected package release sequence is invalid")
+        })?;
+        let receipt = parse_package_release_receipt(&receipt_json)?;
+        let executor = ReceiptExecutor {
+            executor_id,
+            module: executor_module,
+            function: executor_function,
+            entrypoint,
+            contract_major,
+        };
+        if release_sha256 != receipt.release.sha256
+            || release_sequence != receipt.release.release_sequence
+            || executor != receipt.executor
+        {
+            return Err(RunError::InvalidJournal(
+                "selected package release does not match its receipt",
+            ));
+        }
+        Ok(Some(SelectedPackageRelease {
+            release_sha256,
+            release_sequence,
+            executor,
+            receipt,
+        }))
     }
 
     pub(crate) fn snapshot(&self, run_id: &str) -> Result<Option<RunSnapshot>, RunError> {
@@ -1662,6 +2098,20 @@ fn insert_cancellation_event(
     Ok(())
 }
 
+fn package_release_receipt_json(
+    receipt: &PackageReleaseAdmissionReceipt,
+) -> Result<Vec<u8>, RunError> {
+    serde_json::to_vec(receipt)
+        .map_err(|_| RunError::InvalidJournal("package release receipt serialization failed"))
+}
+
+fn parse_package_release_receipt(
+    receipt_json: &[u8],
+) -> Result<PackageReleaseAdmissionReceipt, RunError> {
+    serde_json::from_slice(receipt_json)
+        .map_err(|_| RunError::InvalidJournal("package release receipt JSON is invalid"))
+}
+
 fn validate_state(value: &str) -> Result<(), RunError> {
     let encoded = serde_json::to_vec(value)
         .map_err(|_| RunError::Contract("LocalState serialization failed"))?;
@@ -2074,7 +2524,11 @@ mod tests {
                 .unwrap();
             journal
                 .connection
-                .execute_batch("ALTER TABLE admission_v2_records DROP COLUMN request_json;")
+                .execute_batch(
+                    "ALTER TABLE admission_v2_records DROP COLUMN request_json;
+                     DROP TABLE selected_package_releases;
+                     DROP TABLE package_release_admissions;",
+                )
                 .unwrap();
             if from_version == 7 {
                 journal
@@ -2133,7 +2587,7 @@ mod tests {
                     .connection
                     .pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))
                     .unwrap(),
-                10
+                11
             );
             assert!(migrated.reconstruct_v2_request(run_id).unwrap().is_none());
             assert!(migrated.workspaces().unwrap().is_empty());
@@ -2211,6 +2665,8 @@ mod tests {
             .connection
             .execute_batch(
                 "ALTER TABLE admission_v2_records DROP COLUMN request_json;
+                 DROP TABLE selected_package_releases;
+                 DROP TABLE package_release_admissions;
                  DROP TABLE workspace_ownership;
                  DROP TABLE effect_admissions;
                  DROP TABLE cancellation_controls;

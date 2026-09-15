@@ -3,9 +3,15 @@
 //! hook: called from the per-repo driver, NEVER fails the reconcile, fully logged,
 //! token never logged. v1 is a REPO-LEVEL gate — if ANY registered session on the
 //! repo opted in, the bot's mergeable PRs are merged; per-PR→session scoping is a
-//! documented follow-up.
+//! documented follow-up. The final pre-merge gate is intentionally stricter than
+//! the merge endpoint: requested-changes reviews and non-clean merge states hold
+//! even if the App token could perform an administrative merge.
 
-use crate::github_app::{GithubAppTokens, PullRequestSummary};
+use std::collections::HashMap;
+
+use crate::github_app::{
+    GithubAppTokens, PullRequestMergeStatus, PullRequestReviewSummary, PullRequestSummary,
+};
 
 /// Auto-merge the App bot's mergeable open PRs on `owner_repo`, one at a time.
 /// No-op unless `any_auto_merge` (some session opted in) AND a `bot_login` is
@@ -44,11 +50,41 @@ pub async fn auto_merge_bot_pull_requests(
     };
 
     for pr in pulls.iter().filter(|p| p.author_login == bot_login) {
-        match github.pull_request_mergeable(owner_repo, pr.number).await {
-            Ok(Some(true)) => {
+        let status = match github
+            .pull_request_merge_status(owner_repo, pr.number)
+            .await
+        {
+            Ok(status) => status,
+            Err(error) => {
+                tracing::warn!(
+                    owner_repo = %owner_repo,
+                    pr = pr.number,
+                    error = %error,
+                    "auto-merge: fresh PR status read failed; skipping"
+                );
+                continue;
+            }
+        };
+        let reviews = match github
+            .list_pull_request_reviews(owner_repo, pr.number)
+            .await
+        {
+            Ok(reviews) => reviews,
+            Err(error) => {
+                tracing::warn!(
+                    owner_repo = %owner_repo,
+                    pr = pr.number,
+                    error = %error,
+                    "auto-merge: PR review state read failed; skipping"
+                );
+                continue;
+            }
+        };
+        match auto_merge_hold_reason(&status, &reviews) {
+            None => {
                 let title = format!("Merge pull request #{} (fkst auto-merge)", pr.number);
                 match github
-                    .merge_pull_request(owner_repo, pr.number, &title)
+                    .merge_pull_request_if_head(owner_repo, pr.number, &title, &status.head_sha)
                     .await
                 {
                     Ok(()) => {
@@ -71,24 +107,136 @@ pub async fn auto_merge_bot_pull_requests(
                     ),
                 }
             }
-            Ok(Some(false)) => tracing::info!(
+            Some(reason) if reason.is_retry_noise() => tracing::debug!(
                 owner_repo = %owner_repo,
                 pr = pr.number,
-                "auto-merge: PR not mergeable (conflict); skipping"
+                hold_reason = reason.as_str(),
+                "auto-merge: PR held by merge gate; retry next reconcile"
             ),
-            Ok(None) => tracing::debug!(
+            Some(reason) => tracing::info!(
                 owner_repo = %owner_repo,
                 pr = pr.number,
-                "auto-merge: PR mergeable not yet computed; retry next reconcile"
-            ),
-            Err(error) => tracing::warn!(
-                owner_repo = %owner_repo,
-                pr = pr.number,
-                error = %error,
-                "auto-merge: mergeable read failed; skipping"
+                hold_reason = reason.as_str(),
+                "auto-merge: PR held by merge gate"
             ),
         }
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum AutoMergeHoldReason {
+    NotOpen,
+    MergeablePending,
+    MergeConflict,
+    UnknownMergeState,
+    BlockedMergeState,
+    NonCleanMergeState,
+    ChangesRequested,
+    StaleApprovalAfterChangesRequested,
+    UnknownReviewState,
+}
+
+impl AutoMergeHoldReason {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::NotOpen => "pr-not-open",
+            Self::MergeablePending => "mergeable-pending",
+            Self::MergeConflict => "merge-conflict",
+            Self::UnknownMergeState => "unknown-merge-state",
+            Self::BlockedMergeState => "blocked-merge-state",
+            Self::NonCleanMergeState => "non-clean-merge-state",
+            Self::ChangesRequested => "changes-requested",
+            Self::StaleApprovalAfterChangesRequested => "stale-approval-after-changes-requested",
+            Self::UnknownReviewState => "unknown-review-state",
+        }
+    }
+
+    fn is_retry_noise(self) -> bool {
+        matches!(self, Self::MergeablePending)
+    }
+}
+
+fn auto_merge_hold_reason(
+    status: &PullRequestMergeStatus,
+    reviews: &[PullRequestReviewSummary],
+) -> Option<AutoMergeHoldReason> {
+    if !status.state.eq_ignore_ascii_case("open") {
+        return Some(AutoMergeHoldReason::NotOpen);
+    }
+    match status.mergeable {
+        Some(true) => {}
+        Some(false) => return Some(AutoMergeHoldReason::MergeConflict),
+        None => return Some(AutoMergeHoldReason::MergeablePending),
+    }
+    match normalized_optional(&status.mergeable_state).as_deref() {
+        Some("clean") => {}
+        Some("blocked") => return Some(AutoMergeHoldReason::BlockedMergeState),
+        Some("unknown") => return Some(AutoMergeHoldReason::MergeablePending),
+        Some(_) => return Some(AutoMergeHoldReason::NonCleanMergeState),
+        None => return Some(AutoMergeHoldReason::UnknownMergeState),
+    }
+    review_hold_reason(&status.head_sha, reviews)
+}
+
+fn review_hold_reason(
+    head_sha: &str,
+    reviews: &[PullRequestReviewSummary],
+) -> Option<AutoMergeHoldReason> {
+    let mut latest_decision_by_author: HashMap<&str, &str> = HashMap::new();
+    let mut latest_changes_requested_index: Option<usize> = None;
+
+    for (index, review) in reviews.iter().enumerate() {
+        match normalized_review_state(&review.state).as_deref() {
+            Some("APPROVED") => {
+                latest_decision_by_author.insert(review.author_login.as_str(), "APPROVED");
+            }
+            Some("CHANGES_REQUESTED") => {
+                latest_decision_by_author.insert(review.author_login.as_str(), "CHANGES_REQUESTED");
+                latest_changes_requested_index = Some(index);
+            }
+            Some("COMMENTED" | "DISMISSED" | "PENDING") => {}
+            Some(_) | None => return Some(AutoMergeHoldReason::UnknownReviewState),
+        }
+    }
+
+    if latest_decision_by_author
+        .values()
+        .any(|state| *state == "CHANGES_REQUESTED")
+    {
+        return Some(AutoMergeHoldReason::ChangesRequested);
+    }
+
+    if let Some(changes_requested_index) = latest_changes_requested_index {
+        let has_later_exact_head_approval = reviews
+            .iter()
+            .enumerate()
+            .skip(changes_requested_index + 1)
+            .any(|(_, review)| {
+                normalized_review_state(&review.state).as_deref() == Some("APPROVED")
+                    && review.commit_id.as_deref() == Some(head_sha)
+            });
+        if !has_later_exact_head_approval {
+            return Some(AutoMergeHoldReason::StaleApprovalAfterChangesRequested);
+        }
+    }
+
+    None
+}
+
+fn normalized_optional(value: &Option<String>) -> Option<String> {
+    value
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_ascii_lowercase)
+}
+
+fn normalized_review_state(value: &str) -> Option<String> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    Some(trimmed.to_ascii_uppercase())
 }
 
 /// Close the merged PR's linked work issue (best-effort). Parses the issue number

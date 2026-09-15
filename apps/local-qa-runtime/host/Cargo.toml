@@ -23,11 +23,13 @@ mvp0-browser-test = [
 ]
 
 [dependencies]
+base64 = "=0.23.0"
 ctrlc = { version = "=3.4.7", features = ["termination"] }
 fkst-local-qa-browser-adapter = { path = "../browser-adapter", optional = true }
 fkst-local-qa-evidence-stager = { path = "../evidence-stager", optional = true }
 fkst-qa-contracts = { path = "../../../packages/qa-contracts/rust" }
 httparse = "=1.10.1"
+ed25519-dalek = "=2.2.0"
 rusqlite = "=0.40.1"
 serde = { version = "=1.0.229", features = ["derive"] }
 serde_json = "=1.0.151"

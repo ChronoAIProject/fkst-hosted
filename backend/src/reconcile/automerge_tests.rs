@@ -12,7 +12,8 @@ use secrecy::SecretString;
 
 use super::*;
 use crate::github_app::api::{
-    GithubApi, InstallationId, InstallationToken, InstallationTokenRequest, PullRequestSummary,
+    GithubApi, InstallationId, InstallationToken, InstallationTokenRequest, PullRequestMergeStatus,
+    PullRequestReviewSummary, PullRequestSummary,
 };
 use crate::github_app::config::GithubAppConfig;
 use crate::github_app::{GithubAppError, GithubAppTokens};
@@ -24,10 +25,15 @@ use crate::github_app::{GithubAppError, GithubAppTokens};
 struct FakePrApi {
     pulls: Vec<PullRequestSummary>,
     mergeable: HashMap<u64, Option<bool>>,
+    merge_status: HashMap<u64, PullRequestMergeStatus>,
+    reviews: HashMap<u64, Vec<PullRequestReviewSummary>>,
     merged: Mutex<Vec<u64>>,
+    merge_head_shas: Mutex<Vec<String>>,
     closed_issues: Mutex<Vec<u64>>,
     list_calls: AtomicUsize,
     mergeable_queried: Mutex<Vec<u64>>,
+    status_queried: Mutex<Vec<u64>>,
+    reviews_queried: Mutex<Vec<u64>>,
     fail_list: bool,
     fail_merge: bool,
     fail_close: bool,
@@ -95,6 +101,67 @@ impl GithubApi for FakePrApi {
         Ok(())
     }
 
+    async fn merge_pull_request_if_head(
+        &self,
+        _token: &SecretString,
+        _owner: &str,
+        _repo: &str,
+        number: u64,
+        _commit_title: &str,
+        expected_head_sha: &str,
+    ) -> Result<(), GithubAppError> {
+        if self.fail_merge {
+            return Err(GithubAppError::Http("merge boom".to_string()));
+        }
+        self.merged.lock().unwrap().push(number);
+        self.merge_head_shas
+            .lock()
+            .unwrap()
+            .push(expected_head_sha.to_string());
+        Ok(())
+    }
+
+    async fn pull_request_merge_status(
+        &self,
+        _token: &SecretString,
+        _owner: &str,
+        _repo: &str,
+        number: u64,
+    ) -> Result<PullRequestMergeStatus, GithubAppError> {
+        self.status_queried.lock().unwrap().push(number);
+        if let Some(status) = self.merge_status.get(&number) {
+            return Ok(status.clone());
+        }
+        let pr = self
+            .pulls
+            .iter()
+            .find(|p| p.number == number)
+            .ok_or_else(|| GithubAppError::Http("missing fake PR".to_string()))?;
+        let mergeable = self.mergeable.get(&number).copied().unwrap_or(None);
+        let mergeable_state = match mergeable {
+            Some(true) => Some("clean".to_string()),
+            Some(false) => Some("dirty".to_string()),
+            None => None,
+        };
+        Ok(PullRequestMergeStatus {
+            state: "open".to_string(),
+            head_sha: pr.head_sha.clone(),
+            mergeable,
+            mergeable_state,
+        })
+    }
+
+    async fn list_pull_request_reviews(
+        &self,
+        _token: &SecretString,
+        _owner: &str,
+        _repo: &str,
+        number: u64,
+    ) -> Result<Vec<PullRequestReviewSummary>, GithubAppError> {
+        self.reviews_queried.lock().unwrap().push(number);
+        Ok(self.reviews.get(&number).cloned().unwrap_or_default())
+    }
+
     async fn close_issue(
         &self,
         _token: &SecretString,
@@ -152,6 +219,29 @@ fn pr(number: u64, author: &str) -> PullRequestSummary {
     )
 }
 
+fn review(author: &str, state: &str, commit_id: &str) -> PullRequestReviewSummary {
+    PullRequestReviewSummary {
+        author_login: author.to_string(),
+        state: state.to_string(),
+        commit_id: Some(commit_id.to_string()),
+        submitted_at: None,
+    }
+}
+
+fn status(
+    state: &str,
+    head_sha: &str,
+    mergeable: Option<bool>,
+    mergeable_state: Option<&str>,
+) -> PullRequestMergeStatus {
+    PullRequestMergeStatus {
+        state: state.to_string(),
+        head_sha: head_sha.to_string(),
+        mergeable,
+        mergeable_state: mergeable_state.map(str::to_string),
+    }
+}
+
 #[tokio::test]
 async fn gated_off_when_no_session_opted_in() {
     let api = Arc::new(FakePrApi {
@@ -203,6 +293,100 @@ async fn merges_only_mergeable_bot_prs() {
         *api.merged.lock().unwrap(),
         vec![1],
         "only the mergeable=Some(true) bot PR merges"
+    );
+    assert_eq!(
+        *api.merge_head_shas.lock().unwrap(),
+        vec!["sha1".to_string()],
+        "merge is bound to the freshly-read PR head"
+    );
+}
+
+#[tokio::test]
+async fn requested_changes_review_blocks_auto_merge() {
+    let api = Arc::new(FakePrApi {
+        pulls: vec![pr(1, "fkst-bot")],
+        mergeable: HashMap::from([(1, Some(true))]),
+        reviews: HashMap::from([(1, vec![review("owner", "CHANGES_REQUESTED", "sha1")])]),
+        ..Default::default()
+    });
+    let github = tokens(api.clone());
+
+    auto_merge_bot_pull_requests(&github, "acme/site", Some("fkst-bot"), true).await;
+
+    assert!(
+        api.merged.lock().unwrap().is_empty(),
+        "CHANGES_REQUESTED is a reviewer veto even when GitHub reports mergeable=true"
+    );
+}
+
+#[tokio::test]
+async fn blocked_merge_state_blocks_auto_merge() {
+    let api = Arc::new(FakePrApi {
+        pulls: vec![pr(1, "fkst-bot")],
+        merge_status: HashMap::from([(1, status("open", "sha1", Some(true), Some("blocked")))]),
+        ..Default::default()
+    });
+    let github = tokens(api.clone());
+
+    auto_merge_bot_pull_requests(&github, "acme/site", Some("fkst-bot"), true).await;
+
+    assert!(
+        api.merged.lock().unwrap().is_empty(),
+        "GitHub BLOCKED merge state is a semantic hold even when mergeable=true"
+    );
+}
+
+#[tokio::test]
+async fn stale_approval_after_requested_changes_blocks_auto_merge() {
+    let api = Arc::new(FakePrApi {
+        pulls: vec![pr(1, "fkst-bot")],
+        merge_status: HashMap::from([(1, status("open", "sha2", Some(true), Some("clean")))]),
+        reviews: HashMap::from([(
+            1,
+            vec![
+                review("owner", "CHANGES_REQUESTED", "sha1"),
+                review("owner", "APPROVED", "sha1"),
+            ],
+        )]),
+        ..Default::default()
+    });
+    let github = tokens(api.clone());
+
+    auto_merge_bot_pull_requests(&github, "acme/site", Some("fkst-bot"), true).await;
+
+    assert!(
+        api.merged.lock().unwrap().is_empty(),
+        "approval after requested changes must be bound to the current head"
+    );
+}
+
+#[tokio::test]
+async fn exact_head_approval_after_requested_changes_allows_auto_merge() {
+    let api = Arc::new(FakePrApi {
+        pulls: vec![pr(1, "fkst-bot")],
+        merge_status: HashMap::from([(1, status("open", "sha2", Some(true), Some("clean")))]),
+        reviews: HashMap::from([(
+            1,
+            vec![
+                review("owner", "CHANGES_REQUESTED", "sha1"),
+                review("owner", "APPROVED", "sha2"),
+            ],
+        )]),
+        ..Default::default()
+    });
+    let github = tokens(api.clone());
+
+    auto_merge_bot_pull_requests(&github, "acme/site", Some("fkst-bot"), true).await;
+
+    assert_eq!(
+        *api.merged.lock().unwrap(),
+        vec![1],
+        "current-head approval clears the requested-changes hold"
+    );
+    assert_eq!(
+        *api.merge_head_shas.lock().unwrap(),
+        vec!["sha2".to_string()],
+        "the merge request is head-bound to the fresh status read"
     );
 }
 

@@ -138,7 +138,7 @@ remain intentionally inert hardened-profile shells.
 
 The Testing adapter source is pinned but not activated. Its immutable package
 root is
-`ChronoAIProject/fkst-packages-testing@ac953ff0bb3f1c909728e66c3968cbb3ed5e3cf1:packages/local-qa-host-adapter`,
+`ChronoAIProject/fkst-packages-testing@b0d08185aa81b58a8da57ab64777ac3d48739326:packages/local-qa-host-adapter`,
 with nested platform packages pinned to
 `ChronoAIProject/fkst-packages@d4146d7bbdbde9d6fbbee404d5a2e3e4da0fa08c`
 and the engine pinned to

@@ -142,7 +142,8 @@ pub const TRIGGER_UNAUTHORIZED_LABEL: &str = "fkst-trigger-unauthorized";
 pub const SUBSTRATE_ANNOUNCED_LABEL: &str = "fkst-substrate-active";
 
 /// The DURABLE latch label the reconciler adds to a WORK issue (one carrying a
-/// session's `work_label`) once it has posted the one-time "picked up" acknowledgment
+/// session's `work_label`) once it has observed a Starting/Live runtime for that
+/// session and posted the one-time "picked up" acknowledgment
 /// ([`work_ack::ack_open_work_issues`]). A work issue is otherwise often silent from
 /// GitHub's side — the pod's output (e.g. the codex-triage package) lands elsewhere —
 /// so the author has no signal it was claimed. Mirrors [`SUBSTRATE_ANNOUNCED_LABEL`]:

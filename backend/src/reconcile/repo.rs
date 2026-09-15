@@ -25,7 +25,9 @@ use crate::models::RepoRef;
 use crate::reconcile::announce::parse_config_hash_marker;
 use crate::reconcile::collision::{detect_missing_work_labels, detect_work_label_collisions};
 use crate::reconcile::creator::{effective_creator, CreatorResolution, SessionCreator};
-use crate::reconcile::desired::{plan_repo, plan_trigger_authorization, SessionRegistration};
+use crate::reconcile::desired::{
+    plan_repo, plan_trigger_authorization, PodLiveness, SessionRegistration,
+};
 use crate::reconcile::effective_packages::EffectivePackages;
 use crate::reconcile::execute::{execute, ReconcileCtx};
 use crate::reconcile::pending::{LabelCountPending, PendingWork};
@@ -478,11 +480,23 @@ pub async fn reconcile_repo(
     )
     .await;
 
+    // 3. Observe the live pods for this repo (through the session backend).
+    let live = ctx
+        .backend
+        .observe_repo(repo)
+        .await
+        .map_err(|e| AppError::Internal(anyhow::anyhow!("list substrate-session pods: {e}")))?;
+
+    let admitted_session_ids = live
+        .iter()
+        .filter(|pod| matches!(pod.liveness, PodLiveness::Starting | PodLiveness::Live))
+        .map(|pod| pod.session_id.clone())
+        .collect::<HashSet<_>>();
+
     // Best-effort, non-failing: give each open WORK issue (one carrying a session's
-    // work label) a visible, fkst-owned "picked up" acknowledgment — a work issue is
-    // otherwise often silent from GitHub's side, so the author has no signal it was
-    // claimed. Mirrors the announce latch (comment + durable label), reuses the token
-    // minted above, and gates on ≥1 registration; a failure here never aborts the
+    // work label) a visible, fkst-owned "picked up" acknowledgment only after the
+    // runtime has been observed as admitted. Routed/authorization feedback still
+    // comes from the registration snapshot, and a failure here never aborts the
     // reconcile.
     crate::reconcile::work_ack::ack_open_work_issues_with_bot(
         &ctx.github,
@@ -491,17 +505,11 @@ pub async fn reconcile_repo(
         repo,
         &regs,
         &effective_work_labels_by_session,
+        &admitted_session_ids,
         &ctx.config.access,
         cfg.github_bot_login.as_deref(),
     )
     .await;
-
-    // 3. Observe the live pods for this repo (through the session backend).
-    let live = ctx
-        .backend
-        .observe_repo(repo)
-        .await
-        .map_err(|e| AppError::Internal(anyhow::anyhow!("list substrate-session pods: {e}")))?;
 
     // 4. Gate each registration on the open-issue count of its work-label SET
     //    (`work_labels_by_session`, resolved above): the trigger's explicit label plus

@@ -730,6 +730,24 @@ async fn merge_pull_request_puts_merge() {
 }
 
 #[tokio::test]
+async fn merge_pull_request_if_head_puts_expected_sha() {
+    let server = MockServer::start().await;
+    Mock::given(method("PUT"))
+        .and(path("/repos/acme/site/pulls/321/merge"))
+        .and(body_partial_json(serde_json::json!({
+            "merge_method": "merge",
+            "sha": "head-sha",
+        })))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({})))
+        .mount(&server)
+        .await;
+    api(&server.uri())
+        .merge_pull_request_if_head(&tok(), "acme", "site", 321, "t", "head-sha")
+        .await
+        .expect("merged");
+}
+
+#[tokio::test]
 async fn delete_ref_tolerates_404() {
     let server = MockServer::start().await;
     Mock::given(method("DELETE"))
@@ -1061,6 +1079,72 @@ async fn pull_request_mergeable_reads_tri_state() {
             .await
             .expect("ok"),
         None
+    );
+}
+
+#[tokio::test]
+async fn pull_request_merge_status_reads_fresh_gate_fields() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/repos/acme/site/pulls/7"))
+        .and(header("authorization", "Bearer ghs_tok"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "state": "open",
+            "head": { "sha": "abc123" },
+            "mergeable": true,
+            "mergeable_state": "clean"
+        })))
+        .mount(&server)
+        .await;
+
+    let status = api(&server.uri())
+        .pull_request_merge_status(&tok(), "acme", "site", 7)
+        .await
+        .expect("ok");
+
+    assert_eq!(
+        status,
+        PullRequestMergeStatus {
+            state: "open".to_string(),
+            head_sha: "abc123".to_string(),
+            mergeable: Some(true),
+            mergeable_state: Some("clean".to_string()),
+        }
+    );
+}
+
+#[tokio::test]
+async fn list_pull_request_reviews_reads_review_veto_fields() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/repos/acme/site/pulls/7/reviews"))
+        .and(query_param("per_page", "100"))
+        .and(query_param("page", "1"))
+        .and(header("authorization", "Bearer ghs_tok"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([
+            {
+                "user": { "login": "owner" },
+                "state": "CHANGES_REQUESTED",
+                "commit_id": "abc123",
+                "submitted_at": "2026-08-31T08:33:48Z"
+            }
+        ])))
+        .mount(&server)
+        .await;
+
+    let reviews = api(&server.uri())
+        .list_pull_request_reviews(&tok(), "acme", "site", 7)
+        .await
+        .expect("ok");
+
+    assert_eq!(
+        reviews,
+        vec![PullRequestReviewSummary {
+            author_login: "owner".to_string(),
+            state: "CHANGES_REQUESTED".to_string(),
+            commit_id: Some("abc123".to_string()),
+            submitted_at: Some("2026-08-31T08:33:48Z".to_string()),
+        }]
     );
 }
 
