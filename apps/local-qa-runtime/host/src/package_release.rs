@@ -1621,11 +1621,11 @@ fn valid_utc_timestamp(value: &str) -> bool {
         && [0, 1, 2, 3, 5, 6, 8, 9, 11, 12, 14, 15, 17, 18]
             .into_iter()
             .all(|index| bytes[index].is_ascii_digit())
-        && (&bytes[5..7] >= b"01" && &bytes[5..7] <= b"12")
-        && (&bytes[8..10] >= b"01" && &bytes[8..10] <= b"31")
-        && (&bytes[11..13] <= b"23")
-        && (&bytes[14..16] <= b"59")
-        && (&bytes[17..19] <= b"59")
+        && (&bytes[5..7] >= b"01".as_slice() && &bytes[5..7] <= b"12".as_slice())
+        && (&bytes[8..10] >= b"01".as_slice() && &bytes[8..10] <= b"31".as_slice())
+        && (&bytes[11..13] <= b"23".as_slice())
+        && (&bytes[14..16] <= b"59".as_slice())
+        && (&bytes[17..19] <= b"59".as_slice())
 }
 
 #[derive(Debug, Deserialize)]
