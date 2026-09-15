@@ -7,7 +7,7 @@ cd "$root"
 testing_packages_pin=apps/local-qa-runtime/.fkst/conformance/fkst-packages-testing.pin
 expected_testing_packages_pin=$(mktemp)
 trap 'rm -f "$expected_testing_packages_pin"' EXIT
-printf 'ac953ff0bb3f1c909728e66c3968cbb3ed5e3cf1\n' > "$expected_testing_packages_pin"
+printf 'b0d08185aa81b58a8da57ab64777ac3d48739326\n' > "$expected_testing_packages_pin"
 [[ -f "$testing_packages_pin" ]] && cmp -s "$expected_testing_packages_pin" "$testing_packages_pin" || {
   echo 'Local QA Testing Packages pin must contain the exact immutable source revision' >&2
   exit 1
@@ -15,7 +15,7 @@ printf 'ac953ff0bb3f1c909728e66c3968cbb3ed5e3cf1\n' > "$expected_testing_package
 
 local_qa_readme=apps/local-qa-runtime/README.md
 for required_reference in \
-  'ChronoAIProject/fkst-packages-testing@ac953ff0bb3f1c909728e66c3968cbb3ed5e3cf1:packages/local-qa-host-adapter' \
+  'ChronoAIProject/fkst-packages-testing@b0d08185aa81b58a8da57ab64777ac3d48739326:packages/local-qa-host-adapter' \
   'ChronoAIProject/fkst-packages@d4146d7bbdbde9d6fbbee404d5a2e3e4da0fa08c' \
   'ChronoAIProject/fkst-substrate@e3355b42709f4138613b8238cba34a5ab1161053' \
   'testing-observation.v1' \
@@ -48,6 +48,7 @@ expected=$(printf '%s\n' \
   apps/local-qa-runtime/host/src/local_bundle_process.rs \
   apps/local-qa-runtime/host/src/main.rs \
   apps/local-qa-runtime/host/src/ownership.rs \
+  apps/local-qa-runtime/host/src/package_release.rs \
   apps/local-qa-runtime/host/src/source_cache_tests.rs \
   apps/local-qa-runtime/host/src/source_workspace.rs \
   apps/local-qa-runtime/host/src/source_workspace_fs.rs \
@@ -60,6 +61,7 @@ expected=$(printf '%s\n' \
   apps/local-qa-runtime/host/tests/fail_closed.rs \
   apps/local-qa-runtime/host/tests/local_bundle_provider.rs \
   apps/local-qa-runtime/host/tests/loopback_sqlite.rs \
+  apps/local-qa-runtime/host/tests/package_release.rs \
   apps/local-qa-runtime/host/tests/source_workspace_lifecycle.rs \
   apps/local-qa-runtime/launcher/src/main.rs \
   apps/local-qa-runtime/secret-broker/src/main.rs \

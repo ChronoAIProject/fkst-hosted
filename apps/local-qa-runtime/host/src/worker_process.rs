@@ -439,10 +439,21 @@ fn run_session(
         None;
     let mut pending_abort: Option<PendingAbort> = None;
     let mut pending_eof: Option<(Instant, SyncSender<Result<(), SessionError>>)> = None;
+    let mut terminal_error: Option<SessionError> = None;
     let mut stdin = Some(stdin);
     let mut eof = false;
 
     loop {
+        if let Some(error) = terminal_error {
+            drain_stdout_events(&stdout);
+            match commands.recv_timeout(IO_POLL_INTERVAL) {
+                Ok(command) => reject_command(command, error),
+                Err(mpsc::RecvTimeoutError::Disconnected) => break,
+                Err(mpsc::RecvTimeoutError::Timeout) => {}
+            }
+            continue;
+        }
+
         if let Some((deadline, response)) = pending_read.as_ref() {
             if let Some(frame) = execution_frames.pop_front() {
                 let response = response.clone();
@@ -578,7 +589,8 @@ fn run_session(
                                 &mut pending_abort,
                                 &mut pending_eof,
                             );
-                            return;
+                            terminal_error = Some(error);
+                            break;
                         }
                     };
                     let execution_count = frames
@@ -594,7 +606,9 @@ fn run_session(
                             &mut pending_abort,
                             &mut pending_eof,
                         );
-                        return;
+                        terminal_error =
+                            Some(SessionError("unexpected Browser Worker frame sequence"));
+                        break;
                     }
                     for raw in frames {
                         if let Err(error) =
@@ -606,8 +620,12 @@ fn run_session(
                                 &mut pending_abort,
                                 &mut pending_eof,
                             );
-                            return;
+                            terminal_error = Some(error);
+                            break;
                         }
+                    }
+                    if terminal_error.is_some() {
+                        break;
                     }
                 }
                 Ok(ReaderEvent::Eof) => {
@@ -621,7 +639,8 @@ fn run_session(
                         &mut pending_abort,
                         &mut pending_eof,
                     );
-                    return;
+                    terminal_error = Some(SessionError("Browser Worker stdout failed"));
+                    break;
                 }
                 Ok(ReaderEvent::Overflow) => {
                     fail_session(
@@ -630,7 +649,8 @@ fn run_session(
                         &mut pending_abort,
                         &mut pending_eof,
                     );
-                    return;
+                    terminal_error = Some(SessionError("Browser Worker stdout exceeded limit"));
+                    break;
                 }
                 Err(mpsc::TryRecvError::Empty) => break,
                 Err(mpsc::TryRecvError::Disconnected) => {
@@ -640,6 +660,30 @@ fn run_session(
             }
         }
     }
+}
+
+fn reject_command(command: SessionCommand, error: SessionError) {
+    match command {
+        SessionCommand::Write { response, .. } => {
+            let _ = response.send(Err(error));
+        }
+        SessionCommand::Read { response, .. } => {
+            let _ = response.send(Err(error));
+        }
+        SessionCommand::Abort { response, .. } => {
+            let _ = response.send(Err(error));
+        }
+        SessionCommand::CloseStdin { response } => {
+            let _ = response.send(Err(error));
+        }
+        SessionCommand::CleanEof { response, .. } => {
+            let _ = response.send(Err(error));
+        }
+    }
+}
+
+fn drain_stdout_events(stdout: &Receiver<ReaderEvent>) {
+    while stdout.try_recv().is_ok() {}
 }
 
 fn frame_protocol(raw: &[u8]) -> Option<String> {
@@ -1013,10 +1057,13 @@ mod tests {
                 .expect_err("trailing Worker frame is rejected");
             assert!(error.to_string().contains("trailing Browser Worker frame"));
         } else {
-            assert!(first
+            let error = first
                 .expect_err("first result is either valid or a coalesced sequence")
-                .to_string()
-                .contains("unexpected Browser Worker frame sequence"));
+                .to_string();
+            assert!(
+                error.contains("unexpected Browser Worker frame sequence"),
+                "unexpected first-read error: {error}"
+            );
         }
         process.terminate();
         assert!(!process_group_is_alive(process_group).expect("group inspection succeeds"));

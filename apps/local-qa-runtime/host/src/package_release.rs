@@ -778,7 +778,7 @@ fn fetch_bounded(
 ) -> Result<Vec<u8>, PackageReleaseError> {
     if !safe_path(path) {
         return Err(PackageReleaseError::VerificationFailed(
-            "artifact path is unsafe",
+            "artifact path is not confined",
         ));
     }
     let bytes = fetcher.fetch(reference, path, max_bytes)?;
