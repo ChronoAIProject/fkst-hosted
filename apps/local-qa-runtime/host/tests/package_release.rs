@@ -6,14 +6,15 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use base64::engine::general_purpose::STANDARD;
 use base64::Engine as _;
+use ed25519_dalek::{Signer, SigningKey};
 use fkst_local_qa_host::package_release::{
     admit_package_release, ImmutablePackageReleaseRef, PackageReleaseAdmission,
     PackageReleaseAdmissionRequest, PackageReleaseError, PackageReleaseFetcher,
     PackageReleasePolicy, TESTING_PACKAGES_REPOSITORY,
 };
 use fkst_local_qa_host::Journal;
-use ring::signature::{Ed25519KeyPair, KeyPair};
 use serde_json::{json, Value};
+use sha2::{Digest, Sha256};
 
 static TEMP_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
@@ -508,7 +509,7 @@ fn admission_request(idempotency_key: &str, fixture: &Fixture) -> PackageRelease
 
 fn signed_fixture() -> Fixture {
     let seed = [7_u8; 32];
-    let key_pair = Ed25519KeyPair::from_seed_unchecked(&seed).expect("test key must load");
+    let signing_key = SigningKey::from_bytes(&seed);
     let keyid = "fkst-packages-testing-release-v1-2026-09-04";
     let package_content_sha256 = package_content_sha256();
     let reducer_without_digest = json!({
@@ -561,13 +562,13 @@ fn signed_fixture() -> Fixture {
         }),
         false,
     );
-    let signature = key_pair.sign(&dsse_pae(&payload));
+    let signature = signing_key.sign(&dsse_pae(&payload));
     let envelope = json!({
         "payload": STANDARD.encode(&payload),
         "payloadType": "application/vnd.in-toto+json",
         "signatures": [{
             "keyid": keyid,
-            "sig": STANDARD.encode(signature.as_ref())
+            "sig": STANDARD.encode(signature.to_bytes())
         }]
     });
     let envelope_bytes = canonical(&envelope, true);
@@ -579,7 +580,7 @@ fn signed_fixture() -> Fixture {
             "subject": RELEASE_PATH
         },
         "keyid": keyid,
-        "publicKey": STANDARD.encode(key_pair.public_key().as_ref()),
+        "publicKey": STANDARD.encode(signing_key.verifying_key().as_bytes()),
         "schema": "testing-package-release-key-authorization.v1"
     });
     let authorization_bytes = canonical(&authorization, true);
@@ -679,7 +680,7 @@ fn fkst_packages_testing_680_fixture() -> Fixture {
 
 fn signed_authority_fixture(sequence: u64, commit_sha: &str) -> Fixture {
     let seed = [7_u8; 32];
-    let key_pair = Ed25519KeyPair::from_seed_unchecked(&seed).expect("test key must load");
+    let signing_key = SigningKey::from_bytes(&seed);
     let keyid = "fkst-packages-testing-release-v1-2026-09-04";
     let mut fixture = signed_fixture();
     fixture.release_commit_sha = commit_sha.to_owned();
@@ -727,13 +728,13 @@ fn signed_authority_fixture(sequence: u64, commit_sha: &str) -> Fixture {
         }),
         false,
     );
-    let signature = key_pair.sign(&dsse_pae(&payload));
+    let signature = signing_key.sign(&dsse_pae(&payload));
     let envelope = json!({
         "payload": STANDARD.encode(&payload),
         "payloadType": "application/vnd.in-toto+json",
         "signatures": [{
             "keyid": keyid,
-            "sig": STANDARD.encode(signature.as_ref())
+            "sig": STANDARD.encode(signature.to_bytes())
         }]
     });
 
@@ -1059,9 +1060,9 @@ fn dsse_pae(payload: &[u8]) -> Vec<u8> {
 }
 
 fn sha256_hex(bytes: &[u8]) -> String {
-    let digest = ring::digest::digest(&ring::digest::SHA256, bytes);
+    let digest = Sha256::digest(bytes);
     digest
-        .as_ref()
+        .as_slice()
         .iter()
         .map(|byte| format!("{byte:02x}"))
         .collect()

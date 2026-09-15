@@ -7,10 +7,10 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use base64::engine::general_purpose::STANDARD;
 use base64::Engine as _;
-use ring::digest::{Context, SHA256};
-use ring::signature;
+use ed25519_dalek::{Signature, Verifier, VerifyingKey};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use sha2::{Digest, Sha256};
 
 use crate::journal::Journal;
 
@@ -837,6 +837,9 @@ fn verify_release_authority_and_signature(
 
     let public_key =
         decode_base64_exact(&authorization.public_key, 32, "authorization public key")?;
+    let public_key = public_key.try_into().map_err(|_| {
+        PackageReleaseError::VerificationFailed("authorization public key is unsupported")
+    })?;
     verify_dsse_envelope(dsse_bytes, &authorization, &public_key, release_bytes)?;
     Ok((release, authorization, release_sequence))
 }
@@ -1034,7 +1037,7 @@ fn verify_authorization_record(
 fn verify_dsse_envelope(
     dsse_bytes: &[u8],
     authorization: &AuthorizationRecord,
-    public_key: &[u8],
+    public_key: &[u8; 32],
     release_bytes: &[u8],
 ) -> Result<(), PackageReleaseError> {
     let envelope_value = parse_canonical_value(dsse_bytes, true)?;
@@ -1053,7 +1056,11 @@ fn verify_dsse_envelope(
     }
     let payload = decode_base64(&envelope.payload, "DSSE payload")?;
     let signature = decode_base64_exact(&signed.sig, 64, "DSSE signature")?;
-    let public_key = signature::UnparsedPublicKey::new(&signature::ED25519, public_key);
+    let public_key = VerifyingKey::from_bytes(public_key).map_err(|_| {
+        PackageReleaseError::VerificationFailed("authorization public key is unsupported")
+    })?;
+    let signature = Signature::try_from(signature.as_slice())
+        .map_err(|_| PackageReleaseError::VerificationFailed("DSSE signature is unsupported"))?;
     public_key
         .verify(&dsse_pae(&payload), &signature)
         .map_err(|_| PackageReleaseError::VerificationFailed("Ed25519 DSSE verification failed"))?;
@@ -1156,7 +1163,7 @@ fn verify_bundle(
 
     let mut previous: Option<Vec<u8>> = None;
     let mut paths = Vec::with_capacity(bundle.files.len());
-    let mut context = Context::new(&SHA256);
+    let mut context = Sha256::new();
     for file in bundle.files {
         if !safe_path(&file.path) || !is_hex_len(&file.sha256, 64) {
             return Err(PackageReleaseError::VerificationFailed(
@@ -1180,9 +1187,9 @@ fn verify_bundle(
             ));
         }
         context.update(file.path.as_bytes());
-        context.update(&[0, 0x66]);
+        context.update([0, 0x66]);
         context.update(&content);
-        context.update(&[0]);
+        context.update([0]);
         paths.push(file.path);
     }
     if paths != BUNDLE_PATHS {
@@ -1190,7 +1197,7 @@ fn verify_bundle(
             "bundle files do not match the runtime allowlist",
         ));
     }
-    if hex_digest(context.finish().as_ref()) != release.package.package_content_sha256 {
+    if hex_digest(context.finalize().as_ref()) != release.package.package_content_sha256 {
         return Err(PackageReleaseError::VerificationFailed(
             "bundle package content digest mismatch",
         ));
@@ -1557,7 +1564,7 @@ fn dsse_pae(payload: &[u8]) -> Vec<u8> {
 }
 
 fn sha256_hex(bytes: &[u8]) -> String {
-    let digest = ring::digest::digest(&SHA256, bytes);
+    let digest = Sha256::digest(bytes);
     hex_digest(digest.as_ref())
 }
 
