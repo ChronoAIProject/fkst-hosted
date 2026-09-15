@@ -93,9 +93,30 @@ async fn converges_after_controller_runtime_and_combined_loss_for_both_backends(
             complete_credential_keys(),
             "only the complete, key-name-only inventory is recorded"
         );
+        let cold_spawn_effects = harness.ledger.effects();
+        assert_eq!(
+            cold_spawn_effects.comments, 1,
+            "cold spawn announces the session but must not claim work before runtime admission"
+        );
+        assert_eq!(cold_spawn_effects.label_adds, 1);
+        assert!(!harness
+            .ledger
+            .labels(WORK)
+            .contains(&WORK_PICKED_UP_LABEL.to_string()));
+
+        // A second full resync can observe the runtime created by the first pass,
+        // so it is now safe to emit the durable picked-up work latch.
+        harness.full_resync().await;
         let cold_effects = harness.ledger.effects();
-        assert_eq!(cold_effects.comments, 2, "announcement plus work pickup");
+        assert_eq!(
+            cold_effects.comments, 2,
+            "announcement plus admitted work pickup"
+        );
         assert_eq!(cold_effects.label_adds, 2);
+        assert!(harness
+            .ledger
+            .labels(WORK)
+            .contains(&WORK_PICKED_UP_LABEL.to_string()));
 
         // A fresh controller reconstructs every process-local cache. Kubernetes's
         // durable projection needs no ensure; OpenSandbox adopts the complete bundle.
@@ -369,11 +390,22 @@ async fn colliding_registrations_create_only_the_canonical_runtime() {
             .ledger
             .labels(TRIGGER + 1)
             .contains(&SUBSTRATE_INVALID_LABEL.to_string()));
-        let effects = harness.ledger.effects();
+        assert!(!harness
+            .ledger
+            .labels(WORK)
+            .contains(&WORK_PICKED_UP_LABEL.to_string()));
 
         harness.restart_controller();
         harness.full_resync().await;
         assert_eq!(harness.runtime_ids(), vec![session_id(TRIGGER)]);
+        assert!(harness
+            .ledger
+            .labels(WORK)
+            .contains(&WORK_PICKED_UP_LABEL.to_string()));
+        let effects = harness.ledger.effects();
+
+        harness.restart_controller();
+        harness.full_resync().await;
         assert_eq!(harness.ledger.effects(), effects);
     }
 }

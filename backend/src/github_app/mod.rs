@@ -51,8 +51,8 @@ pub use config::GithubAppConfig;
 
 /// Re-export API types for downstream consumers.
 pub use api::{
-    InstallationId, InstallationToken, PullFileMeta, PullRequestSummary, RepoDirEntry,
-    RepoEntryKind, TokenPermissions,
+    InstallationId, InstallationToken, PullFileMeta, PullRequestMergeStatus,
+    PullRequestReviewSummary, PullRequestSummary, RepoDirEntry, RepoEntryKind, TokenPermissions,
 };
 
 /// Re-export the Contents READ helper types (#179): the `get_contents` result
@@ -738,6 +738,42 @@ impl GithubAppTokens {
             .await
     }
 
+    /// Read one PR's fresh auto-merge gate facts as the App.
+    pub async fn pull_request_merge_status(
+        &self,
+        owner_repo: &str,
+        number: u64,
+    ) -> Result<api::PullRequestMergeStatus, GithubAppError> {
+        let (owner, repo) = owner_repo
+            .split_once('/')
+            .ok_or(GithubAppError::InvalidRepoRef)?;
+        let token = self
+            .token_for_repo(owner_repo, Some(auto_merge_permissions()))
+            .await?;
+        self.inner
+            .api
+            .pull_request_merge_status(&token, owner, repo, number)
+            .await
+    }
+
+    /// List one PR's submitted reviews as the App for the auto-merge review veto.
+    pub async fn list_pull_request_reviews(
+        &self,
+        owner_repo: &str,
+        number: u64,
+    ) -> Result<Vec<api::PullRequestReviewSummary>, GithubAppError> {
+        let (owner, repo) = owner_repo
+            .split_once('/')
+            .ok_or(GithubAppError::InvalidRepoRef)?;
+        let token = self
+            .token_for_repo(owner_repo, Some(auto_merge_permissions()))
+            .await?;
+        self.inner
+            .api
+            .list_pull_request_reviews(&token, owner, repo, number)
+            .await
+    }
+
     /// Merge `owner/repo`'s PR `number` as the App (default merge commit).
     pub async fn merge_pull_request(
         &self,
@@ -754,6 +790,34 @@ impl GithubAppTokens {
         self.inner
             .api
             .merge_pull_request(&token, owner, repo, number, commit_title)
+            .await
+    }
+
+    /// Merge `owner/repo`'s PR `number` as the App only if the PR head still
+    /// equals `expected_head_sha`.
+    pub async fn merge_pull_request_if_head(
+        &self,
+        owner_repo: &str,
+        number: u64,
+        commit_title: &str,
+        expected_head_sha: &str,
+    ) -> Result<(), GithubAppError> {
+        let (owner, repo) = owner_repo
+            .split_once('/')
+            .ok_or(GithubAppError::InvalidRepoRef)?;
+        let token = self
+            .token_for_repo(owner_repo, Some(auto_merge_permissions()))
+            .await?;
+        self.inner
+            .api
+            .merge_pull_request_if_head(
+                &token,
+                owner,
+                repo,
+                number,
+                commit_title,
+                expected_head_sha,
+            )
             .await
     }
 

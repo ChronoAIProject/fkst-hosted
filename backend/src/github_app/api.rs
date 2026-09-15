@@ -26,6 +26,11 @@ const REQUEST_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(20);
 /// unbounded mega-PR, so a fixed cap bounds the fan-out.
 const MAX_PULL_FILE_PAGES: u32 = 3;
 
+/// Hard page cap for [`GithubApi::list_pull_request_reviews`]. Auto-merge is a
+/// fail-closed path: if a PR has more submitted reviews than this bounded scan
+/// can inspect, the transport returns an error and reconcile retries later.
+const MAX_PULL_REVIEW_PAGES: u32 = 3;
+
 /// Opaque installation ID resolved from the GitHub API.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub struct InstallationId(pub u64);
@@ -112,6 +117,31 @@ pub struct PullRequestSummary {
     /// The PR title (GitHub `title`). A fallback source for the work-issue number
     /// (`… for #<N>` / `… for issue #<N>`) when the branch name does not carry it.
     pub title: String,
+}
+
+/// Fresh pull-request merge facts read immediately before an auto-merge attempt.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PullRequestMergeStatus {
+    /// GitHub REST `state` (`open`, `closed`, ...). Auto-merge requires `open`.
+    pub state: String,
+    /// Current PR head SHA. Auto-merge passes this back to the merge endpoint so
+    /// a head push between the gate read and merge call cannot be merged.
+    pub head_sha: String,
+    /// GitHub's content-conflict tri-state. `None` means GitHub has not computed
+    /// it yet, so callers retry on a later reconcile.
+    pub mergeable: Option<bool>,
+    /// GitHub REST `mergeable_state` / GraphQL-style merge state equivalent.
+    /// The auto-merge gate treats missing or non-clean state as fail-closed.
+    pub mergeable_state: Option<String>,
+}
+
+/// One submitted pull-request review, trimmed to the auto-merge veto gate.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PullRequestReviewSummary {
+    pub author_login: String,
+    pub state: String,
+    pub commit_id: Option<String>,
+    pub submitted_at: Option<String>,
 }
 
 /// One changed file of a pull request (`GET /repos/{o}/{r}/pulls/{n}/files`),
@@ -424,6 +454,21 @@ pub trait GithubApi: Send + Sync {
         unimplemented!("merge_pull_request is only implemented by the HTTP transport")
     }
 
+    /// `PUT {base}/repos/{owner}/{repo}/pulls/{number}/merge` merging a PR only
+    /// if its current head still equals `expected_head_sha`. Default panics.
+    async fn merge_pull_request_if_head(
+        &self,
+        token: &SecretString,
+        owner: &str,
+        repo: &str,
+        number: u64,
+        commit_title: &str,
+        expected_head_sha: &str,
+    ) -> Result<(), GithubAppError> {
+        let _ = (token, owner, repo, number, commit_title, expected_head_sha);
+        unimplemented!("merge_pull_request_if_head is only implemented by the HTTP transport")
+    }
+
     /// `GET {base}/repos/{owner}/{repo}/pulls?state=open&per_page=100` → the open
     /// PRs (number + author login + head sha). Single page (v1). Default panics.
     async fn list_open_pulls(
@@ -466,6 +511,32 @@ pub trait GithubApi: Send + Sync {
     ) -> Result<Option<bool>, GithubAppError> {
         let _ = (token, owner, repo, number);
         unimplemented!("pull_request_mergeable is only implemented by the HTTP transport")
+    }
+
+    /// `GET {base}/repos/{owner}/{repo}/pulls/{number}` → fresh merge gate facts.
+    /// Default panics.
+    async fn pull_request_merge_status(
+        &self,
+        token: &SecretString,
+        owner: &str,
+        repo: &str,
+        number: u64,
+    ) -> Result<PullRequestMergeStatus, GithubAppError> {
+        let _ = (token, owner, repo, number);
+        unimplemented!("pull_request_merge_status is only implemented by the HTTP transport")
+    }
+
+    /// `GET {base}/repos/{owner}/{repo}/pulls/{number}/reviews` → submitted PR
+    /// reviews used by the auto-merge requested-changes veto. Default panics.
+    async fn list_pull_request_reviews(
+        &self,
+        token: &SecretString,
+        owner: &str,
+        repo: &str,
+        number: u64,
+    ) -> Result<Vec<PullRequestReviewSummary>, GithubAppError> {
+        let _ = (token, owner, repo, number);
+        unimplemented!("list_pull_request_reviews is only implemented by the HTTP transport")
     }
 
     /// `GET {base}/repos/{owner}/{repo}/pulls/{number}/files?per_page=100` — the
@@ -554,6 +625,57 @@ impl HttpGithubApi {
             api_base: api_base.trim_end_matches('/').to_string(),
             client,
         })
+    }
+
+    async fn merge_pull_request_with_optional_head(
+        &self,
+        token: &SecretString,
+        owner: &str,
+        repo: &str,
+        number: u64,
+        commit_title: &str,
+        expected_head_sha: Option<&str>,
+    ) -> Result<(), GithubAppError> {
+        let url = format!(
+            "{}/repos/{owner}/{repo}/pulls/{number}/merge",
+            self.api_base
+        );
+        let mut body = serde_json::Map::new();
+        body.insert(
+            "merge_method".to_string(),
+            serde_json::Value::String("merge".to_string()),
+        );
+        body.insert(
+            "commit_title".to_string(),
+            serde_json::Value::String(commit_title.to_string()),
+        );
+        if let Some(sha) = expected_head_sha {
+            body.insert(
+                "sha".to_string(),
+                serde_json::Value::String(sha.to_string()),
+            );
+        }
+        let response = self
+            .client
+            .put(&url)
+            .header("accept", "application/vnd.github+json")
+            .header("user-agent", "fkst-hosted")
+            .bearer_auth(token.expose_secret())
+            .json(&serde_json::Value::Object(body))
+            .send()
+            .await
+            .map_err(|e| GithubAppError::Http(format!("merge_pull_request: {e}")))?;
+        let status = response.status();
+        if let Some(err) = classify_auth_status(status, response.headers()) {
+            return Err(err);
+        }
+        if !status.is_success() {
+            let body = response.text().await.unwrap_or_default();
+            return Err(GithubAppError::Http(format!(
+                "merge_pull_request status {status}: {body}"
+            )));
+        }
+        Ok(())
     }
 }
 
@@ -1430,34 +1552,28 @@ impl GithubApi for HttpGithubApi {
         number: u64,
         commit_title: &str,
     ) -> Result<(), GithubAppError> {
-        let url = format!(
-            "{}/repos/{owner}/{repo}/pulls/{number}/merge",
-            self.api_base
-        );
-        let response = self
-            .client
-            .put(&url)
-            .header("accept", "application/vnd.github+json")
-            .header("user-agent", "fkst-hosted")
-            .bearer_auth(token.expose_secret())
-            .json(&serde_json::json!({
-                "merge_method": "merge",
-                "commit_title": commit_title,
-            }))
-            .send()
+        self.merge_pull_request_with_optional_head(token, owner, repo, number, commit_title, None)
             .await
-            .map_err(|e| GithubAppError::Http(format!("merge_pull_request: {e}")))?;
-        let status = response.status();
-        if let Some(err) = classify_auth_status(status, response.headers()) {
-            return Err(err);
-        }
-        if !status.is_success() {
-            let body = response.text().await.unwrap_or_default();
-            return Err(GithubAppError::Http(format!(
-                "merge_pull_request status {status}: {body}"
-            )));
-        }
-        Ok(())
+    }
+
+    async fn merge_pull_request_if_head(
+        &self,
+        token: &SecretString,
+        owner: &str,
+        repo: &str,
+        number: u64,
+        commit_title: &str,
+        expected_head_sha: &str,
+    ) -> Result<(), GithubAppError> {
+        self.merge_pull_request_with_optional_head(
+            token,
+            owner,
+            repo,
+            number,
+            commit_title,
+            Some(expected_head_sha),
+        )
+        .await
     }
 
     async fn list_open_pulls(
@@ -1575,6 +1691,110 @@ impl GithubApi for HttpGithubApi {
         // `mergeable` is `null` until GitHub computes it — `as_bool()` maps that
         // (and an absent field) to `None`, the "retry next reconcile" signal.
         Ok(body["mergeable"].as_bool())
+    }
+
+    async fn pull_request_merge_status(
+        &self,
+        token: &SecretString,
+        owner: &str,
+        repo: &str,
+        number: u64,
+    ) -> Result<PullRequestMergeStatus, GithubAppError> {
+        let url = format!("{}/repos/{owner}/{repo}/pulls/{number}", self.api_base);
+        let response = self
+            .client
+            .get(&url)
+            .header("accept", "application/vnd.github+json")
+            .header("user-agent", "fkst-hosted")
+            .bearer_auth(token.expose_secret())
+            .send()
+            .await
+            .map_err(|e| GithubAppError::Http(format!("pull_request_merge_status: {e}")))?;
+        let status = response.status();
+        if let Some(err) = classify_auth_status(status, response.headers()) {
+            return Err(err);
+        }
+        if !status.is_success() {
+            let body = response.text().await.unwrap_or_default();
+            return Err(GithubAppError::Http(format!(
+                "pull_request_merge_status status {status}: {body}"
+            )));
+        }
+        let body: serde_json::Value = response
+            .json()
+            .await
+            .map_err(|e| GithubAppError::Http(format!("pull_request_merge_status body: {e}")))?;
+        let state = body["state"].as_str().unwrap_or_default().to_string();
+        let head_sha = body["head"]["sha"]
+            .as_str()
+            .ok_or_else(|| {
+                GithubAppError::Http("pull_request_merge_status: missing head.sha".to_string())
+            })?
+            .to_string();
+        Ok(PullRequestMergeStatus {
+            state,
+            head_sha,
+            mergeable: body["mergeable"].as_bool(),
+            mergeable_state: body["mergeable_state"].as_str().map(str::to_string),
+        })
+    }
+
+    async fn list_pull_request_reviews(
+        &self,
+        token: &SecretString,
+        owner: &str,
+        repo: &str,
+        number: u64,
+    ) -> Result<Vec<PullRequestReviewSummary>, GithubAppError> {
+        let mut out = Vec::new();
+        for page in 1..=MAX_PULL_REVIEW_PAGES {
+            let url = format!(
+                "{}/repos/{owner}/{repo}/pulls/{number}/reviews",
+                self.api_base
+            );
+            let response = self
+                .client
+                .get(&url)
+                .header("accept", "application/vnd.github+json")
+                .header("user-agent", "fkst-hosted")
+                .bearer_auth(token.expose_secret())
+                .query(&[("per_page", "100".to_string()), ("page", page.to_string())])
+                .send()
+                .await
+                .map_err(|e| GithubAppError::Http(format!("list_pull_request_reviews: {e}")))?;
+            let status = response.status();
+            if let Some(err) = classify_auth_status(status, response.headers()) {
+                return Err(err);
+            }
+            if !status.is_success() {
+                let body = response.text().await.unwrap_or_default();
+                return Err(GithubAppError::Http(format!(
+                    "list_pull_request_reviews status {status}: {body}"
+                )));
+            }
+            let body: serde_json::Value = response.json().await.map_err(|e| {
+                GithubAppError::Http(format!("list_pull_request_reviews body: {e}"))
+            })?;
+            let arr = body.as_array().cloned().unwrap_or_default();
+            out.extend(arr.iter().map(|review| {
+                PullRequestReviewSummary {
+                    author_login: review["user"]["login"]
+                        .as_str()
+                        .unwrap_or_default()
+                        .to_string(),
+                    state: review["state"].as_str().unwrap_or_default().to_string(),
+                    commit_id: review["commit_id"].as_str().map(str::to_string),
+                    submitted_at: review["submitted_at"].as_str().map(str::to_string),
+                }
+            }));
+            if arr.len() < 100 {
+                return Ok(out);
+            }
+        }
+        Err(GithubAppError::Http(format!(
+            "list_pull_request_reviews exceeded {} reviews",
+            MAX_PULL_REVIEW_PAGES * 100
+        )))
     }
 
     async fn list_pull_files(

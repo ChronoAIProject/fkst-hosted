@@ -21,7 +21,7 @@ use super::{WORK_PICKED_UP_LABEL, WORK_UNAUTHORIZED_LABEL, WORK_UNROUTED_LABEL};
 pub fn work_ack_comment(session_name: &str, work_label: &str) -> String {
     format!(
         "👀 **Picked up by fkst session `{session_name}`.**\n\n\
-         A fkst pod is working this repo's `{work_label}` issues, including this one. \
+         A fkst runtime has admitted this repo's `{work_label}` issues, including this one. \
          The session posts its progress on this issue as it works, and the outcome \
          will be a pull request (or, for issue-producing sessions, linked issues)."
     )
@@ -53,6 +53,9 @@ pub fn work_unrouted_comment() -> &'static str {
 /// Process all open work issues for the active registrations in one repository.
 /// Every read/write is best-effort; a failed label listing skips only that label,
 /// and every durable feedback path is retried on a later reconcile as appropriate.
+/// Routed/authorization feedback is emitted from the registration snapshot, while
+/// the picked-up latch is limited to `admitted_session_ids` observed from runtime.
+#[allow(clippy::too_many_arguments)]
 pub async fn ack_open_work_issues(
     github: &GithubAppTokens,
     listing: &dyn GithubListing,
@@ -60,6 +63,7 @@ pub async fn ack_open_work_issues(
     repo: &RepoRef,
     regs: &[SessionRegistration],
     work_labels_by_session: &HashMap<String, Vec<String>>,
+    admitted_session_ids: &HashSet<String>,
     global_admins: &AccessPolicy,
 ) {
     ack_open_work_issues_with_bot(
@@ -69,6 +73,7 @@ pub async fn ack_open_work_issues(
         repo,
         regs,
         work_labels_by_session,
+        admitted_session_ids,
         global_admins,
         None,
     )
@@ -86,6 +91,7 @@ pub async fn ack_open_work_issues_with_bot(
     repo: &RepoRef,
     regs: &[SessionRegistration],
     work_labels_by_session: &HashMap<String, Vec<String>>,
+    admitted_session_ids: &HashSet<String>,
     global_admins: &AccessPolicy,
     github_bot_login: Option<&str>,
 ) {
@@ -171,6 +177,9 @@ pub async fn ack_open_work_issues_with_bot(
 
             if carries_unauthorized {
                 clear_unauthorized(github, repo, issue.number).await;
+            }
+            if !admitted_session_ids.contains(&reg.session_id) {
+                continue;
             }
             if carries_label(issue, WORK_PICKED_UP_LABEL) {
                 continue;

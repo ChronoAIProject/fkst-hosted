@@ -33,6 +33,7 @@ async fn routed_authorized_issue_is_acked_once() {
         &repo(),
         &[registration("demo", "fkst-run")],
         &one_label_map(&["fkst-run"]),
+        &admitted_sessions(&["sess-1"]),
         &access(""),
     )
     .await;
@@ -48,6 +49,26 @@ async fn routed_authorized_issue_is_acked_once() {
 }
 
 #[tokio::test]
+async fn routed_authorized_issue_waits_for_runtime_admission_before_pickup() {
+    let api = Arc::new(RecordingApi::default());
+    let listing = FakeListing::ok(vec![issue(5, &["fkst-run"])]);
+    ack_open_work_issues(
+        &tokens(api.clone()),
+        &listing,
+        &token(),
+        &repo(),
+        &[registration("demo", "fkst-run")],
+        &one_label_map(&["fkst-run"]),
+        &admitted_sessions(&[]),
+        &access(""),
+    )
+    .await;
+
+    assert!(api.comments.lock().unwrap().is_empty());
+    assert!(api.labels_added.lock().unwrap().is_empty());
+}
+
+#[tokio::test]
 async fn already_acked_issue_is_not_reprocessed() {
     let api = Arc::new(RecordingApi::default());
     let listing = FakeListing::ok(vec![issue(5, &["fkst-run", WORK_PICKED_UP_LABEL])]);
@@ -58,6 +79,7 @@ async fn already_acked_issue_is_not_reprocessed() {
         &repo(),
         &[registration("demo", "fkst-run")],
         &one_label_map(&["fkst-run"]),
+        &admitted_sessions(&["sess-1"]),
         &access(""),
     )
     .await;
@@ -76,6 +98,7 @@ async fn no_registrations_means_no_listing_or_writes() {
         &repo(),
         &[],
         &Default::default(),
+        &admitted_sessions(&[]),
         &access(""),
     )
     .await;
@@ -94,6 +117,7 @@ async fn listing_failure_is_best_effort() {
         &repo(),
         &[registration("demo", "fkst-run")],
         &one_label_map(&["fkst-run"]),
+        &admitted_sessions(&["sess-1"]),
         &access(""),
     )
     .await;
@@ -112,6 +136,7 @@ async fn ack_comment_failure_still_latches_picked_up() {
         &repo(),
         &[registration("demo", "fkst-run")],
         &one_label_map(&["fkst-run"]),
+        &admitted_sessions(&["sess-1"]),
         &access(""),
     )
     .await;
@@ -135,6 +160,7 @@ async fn label_less_trigger_acks_over_its_full_discovered_label_set() {
         &repo(),
         &[reg],
         &one_label_map(&["pkg-work"]),
+        &admitted_sessions(&["sess-1"]),
         &access(""),
     )
     .await;
@@ -159,6 +185,7 @@ async fn each_unrouted_shape_latches_and_comments_once_without_pickup() {
             &repo(),
             &[registration("demo", "fkst-run")],
             &one_label_map(&["fkst-run"]),
+            &admitted_sessions(&["sess-1"]),
             &access(""),
         )
         .await;
@@ -192,6 +219,7 @@ async fn unrouted_latch_dedupes_and_clears_on_correct_assignment() {
         &repo(),
         &[registration("demo", "fkst-run")],
         &one_label_map(&["fkst-run"]),
+        &admitted_sessions(&["sess-1"]),
         &access(""),
     )
     .await;
@@ -213,6 +241,7 @@ async fn unrouted_latch_dedupes_and_clears_on_correct_assignment() {
         &repo(),
         &[registration("demo", "fkst-run")],
         &one_label_map(&["fkst-run"]),
+        &admitted_sessions(&["sess-1"]),
         &access(""),
     )
     .await;
@@ -240,6 +269,7 @@ async fn matching_session_appearing_later_clears_a_parked_issue() {
         &repo(),
         &[bob],
         &label_map(&[("sess-bob", &["shared"])]),
+        &admitted_sessions(&["sess-bob"]),
         &access(""),
     )
     .await;
@@ -259,6 +289,7 @@ async fn issue_routed_to_another_creator_is_silent_for_this_session() {
         &repo(),
         &[alice, bob],
         &label_map(&[("sess-alice", &["shared"]), ("sess-bob", &["shared"])]),
+        &admitted_sessions(&["sess-alice", "sess-bob"]),
         &access(""),
     )
     .await;

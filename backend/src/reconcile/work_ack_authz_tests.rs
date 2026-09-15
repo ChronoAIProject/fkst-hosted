@@ -28,6 +28,7 @@ async fn routed_unauthorized_author_is_rejected_label_first() {
         &repo(),
         &[registration("demo", "fkst-run")],
         &one_label_map(&["fkst-run"]),
+        &admitted_sessions(&["sess-1"]),
         &access(""),
     )
     .await;
@@ -60,6 +61,7 @@ async fn unauthorized_latch_prevents_duplicate_feedback() {
         &repo(),
         &[registration("demo", "fkst-run")],
         &one_label_map(&["fkst-run"]),
+        &admitted_sessions(&["sess-1"]),
         &access(""),
     )
     .await;
@@ -77,6 +79,7 @@ async fn failed_unauthorized_latch_never_posts_an_undeduped_comment() {
         &repo(),
         &[registration("demo", "fkst-run")],
         &one_label_map(&["fkst-run"]),
+        &admitted_sessions(&["sess-1"]),
         &access(""),
     )
     .await;
@@ -109,6 +112,7 @@ async fn collaborator_and_global_admin_authors_are_acked() {
             &repo(),
             &[reg],
             &one_label_map(&["fkst-run"]),
+            &admitted_sessions(&["sess-1"]),
             &access(admins),
         )
         .await;
@@ -134,6 +138,7 @@ async fn repo_admin_and_log_viewer_are_not_authority_tiers() {
             &repo(),
             &[reg],
             &one_label_map(&["fkst-run"]),
+            &admitted_sessions(&["sess-1"]),
             &access(""),
         )
         .await;
@@ -162,6 +167,7 @@ async fn stale_unauthorized_latch_clears_before_authorized_ack() {
         &repo(),
         &[registration("demo", "fkst-run")],
         &one_label_map(&["fkst-run"]),
+        &admitted_sessions(&["sess-1"]),
         &access(""),
     )
     .await;
@@ -192,6 +198,7 @@ async fn configured_app_child_clears_unauthorized_latch_and_is_acked() {
         &repo(),
         &[registration("demo", "fkst-run")],
         &one_label_map(&["fkst-run"]),
+        &admitted_sessions(&["sess-1"]),
         &access(""),
         Some("fkst-app[bot]"),
     )

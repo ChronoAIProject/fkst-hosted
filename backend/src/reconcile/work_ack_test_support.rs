@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime};
@@ -312,6 +312,10 @@ pub(super) fn label_map(entries: &[(&str, &[&str])]) -> HashMap<String, Vec<Stri
 
 pub(super) fn one_label_map(labels: &[&str]) -> HashMap<String, Vec<String>> {
     label_map(&[("sess-1", labels)])
+}
+
+pub(super) fn admitted_sessions(ids: &[&str]) -> HashSet<String> {
+    ids.iter().map(|id| (*id).to_string()).collect()
 }
 
 pub(super) fn access(global_admins: &str) -> AccessPolicy {
