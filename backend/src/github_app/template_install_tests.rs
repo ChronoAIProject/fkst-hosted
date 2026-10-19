@@ -84,6 +84,7 @@ struct FakeApi {
     fail_delete_ref: bool,
     fail_pull_files: bool,
     calls: Mutex<Vec<String>>,
+    writes: Mutex<Vec<(String, String)>>,
 }
 
 impl FakeApi {
@@ -249,11 +250,19 @@ impl GithubApi for FakeApi {
         _repo: &str,
         path: &str,
         _message: &str,
-        _content_base64: &str,
+        content_base64: &str,
         _branch: &str,
         _sha: Option<&str>,
     ) -> Result<(), GithubAppError> {
         self.record(format!("put_file:{path}"));
+        use base64::Engine;
+        let body = String::from_utf8(
+            base64::engine::general_purpose::STANDARD
+                .decode(content_base64)
+                .unwrap(),
+        )
+        .unwrap();
+        self.writes.lock().unwrap().push((path.to_string(), body));
         Ok(())
     }
 
@@ -699,4 +708,51 @@ fn is_same_repo_compares_the_head_repository_not_the_branch_name() {
         REPO
     ));
     assert!(!is_same_repo(&pull(1, "any", None), OWNER, REPO));
+}
+
+#[tokio::test]
+async fn nyxid_reconciliation_writes_repository_security_contact() {
+    let api = FakeApi::fresh();
+    assert_eq!(
+        install_templates_with_api(
+            &api,
+            &token(),
+            "ChronoAIProject",
+            "NyxID",
+            super::super::templates::FKST_ISSUE_TEMPLATES_VERSION
+        )
+        .await
+        .unwrap(),
+        TemplateInstallOutcome::Merged
+    );
+    let writes = api.writes.lock().unwrap();
+    let config = writes
+        .iter()
+        .find(|(path, _)| path == ".github/ISSUE_TEMPLATE/config.yml")
+        .unwrap();
+    assert_eq!(
+        config.1,
+        repository_config("ChronoAIProject", "NyxID").unwrap()
+    );
+    assert!(config
+        .1
+        .contains("https://github.com/ChronoAIProject/NyxID/security/policy"));
+    assert!(!config.1.contains("/advisories/new"));
+    assert_eq!(writes.len(), bundled_templates().len());
+    // Inert bundled content only: unrelated files and the repository's unmanaged
+    // bug_report.yml security warning are outside this writer's path allowlist.
+    assert!(writes
+        .iter()
+        .all(|(path, _)| bundled_templates().iter().any(|tf| tf.path == path)));
+}
+
+#[tokio::test]
+async fn malformed_repository_is_rejected_before_any_reconcile_effect() {
+    let api = FakeApi::fresh();
+    assert!(matches!(
+        install_templates_with_api(&api, &token(), "owner\ncontact_links:", "repo", TARGET).await,
+        Err(GithubAppError::InvalidRepoRef)
+    ));
+    assert!(api.calls.lock().unwrap().is_empty());
+    assert!(api.writes.lock().unwrap().is_empty());
 }
