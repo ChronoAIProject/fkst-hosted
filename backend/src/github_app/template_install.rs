@@ -27,7 +27,9 @@
 use secrecy::{ExposeSecret, SecretString};
 
 use super::api::{GithubApi, PullRequestSummary};
-use super::templates::{bundled_templates, encode_content, TemplateInstallOutcome};
+use super::templates::{
+    bundled_templates, encode_content, repository_config, TemplateInstallOutcome,
+};
 use super::GithubAppError;
 
 #[cfg(test)]
@@ -137,6 +139,7 @@ async fn open_install_pull(
     repo: &str,
     target_version: u32,
 ) -> Result<TemplateInstallOutcome, GithubAppError> {
+    let config = repository_config(owner, repo).map_err(|_| GithubAppError::InvalidRepoRef)?;
     let branch = template_branch(target_version);
     let title = pr_title(target_version);
 
@@ -166,7 +169,12 @@ async fn open_install_pull(
             .content_file(token, owner, repo, tf.path, Some(&base))
             .await?;
         let sha = existing.map(|f| f.sha);
-        let content_b64 = encode_content(tf.content);
+        let content = if tf.path == ".github/ISSUE_TEMPLATE/config.yml" {
+            config.as_str()
+        } else {
+            tf.content
+        };
+        let content_b64 = encode_content(content);
         let msg = format!("chore(fkst): sync {} to v{target_version}", tf.path);
         api.put_file(
             token,
@@ -345,6 +353,8 @@ pub(super) async fn install_templates_with_api(
     repo: &str,
     target_version: u32,
 ) -> Result<TemplateInstallOutcome, GithubAppError> {
+    // Validate before any API effects, including pending-PR reconciliation.
+    repository_config(owner, repo).map_err(|_| GithubAppError::InvalidRepoRef)?;
     // Exact + owner-qualified: a busy repo's 100-PR listing page cannot hide
     // this, and a fork branch of the same name cannot impersonate it.
     let pending = api

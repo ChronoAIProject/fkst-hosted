@@ -23,13 +23,16 @@
 
 use async_trait::async_trait;
 
+mod security;
+pub(super) use security::repository_config;
+
 use super::{issue_templates_permissions, GithubAppError, GithubAppTokens};
 
 /// Compile-time source of truth for the bundled issue templates. Bump on ANY
 /// change to the bundled files below; the bundled `config.yml` marker MUST equal
 /// this (enforced by a unit test). Repos whose installed version is below this
 /// get a merged PR to catch up.
-pub const FKST_ISSUE_TEMPLATES_VERSION: u32 = 13;
+pub const FKST_ISSUE_TEMPLATES_VERSION: u32 = 14;
 
 /// Repo-relative directory the templates live under.
 const TEMPLATE_DIR: &str = ".github/ISSUE_TEMPLATE";
