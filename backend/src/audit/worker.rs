@@ -308,13 +308,19 @@ impl Worker {
 
     /// One event left the queue: keep the depth gauge honest.
     fn note_received(&self) {
-        let depth = self
-            .depth
-            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |current| {
-                Some(current.saturating_sub(1))
-            })
-            .unwrap_or(0)
-            .saturating_sub(1);
+        let mut current = self.depth.load(Ordering::Relaxed);
+        let depth = loop {
+            let next = current.saturating_sub(1);
+            match self.depth.compare_exchange_weak(
+                current,
+                next,
+                Ordering::Relaxed,
+                Ordering::Relaxed,
+            ) {
+                Ok(_) => break next,
+                Err(observed) => current = observed,
+            }
+        };
         self.metrics.set_queue_depth(depth);
     }
 

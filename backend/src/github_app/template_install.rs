@@ -103,7 +103,7 @@ async fn touches_only_templates(
     // must be ours.
     files
         .iter()
-        .all(|f| is_bundled(&f.filename) && f.previous_filename.as_deref().is_none_or(&is_bundled))
+        .all(|f| is_bundled(&f.filename) && f.previous_filename.as_deref().is_none_or(is_bundled))
 }
 
 /// Rebuild the install branch from the current base head and open a fresh PR,
